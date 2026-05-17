@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+state/
+*.db
+*.jsonl
+.env
+.env.local
+.venv/
+venv/
+
+# Engine outputs / audit logs (per-project, never committed)
+audit/
+.swarm/
+**/coord/packets/*/responses/
+**/coord/packets/*/audit/
+
+# IDE
+.idea/
+.vscode/
+*.swp
