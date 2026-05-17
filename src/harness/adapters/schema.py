@@ -92,6 +92,9 @@ class ObserverConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+_CRON_REGEX = re.compile(r"^(\S+\s+){4}\S+$")
+
+
 class ScheduledTask(BaseModel):
     """A supplementary scheduled task registered via Windows Task Scheduler."""
 
@@ -99,12 +102,10 @@ class ScheduledTask(BaseModel):
     command: str = Field(max_length=4096)
     idempotent: bool = True
 
-    _cron_regex = re.compile(r"^(\S+\s+){4}\S+$")
-
     @field_validator("cron")
     @classmethod
     def validate_cron_format(cls, v: str) -> str:
-        if not cls._cron_regex.match(v):
+        if not _CRON_REGEX.match(v):
             raise ValueError(
                 "cron must be a 5-field expression (e.g. '0 9 * * 1-5')"
             )
@@ -126,6 +127,9 @@ class ScheduledTask(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
 class AdapterConfig(BaseModel):
     """Top-level project adapter configuration."""
 
@@ -136,12 +140,10 @@ class AdapterConfig(BaseModel):
     routing_rules: list[RoutingRule] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
 
-    _name_pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
-
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not cls._name_pattern.match(v):
+        if not _NAME_PATTERN.match(v):
             raise ValueError(
                 "name must contain only alphanumerics, underscores, and hyphens"
             )
