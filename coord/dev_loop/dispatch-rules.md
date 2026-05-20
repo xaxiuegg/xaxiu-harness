@@ -22,7 +22,7 @@ Never:
 
 | Backend | Minimum `--timeout` | Retry on timeout |
 |---|---|---|
-| `kimi` (CLI) | 420 | Fall back to `deepseek` immediately; do NOT retry `kimi` within 60 min |
+| `swarm/kimi` (xaxiu-swarm wrapping Kimi-Code CLI subprocess) | 420 | Fall back to `deepseek` immediately; do NOT retry `kimi` within 60 min |
 | `kimi-api` | 420 | Same fallback rule |
 | `deepseek` v4-flash | 600 | Fall back to `deepseek` v4-pro if recoverable, else `kimi` |
 | `deepseek` v4-pro | 1200 | Fall back to `kimi`; escalate to L5 if both fail |
@@ -81,7 +81,7 @@ From warehouse `dev-panel-runs/.../observer/daily/`:
 
 | Engine | max_parallel | fill_policy | Why |
 |---|---|---|---|
-| `kimi` (CLI) | 3 | aggressive | Subscription-cost; cheap to keep busy |
+| `swarm/kimi` (xaxiu-swarm wrapping Kimi-Code CLI subprocess) | 3 | aggressive | Subscription-cost; cheap to keep busy |
 | `kimi-api` (REST) | 2 | aggressive_overflow | Same provider but different transport; use when CLI slots full and task is REST-friendly (no shell tool use needed) |
 | `deepseek` (v4-flash/pro) | 1 | on_demand | Per-API cost; only dispatch when task needs DeepSeek's strengths |
 

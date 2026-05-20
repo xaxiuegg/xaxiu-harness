@@ -245,7 +245,19 @@
         "wave-5"
       ],
       "operator_added": "2026-05-20",
-      "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration"
+      "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration",
+      "scope_expansion_2026_05_20": "Must include operator-modes config surface: every directive given in this dev-loop session becomes a discoverable CLI flag / YAML key. See memory feedback_operator_inputs_become_harness_config for the directive table (full-dev-authority, L5 escalation, parallelism, engine-fill, etc.)."
+    },
+    {
+      "id": "wave-7",
+      "name": "operator-mode CLI flags + adapter.operator YAML section",
+      "status": "planned",
+      "depends_on": [
+        "wave-A",
+        "wave-B"
+      ],
+      "operator_added": "2026-05-20",
+      "note": "Surface session directives as harness config (--full-dev-authority, --escalation-threshold L5, --engine-fill aggressive, etc.). Foundation for Wave 6. Smaller scope than full productization."
     }
   ],
   "blockers": [],
