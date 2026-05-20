@@ -10,7 +10,8 @@
     "creativity": "armed",
     "developing": "armed",
     "testing": "armed",
-    "integrating": "armed"
+    "integrating": "armed",
+    "process_improvement": "armed"
   },
   "phase_status_legend": {
     "armed": "phase eligible to run this tick",
@@ -22,8 +23,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T12:58:34Z",
-  "tick_count": 5,
+  "last_tick_at": "2026-05-20T13:59:13Z",
+  "tick_count": 8,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -43,13 +44,18 @@
       "integrating": {
         "engine": "claude-in-session",
         "model": null
+      },
+      "process_improvement": {
+        "engine": "claude-in-session",
+        "model": null
       }
     },
     "cadence_minutes": {
       "creativity": 360,
       "developing": 30,
       "testing": 60,
-      "integrating": 20
+      "integrating": 20,
+      "process_improvement": 120
     }
   },
   "phase_cursors": {
@@ -118,6 +124,54 @@
       "last_run_at": null,
       "next_due_at": null,
       "pending_merges": []
+    },
+    "process_improvement": {
+      "last_run_at": "2026-05-20T13:29:58Z",
+      "next_due_at": "2026-05-20T15:29:58Z",
+      "findings_log": [
+        {
+          "id": "pi-20260520-01",
+          "tier": "P1",
+          "title": "Integrating supervisor uses bin/parse-swarm-status.py",
+          "applied": true,
+          "evidence": "tick #6 manual diagnosis of Wave A.6 timeout"
+        },
+        {
+          "id": "pi-20260520-02",
+          "tier": "P1",
+          "title": "Memory: Kimi-Code CLI incremental edits",
+          "applied": true,
+          "evidence": "Wave B/1 timeout tagged but file landed"
+        },
+        {
+          "id": "pi-20260520-03",
+          "tier": "P1",
+          "title": "Timeout table: 1200s for multi-file Kimi packets",
+          "applied": true,
+          "evidence": "Wave A.6 + Wave 7 both timed out at 600s"
+        },
+        {
+          "id": "pi-20260520-04",
+          "tier": "P2",
+          "title": "harness state inspect CLI verb (pretty-print state.json)",
+          "applied": false,
+          "evidence": "operator non-technical; needs to read state without Python"
+        },
+        {
+          "id": "pi-20260520-05",
+          "tier": "P3",
+          "title": "Process-improvement loop itself \u2192 feature roster row #16",
+          "applied": true,
+          "evidence": "this very tick"
+        }
+      ],
+      "cadence_minutes": 120,
+      "trigger_events": [
+        "wave_completion",
+        "3x_same_failure",
+        "L4_or_L5_escalation",
+        "explicit_invoke"
+      ]
     }
   },
   "engine_cooldowns": {
@@ -157,32 +211,7 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [
-    {
-      "task_id": "swarm-2026-05-20T12-54-waveB-concrete",
-      "packet": "coord/packets/2026-05-20-waveB-concrete-tests/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T12:58:34Z",
-      "phase": "developing",
-      "wave_id": "wave-B/1"
-    },
-    {
-      "task_id": "swarm-2026-05-20T12-54-waveB-guards",
-      "packet": "coord/packets/2026-05-20-waveB-guards-tests/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T12:58:34Z",
-      "phase": "developing",
-      "wave_id": "wave-B/2"
-    },
-    {
-      "task_id": "swarm-2026-05-20T12-54-wave7",
-      "packet": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T12:58:34Z",
-      "phase": "developing",
-      "wave_id": "wave-7"
-    }
-  ],
+  "active_dispatches": [],
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -220,7 +249,7 @@
     {
       "id": "wave-B",
       "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "wave-A"
       ],
@@ -235,19 +264,24 @@
         "tests/test_engines_concrete_boundary.py",
         "tests/test_engines_guards_boundary.py"
       ],
-      "current_swarm_run": "2026-05-20T12:54"
+      "current_swarm_run": "2026-05-20T12:54",
+      "completed_at": "2026-05-20T13:19:31Z",
+      "completion_note": "75 new tests, 164/164 green; concrete.py + guards.py boundary coverage achieved. Swarm worker-1 was tagged timeout but Kimi-Code CLI applies edits incrementally - the file landed."
     },
     {
       "id": "wave-4",
       "name": "Windows installer + first-run wizard",
-      "status": "planned",
+      "status": "done",
       "depends_on": [
         "wave-A",
         "wave-B"
       ],
       "spec_ready": "spec/wave-4-installer.md",
       "packet_ready": "coord/packets/2026-05-20-wave4-installer/packet.md",
-      "awaiting": "Wave B/1 + B/2 to complete (frees swarm/kimi slot); ideally also Wave 7 for operator-mode wizard prompt"
+      "awaiting": "Wave B/1 + B/2 to complete (frees swarm/kimi slot); ideally also Wave 7 for operator-mode wizard prompt",
+      "current_swarm_run": "2026-05-20T13:08",
+      "completed_at": "2026-05-20T13:53:38Z",
+      "completion_note": "Authored by swarm/kimi (timeout-tag but Kimi-CLI incremental edits landed all 4 files); tests/test_install_smoke.py patch path fixed inline; 171/171 then 185/185 pass."
     },
     {
       "id": "wave-5",
@@ -282,7 +316,7 @@
     {
       "id": "wave-7",
       "name": "operator-mode CLI flags + adapter.operator YAML section",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "wave-A",
         "wave-B"
@@ -292,7 +326,17 @@
       "packet_ready": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
       "spec_ready": "spec/operator-modes.md",
       "awaiting": "swarm/kimi cooldown lift at 12:53:14Z",
-      "current_swarm_run": "2026-05-20T12:54"
+      "current_swarm_run": "2026-05-20T13:08",
+      "attempt_count": 1,
+      "partial_complete": [
+        "7/A: foundation module (operator/__init__, modes, config, flags) + tests"
+      ],
+      "pending_work": [
+        "7/B: cli.py @apply_operator_flags wiring; schema.py OperatorSection; dispatch dry_run handling; init verb operator: emission"
+      ],
+      "completed_at_7A": "2026-05-20T13:53:38Z",
+      "completed_at": "2026-05-20T13:59:13Z",
+      "completion_note": "7/A foundation (operator/* module + 14 tests) + 7/B CLI integration (apply_operator_flags on @cli.group, ctx.obj, dispatch dry_run handling) both inline; 185/185 tests green; harness --help shows 7 new flags; smoke confirmed --mode dry_run dispatch exits 0 without dispatch. Schema OperatorSection deferred to Wave 7/C (low priority polish)."
     }
   ],
   "blockers": [],
@@ -302,11 +346,7 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 3,
-      "in_flight": [
-        "swarm-2026-05-20T12-54-waveB-concrete",
-        "swarm-2026-05-20T12-54-waveB-guards",
-        "swarm-2026-05-20T12-54-wave7"
-      ],
+      "in_flight": [],
       "fill_policy": "aggressive"
     },
     "kimi-api": {
@@ -317,9 +357,7 @@
     },
     "deepseek": {
       "max_parallel": 1,
-      "in_flight": [
-        "<pending \u2014 see active_dispatches>"
-      ],
+      "in_flight": [],
       "fill_policy": "on_demand",
       "note": "DeepSeek costs per API call; only dispatch when task needs its strengths (V-file, math/schema, novel-feature drafting)"
     }

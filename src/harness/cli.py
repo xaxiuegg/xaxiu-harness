@@ -21,12 +21,22 @@ import yaml
 from harness.adapters.loader import _repo_root, load_project_adapter, load_template
 from harness.cli_helpers import probe_all_engines
 from harness.engines.dispatcher import dispatch_packet
+from harness.operator import OperatorMode, resolve_operator_config
+from harness.operator.flags import OPERATOR_FLAG_NAMES, apply_operator_flags
 from harness.state.files import read_engine_health, update_engine_health
 
 
 @click.group()
-def cli() -> None:
+@apply_operator_flags
+@click.pass_context
+def cli(ctx: click.Context, **operator_overrides: object) -> None:
     """xaxiu-harness: dispatch, observe, and retro across LLM engines."""
+    ctx.ensure_object(dict)
+    cli_overrides = {name: operator_overrides.get(name) for name in OPERATOR_FLAG_NAMES}
+    ctx.obj["operator_config"] = resolve_operator_config(
+        cli_overrides=cli_overrides,
+        env=os.environ,
+    )
 
 
 main = cli
@@ -38,7 +48,9 @@ main = cli
 @click.option("--backend", "-b", help="Override backend engine.")
 @click.option("--model", "-m", help="Override model name.")
 @click.option("--force-engine", help="Force a specific engine (disables routing).")
+@click.pass_context
 def dispatch(
+    ctx: click.Context,
     project: Optional[str],
     packet: Optional[str],
     backend: Optional[str],
@@ -49,6 +61,13 @@ def dispatch(
     if not project or not packet:
         click.echo("error: --project and --packet are required", err=True)
         sys.exit(2)
+    op_cfg = (ctx.obj or {}).get("operator_config") if ctx.obj else None
+    if op_cfg is not None and op_cfg.mode == OperatorMode.DRY_RUN:
+        click.echo(
+            f"dry-run: would dispatch project={project} packet={packet} "
+            f"backend={backend} model={model} force_engine={force_engine}"
+        )
+        sys.exit(0)
     forced = force_engine or backend
     result = dispatch_packet(
         project=project,
