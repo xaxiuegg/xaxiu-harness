@@ -102,6 +102,37 @@ When a wave touches N independent modules, split into N packets and fan out:
 - Per-feature isolation: distinct CLI verbs or distinct engine adapters split cleanly
 - Anti-pattern: do NOT split a single function's refactor across workers; the cross-cutting changes will conflict
 
+## Multi-packet dispatch — prefer `xaxiu-swarm swarm` over N `dispatch` calls
+
+When dispatching ≥2 packets in parallel, use the `swarm` subcommand, not multiple `dispatch` invocations:
+
+```
+xaxiu-swarm swarm \
+  --backend swarm/kimi \
+  --max-concurrent 3 \
+  --timeout 600 \
+  --add-dir D:/Projects/xaxiu-harness \
+  --context-file D:/Projects/xaxiu-harness/CLAUDE.md \
+  packet1.md packet2.md packet3.md
+```
+
+Or, route different packets to different backends in one call:
+
+```
+xaxiu-swarm swarm \
+  --backends "swarm/kimi,swarm/kimi-api,swarm/deepseek" \
+  --max-concurrent 3 \
+  packet1.md packet2.md packet3.md
+```
+
+Why `swarm` over multiple `dispatch`:
+- Single audit run-id ties all related workers together for forensics
+- `--max-concurrent` lets the slot policy be enforced inside swarm
+- `--heartbeat` gives liveness signals across the fleet
+- Shared `--context-file` is inlined once per worker, not duplicated by the caller
+
+Use `dispatch` (singular) only for: one-off ad-hoc work, smoke tests, or when you need backend-specific flags swarm doesn't expose.
+
 ## When to escalate
 
 | Condition | Level | Notes |
