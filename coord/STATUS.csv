@@ -1,0 +1,35 @@
+ID,Category,Title,Status,Owner,Effort,Updated,Notes
+WA-1,Wave A,Wire dispatch CLI verb to dispatch_packet,shipped,Claude,30 min,2026-05-20,Commit 8b65dde; first wired verb, set pattern
+WA-2,Wave A,Wire remaining 10 CLI verbs (init/status/engines/priority/burst/lock/observer-tick/retro/install/dashboard-serve/loops),shipped,Kimi via swarm,~30 min wall,2026-05-20,Commit d5def26; 24 new tests
+WA5,Wave A.5,HarnessError taxonomy module + spec + tests,shipped,Claude,~1 hr,2026-05-20,errors.py + spec/errors.md + 21 tests; 89/89 pass
+WA6,Wave A.6,Retrofit operational raises to HarnessError subclasses,shipped,Claude,30 min,2026-05-20,Scope narrowed to 4 raises in dpapi+jsonl_log; Pydantic/user-input/contract raises kept as ValueError
+WB-CI,Wave B,GitHub Actions test workflow,shipped,Claude,15 min,2026-05-20,.github/workflows/test.yml; ubuntu+windows matrix; py3.13
+WB-CONCRETE,Wave B/1,Boundary tests for engines/concrete.py,shipped,Kimi via swarm,~10 min,2026-05-20,459 lines; coverage 20%→84%; landed despite swarm timeout tag (incremental-edit pattern)
+WB-GUARDS,Wave B/2,Boundary tests for engines/guards.py,shipped,Kimi via swarm,~10 min,2026-05-20,478 lines; coverage 39%→100%
+WB2-DPAPI,Wave B/2,Boundary tests for secrets/dpapi.py,in_progress,Kimi via swarm,unknown,2026-05-20,Dispatched 14:12Z swarm bpmoktqtv; target coverage 32%→>60%
+WB2-STATE-FILES,Wave B/2,Boundary tests for state/files.py,in_progress,Kimi via swarm,unknown,2026-05-20,Same swarm; target 39%→>60%
+WB2-STATE-DB,Wave B/2,Boundary tests for state/db.py,in_progress,Kimi via swarm,unknown,2026-05-20,Same swarm; target 37%→>60%
+WB2-STATE-JSONL,Wave B/2,Boundary tests for state/jsonl_log.py,queued,Kimi via swarm,unknown,2026-05-20,In swarm queue (max-concurrent 3); target 22%→>60%
+WB2-CLI-HELPERS,Wave B/2,Boundary tests for cli_helpers.py,queued,Kimi via swarm,unknown,2026-05-20,In swarm queue; target 28%→>70%
+W4,Wave 4,Windows installer + first-run wizard,shipped,Kimi+Claude,~2 hr,2026-05-20,4 files + dpapi __main__; landed despite swarm timeout tag; 171/171 then 185/185 pass
+W7A,Wave 7/A,Operator-modes foundation (operator/* module + 14 tests),shipped,Claude,45 min,2026-05-20,Inline after 2 swarm/kimi attempts failed on too-broad packet
+W7B,Wave 7/B,Operator-modes CLI integration (apply_operator_flags + dispatch dry_run),shipped,Claude,20 min,2026-05-20,7 new flags on @cli.group; dry_run mode works end-to-end
+W7C,Wave 7/C,Operator-modes polish (schema OperatorSection + init verb operator: YAML emission),todo,Claude or Kimi,~30 min,-,Low priority; CLI flags + env vars already cover full functionality
+W5,Wave 5,Templates + NL→YAML translator,spec-done,Kimi+Claude,multi-day,2026-05-20,spec/wave-5-templates-nl-yaml.md drafted; packet not drafted yet
+W3,Wave 3,Dashboard backend + frontend (FastAPI + WebSocket),planned,Kimi+Claude,multi-day,-,Depends on W4 (now done); unblocked
+W6,Wave 6,Productize autonomous loops as harness feature,planned,Kimi+Claude,multi-week,-,Acceptance gate = all 18 rows in spec/session-derived-feature-roster checked off
+DEV-LOOP-SCAFFOLD,Dev Loop,coord/dev_loop/ scaffolding (state.json + manager.md + 5 supervisors + dispatch-rules + escalations + log),shipped,Claude,~3 hr,2026-05-20,Prototype for Wave 6; loop running in this session
+DEV-LOOP-PROCESS-IMPROVE,Dev Loop,5th supervisor: process_improvement,shipped,Claude,30 min,2026-05-20,Cadence 2h or trigger-driven; first tick produced 5 findings; 3 P1 applied
+DEV-LOOP-EVENT-DRIVEN,Dev Loop,Cadence-is-the-floor / event-driven tick rule,shipped,Claude,15 min,2026-05-20,manager.md "What you do NOT do" + roster row #18
+DEV-LOOP-NO-IDLE-DM,Dev Loop,"Dev manager does not idle either" rule,shipped,Claude,5 min,2026-05-20,Same commit; roster row #18 origin
+DEV-LOOP-CALIBRATION,Dev Loop,Empirical concurrency calibration from warehouse,shipped,Claude,30 min,2026-05-20,engine_slots kimi 3→6 / kimi-api 2→6; cooldowns removed (immediate_fallback)
+DEV-LOOP-STATUS-CSV,Dev Loop,Canonical STATUS.csv tracker (this file),shipped,Claude,15 min,2026-05-20,Replicated from warehouse pattern; update on every task transition
+HEARTBEAT,Backlog (P2),harness heartbeat CLI verb (passive operator status),todo,Kimi,~30 min,-,Pulse to coord/dev_loop/heartbeat.json every N sec; harness status reads it
+STATE-INSPECT,Backlog (P2),harness state inspect CLI verb (pretty-print state.json),todo,Kimi,~30 min,-,Non-technical operator can't read state.json directly
+REPLAY-CLI,Backlog (creativity),harness replay CLI verb - decision archaeology for dispatches,proposed,Claude+Kimi,~3 hr,2026-05-20,creativity tick #1; needs operator approval before dispatch
+BUDGET-METER,Backlog (parked),Dispatch budget meter + per-engine cost ledger,parked,Claude+Kimi,~2 hr,2026-05-20,Idea score 82; revisit after Wave 3-5 done
+GEMINI-ADAPTER,Backlog (parked),Gemini 2.x engine adapter for cross-engine triangulation,parked,Kimi,~3 hr,2026-05-20,Idea score 71; revisit when cross-engine ship audits become routine
+MEMORY-ENTRIES,Memory,6 memory entries (full-dev-authority / error-taxonomy / agentic-differences / operator-inputs-config / kimi-cli-incremental-edits / concurrency-calibration),shipped,Claude,~1 hr total,2026-05-20,All in C:/Users/xaxiu/.claude/projects/D--Projects/memory/ + indexed in MEMORY.md
+CLAUDE-MD-REFRESH,Doc,CLAUDE.md refresh for current operating mode,shipped,Claude,15 min,2026-05-20,Full-dev-authority + L5 escalation + parallelism + slot-fill + memory entries to load on session start
+GH-PUSH,Infra,Push to GitHub public repo,shipped,Claude,10 min,2026-05-20,xaxiuegg/xaxiu-harness; sensitivity audit clean; CI active
+SSH-SETUP,Infra,SSH key-only auth + WSL+tmux remote access (parent project),shipped,operator+Claude,~2 hr,2026-05-20,Pre-dev-loop session; not part of harness scope but unlocked productivity

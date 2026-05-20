@@ -123,7 +123,17 @@ Read `operator_directives.approved_engine_routing.<phase>` to determine which en
 
 ## Logging
 
-`coord/dev_loop/log.jsonl` is the audit trail. Each entry must include `timestamp`, `tick_count`, `phases_acted_on` (array of phase names — parallel supervisors), `outcome` ∈ `{"normal", "skipped", "exhausted"}`, and a short `summary` (~1 sentence). Parallel ticks log a single entry covering all phases that ran.
+`coord/dev_loop/log.jsonl` is the **event log** (append-only audit trail). Each entry must include `timestamp`, `tick_count`, `phases_acted_on` (array — parallel supervisors), `outcome` ∈ `{"normal", "skipped", "exhausted"}`, and a short `summary` (~1 sentence). Parallel ticks log a single entry.
+
+`coord/STATUS.csv` is the **canonical task tracker** (per [[feedback_status_csv_canonical]], adapted from warehouse). Columns: `ID,Category,Title,Status,Owner,Effort,Updated,Notes`. Status vocabulary: `shipped | in_progress | queued | todo | spec-done | design-done | partial | proposed | parked | deferred | planned`.
+
+**Update STATUS.csv on every task transition**:
+- New row when a task is queued/dispatched (status=`queued` or `in_progress`)
+- Row update when work completes (status=`shipped` + `Updated` date + commit sha in Notes)
+- Row update when a packet fails twice and is re-strategized (status=`partial` or `deferred`)
+- Pair the STATUS.csv update with the task's own commit when possible — single atomic landing
+
+The dev manager MUST `git diff coord/STATUS.csv` at the start of every tick: if any row is in `in_progress` for >2× its expected effort, surface as a finding to process_improvement supervisor (potential stuck task).
 
 ## What you do NOT do in a tick
 
