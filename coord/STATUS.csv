@@ -6,16 +6,16 @@ WA6,Wave A.6,Retrofit operational raises to HarnessError subclasses,shipped,Clau
 WB-CI,Wave B,GitHub Actions test workflow,shipped,Claude,15 min,2026-05-20,.github/workflows/test.yml; ubuntu+windows matrix; py3.13
 WB-CONCRETE,Wave B/1,Boundary tests for engines/concrete.py,shipped,Kimi via swarm,~10 min,2026-05-20,459 lines; coverage 20%→84%; landed despite swarm timeout tag (incremental-edit pattern)
 WB-GUARDS,Wave B/2,Boundary tests for engines/guards.py,shipped,Kimi via swarm,~10 min,2026-05-20,478 lines; coverage 39%→100%
-WB2-DPAPI,Wave B/2,Boundary tests for secrets/dpapi.py,in_progress,Kimi via swarm,unknown,2026-05-20,Dispatched 14:12Z swarm bpmoktqtv; target coverage 32%→>60%
-WB2-STATE-FILES,Wave B/2,Boundary tests for state/files.py,in_progress,Kimi via swarm,unknown,2026-05-20,Same swarm; target 39%→>60%
-WB2-STATE-DB,Wave B/2,Boundary tests for state/db.py,in_progress,Kimi via swarm,unknown,2026-05-20,Same swarm; target 37%→>60%
-WB2-STATE-JSONL,Wave B/2,Boundary tests for state/jsonl_log.py,queued,Kimi via swarm,unknown,2026-05-20,In swarm queue (max-concurrent 3); target 22%→>60%
-WB2-CLI-HELPERS,Wave B/2,Boundary tests for cli_helpers.py,queued,Kimi via swarm,unknown,2026-05-20,In swarm queue; target 28%→>70%
+WB2-DPAPI,Wave B/2,Boundary tests for secrets/dpapi.py,shipped,Kimi via swarm,unknown,2026-05-20,Dispatched 14:12Z swarm bpmoktqtv; commit d6acc1f; landed via incremental Kimi-CLI edits
+WB2-STATE-FILES,Wave B/2,Boundary tests for state/files.py,shipped,Kimi via swarm,unknown,2026-05-20,Same swarm; commit 0a7a0f5; landed via incremental Kimi-CLI edits
+WB2-STATE-DB,Wave B/2,Boundary tests for state/db.py,shipped,Kimi via swarm,unknown,2026-05-20,Same swarm; commit d1e8f92; landed via incremental Kimi-CLI edits
+WB2-STATE-JSONL,Wave B/2,Boundary tests for state/jsonl_log.py,shipped,Kimi via swarm,unknown,2026-05-20,In swarm queue (max-concurrent 3); commit f010ecf; landed via incremental Kimi-CLI edits
+WB2-CLI-HELPERS,Wave B/2,Boundary tests for cli_helpers.py,shipped,Kimi via swarm,unknown,2026-05-20,In swarm queue; commit 34c920b; landed via incremental Kimi-CLI edits
 W4,Wave 4,Windows installer + first-run wizard,shipped,Kimi+Claude,~2 hr,2026-05-20,4 files + dpapi __main__; landed despite swarm timeout tag; 171/171 then 185/185 pass
 W7A,Wave 7/A,Operator-modes foundation (operator/* module + 14 tests),shipped,Claude,45 min,2026-05-20,Inline after 2 swarm/kimi attempts failed on too-broad packet
 W7B,Wave 7/B,Operator-modes CLI integration (apply_operator_flags + dispatch dry_run),shipped,Claude,20 min,2026-05-20,7 new flags on @cli.group; dry_run mode works end-to-end
 W7C,Wave 7/C,Operator-modes polish (schema OperatorSection + init verb operator: YAML emission),todo,Claude or Kimi,~30 min,-,Low priority; CLI flags + env vars already cover full functionality
-W5-PACKETS,Wave 5,"Wave 5 split into 5/A (templates) + 5/B (NL→YAML), both packets drafted",spec-done,Claude,30 min,2026-05-20,Pre-staged; ready to dispatch when swarm/kimi slot opens
+W5-PACKETS,Wave 5,"Wave 5 split into 5/A (templates) + 5/B (NL→YAML), both packets drafted",shipped,Claude,30 min,2026-05-20,Commit bd26470; both packets ready to dispatch when swarm slot opens
 W5A,Wave 5/A,Template refresh: add operator: section to all 6 templates,queued,Kimi via swarm,~10 min,2026-05-20,Packet ready at coord/packets/2026-05-20-wave5A-template-refresh/
 W5B,Wave 5/B,NL→YAML translator + harness adapter verb group,queued,Kimi via swarm,~30 min,2026-05-20,Packet ready at coord/packets/2026-05-20-wave5B-nl-to-yaml/
 W3,Wave 3,Dashboard backend + frontend (FastAPI + WebSocket),planned,Kimi+Claude,multi-day,-,Depends on W4 (now done); unblocked
