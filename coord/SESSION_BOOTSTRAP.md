@@ -10,7 +10,12 @@ This is the "monster prompt" used to spin up a fresh Claude Code terminal sessio
 
 ## ⚠ Current state delta (post-draft updates — read alongside the prompt)
 
-The prompt was drafted while Wave 7 was still pending. Since then, this session shipped:
+**MOST RECENT (post-original-bootstrap):**
+- **Row #19 added to feature roster**: canonical STATUS tracker as harness primitive. Operator directive: STATUS.csv must be IN the harness, not a hand-maintained convention. Spec at `spec/status-tracker.md`; Kimi packet at `coord/packets/2026-05-20-status-tracker-harness-feature/`. Roster row #19 dispatched-before-W5 (recovery layer comes first).
+- **STATUS.csv first row** is now `W19-STATUS-TRACKER` — highest priority queued work.
+- **Sequencing rule (NEW)**: Wave 5/A (templates), Wave 5/B (NL→YAML), and W7C (schema polish) ALL modify cli.py. Don't parallel-dispatch them with the status tracker — sequence: status-tracker alone → land → then Wave 5 batch.
+
+The prompt below was drafted while Wave 7 was still pending. Since then, this session shipped:
 
 | Prompt claim | Current reality (2026-05-20 post-cleanup) |
 |---|---|
