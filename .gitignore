@@ -28,3 +28,10 @@ audit/
 .idea/
 .vscode/
 *.swp
+
+# Windows / PowerShell pollution (ModuleAnalysisCache when $LOCALAPPDATA not set)
+/Microsoft/
+
+# Local dev_loop runtime state (the seed state.json is tracked; ad-hoc runtime
+# overrides are not. Uncomment if you want to keep the seed only.)
+# coord/dev_loop/state.runtime.json

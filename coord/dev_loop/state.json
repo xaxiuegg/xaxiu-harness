@@ -195,14 +195,21 @@
     {
       "id": "wave-B",
       "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI",
-      "status": "queued",
+      "status": "partial_in_progress",
       "depends_on": [
         "wave-A"
       ],
       "last_attempt_at": "2026-05-20T12:08:10Z",
       "attempt_count": 1,
       "last_failure_mode": "kimi_api_packet_trap_prose_not_edits (non-agentic backend)",
-      "next_strategy": "wait for Kimi CLI cooldown lift; re-dispatch as ONE Kimi CLI packet (NOT splittable \u2014 interdependent test fixtures)"
+      "next_strategy": "Wait for Kimi CLI cooldown (~25 min remaining); dispatch the 2 test files as ONE Kimi CLI packet (interdependent fixtures); CI already gates regressions.",
+      "partial_complete": [
+        "ci_workflow_yml"
+      ],
+      "pending_work": [
+        "tests/test_engines_concrete_boundary.py",
+        "tests/test_engines_guards_boundary.py"
+      ]
     },
     {
       "id": "wave-4",
