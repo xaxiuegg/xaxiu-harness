@@ -22,16 +22,28 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": null,
-  "tick_count": 0,
+  "last_tick_at": "2026-05-20T11:26:27Z",
+  "tick_count": 1,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
     "approved_engine_routing": {
-      "creativity": {"engine": "claude-in-session", "model": null},
-      "developing": {"engine": "kimi", "model": null},
-      "testing": {"engine": "kimi", "model": null},
-      "integrating": {"engine": "claude-in-session", "model": null}
+      "creativity": {
+        "engine": "claude-in-session",
+        "model": null
+      },
+      "developing": {
+        "engine": "kimi",
+        "model": null
+      },
+      "testing": {
+        "engine": "kimi",
+        "model": null
+      },
+      "integrating": {
+        "engine": "claude-in-session",
+        "model": null
+      }
     },
     "cadence_minutes": {
       "creativity": 360,
@@ -41,45 +53,147 @@
     }
   },
   "phase_cursors": {
-    "creativity": {"last_run_at": null, "next_due_at": null, "queue": []},
-    "developing": {"last_run_at": null, "next_due_at": null, "current_dispatch_task_id": "brxuctma4"},
-    "testing": {"last_run_at": null, "next_due_at": null, "coverage_gaps": ["engines/concrete.py", "engines/guards.py", "secrets/dpapi.py", "state/files.py", "state/db.py", "state/jsonl_log.py", "cli.py"]},
-    "integrating": {"last_run_at": null, "next_due_at": null, "pending_merges": []}
+    "creativity": {
+      "last_run_at": null,
+      "next_due_at": null,
+      "queue": []
+    },
+    "developing": {
+      "last_run_at": "2026-05-20T11:26:27Z",
+      "next_due_at": "2026-05-20T11:56:27Z",
+      "current_dispatch_task_id": null
+    },
+    "testing": {
+      "last_run_at": null,
+      "next_due_at": null,
+      "coverage_gaps": [
+        "engines/concrete.py",
+        "engines/guards.py",
+        "secrets/dpapi.py",
+        "state/files.py",
+        "state/db.py",
+        "state/jsonl_log.py",
+        "cli.py"
+      ]
+    },
+    "integrating": {
+      "last_run_at": null,
+      "next_due_at": null,
+      "pending_merges": []
+    }
   },
   "engine_cooldowns": {
-    "kimi": {"last_failure_at": null, "failure_reason": null, "cooldown_until": null},
-    "kimi-api": {"last_failure_at": null, "failure_reason": null, "cooldown_until": null},
-    "deepseek": {"last_failure_at": null, "failure_reason": null, "cooldown_until": null}
+    "kimi": {
+      "last_failure_at": null,
+      "failure_reason": null,
+      "cooldown_until": null
+    },
+    "kimi-api": {
+      "last_failure_at": null,
+      "failure_reason": null,
+      "cooldown_until": null
+    },
+    "deepseek": {
+      "last_failure_at": null,
+      "failure_reason": null,
+      "cooldown_until": null
+    }
   },
   "dispatch_defaults": {
-    "kimi": {"min_timeout_seconds": 420, "post_failure_cooldown_seconds": 3600},
-    "kimi-api": {"min_timeout_seconds": 420, "post_failure_cooldown_seconds": 3600},
-    "deepseek-v4-flash": {"min_timeout_seconds": 600, "post_failure_cooldown_seconds": 1800, "no_thinking_for_surgical": true},
-    "deepseek-v4-pro": {"min_timeout_seconds": 1200, "post_failure_cooldown_seconds": 1800}
+    "kimi": {
+      "min_timeout_seconds": 420,
+      "post_failure_cooldown_seconds": 3600
+    },
+    "kimi-api": {
+      "min_timeout_seconds": 420,
+      "post_failure_cooldown_seconds": 3600
+    },
+    "deepseek-v4-flash": {
+      "min_timeout_seconds": 600,
+      "post_failure_cooldown_seconds": 1800,
+      "no_thinking_for_surgical": true
+    },
+    "deepseek-v4-pro": {
+      "min_timeout_seconds": 1200,
+      "post_failure_cooldown_seconds": 1800
+    }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [
-    {
-      "task_id": "brxuctma4",
-      "packet": "coord/packets/2026-05-20-waveA-cli-wiring/packet.md",
-      "engine": "kimi",
-      "model": null,
-      "dispatched_at": "2026-05-20T02:50:00Z",
-      "phase": "developing",
-      "output_file": "C:/Users/xaxiu/AppData/Local/Temp/claude/D--Projects/dd39948c-1ea0-418b-895c-71d5d8befabd/tasks/brxuctma4.output",
-      "deliverable_dir": "D:/Projects/xaxiu-harness"
-    }
-  ],
+  "active_dispatches": [],
   "wave_plan": [
-    {"id": "wave-A.1", "name": "wire dispatch verb to dispatch_packet", "status": "done", "completed_at": "2026-05-20T02:48:00Z"},
-    {"id": "wave-A", "name": "wire remaining 10 CLI verbs", "status": "in_progress", "current_dispatch": "brxuctma4"},
-    {"id": "wave-A.5", "name": "error taxonomy spec + src/harness/errors.py", "status": "queued", "depends_on": ["wave-A"]},
-    {"id": "wave-A.6", "name": "retrofit raises across codebase to HarnessError subclasses", "status": "queued", "depends_on": ["wave-A.5"]},
-    {"id": "wave-B", "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI", "status": "queued", "depends_on": ["wave-A"]},
-    {"id": "wave-4", "name": "Windows installer + first-run wizard", "status": "planned", "depends_on": ["wave-A", "wave-B"]},
-    {"id": "wave-5", "name": "templates + NL→YAML translator + visual config builder", "status": "planned", "depends_on": ["wave-4"]},
-    {"id": "wave-3", "name": "dashboard backend + frontend (FastAPI + WebSocket)", "status": "planned", "depends_on": ["wave-4"]},
-    {"id": "wave-6", "name": "autonomous loops as harness feature (productize dev_loop pattern)", "status": "planned", "depends_on": ["wave-3", "wave-5"], "operator_added": "2026-05-20", "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration"}
+    {
+      "id": "wave-A.1",
+      "name": "wire dispatch verb to dispatch_packet",
+      "status": "done",
+      "completed_at": "2026-05-20T02:48:00Z"
+    },
+    {
+      "id": "wave-A",
+      "name": "wire remaining 10 CLI verbs",
+      "status": "done",
+      "completed_at": "2026-05-20T11:26:27Z"
+    },
+    {
+      "id": "wave-A.5",
+      "name": "error taxonomy spec + src/harness/errors.py",
+      "status": "done",
+      "depends_on": [
+        "wave-A"
+      ],
+      "completed_at": "2026-05-20T11:26:27Z"
+    },
+    {
+      "id": "wave-A.6",
+      "name": "retrofit raises across codebase to HarnessError subclasses",
+      "status": "queued",
+      "depends_on": [
+        "wave-A.5"
+      ]
+    },
+    {
+      "id": "wave-B",
+      "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI",
+      "status": "queued",
+      "depends_on": [
+        "wave-A"
+      ]
+    },
+    {
+      "id": "wave-4",
+      "name": "Windows installer + first-run wizard",
+      "status": "planned",
+      "depends_on": [
+        "wave-A",
+        "wave-B"
+      ]
+    },
+    {
+      "id": "wave-5",
+      "name": "templates + NL\u00e2\u2020\u2019YAML translator + visual config builder",
+      "status": "planned",
+      "depends_on": [
+        "wave-4"
+      ]
+    },
+    {
+      "id": "wave-3",
+      "name": "dashboard backend + frontend (FastAPI + WebSocket)",
+      "status": "planned",
+      "depends_on": [
+        "wave-4"
+      ]
+    },
+    {
+      "id": "wave-6",
+      "name": "autonomous loops as harness feature (productize dev_loop pattern)",
+      "status": "planned",
+      "depends_on": [
+        "wave-3",
+        "wave-5"
+      ],
+      "operator_added": "2026-05-20",
+      "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration"
+    }
   ],
   "blockers": [],
   "escalations": [],
