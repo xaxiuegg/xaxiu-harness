@@ -23,8 +23,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T13:59:13Z",
-  "tick_count": 8,
+  "last_tick_at": "2026-05-20T14:12:21Z",
+  "tick_count": 10,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -95,30 +95,39 @@
       "current_dispatch_task_id": null
     },
     "testing": {
-      "last_run_at": "2026-05-20T11:30:37Z",
-      "next_due_at": "2026-05-20T12:30:37Z",
+      "last_run_at": "2026-05-20T14:04:45Z",
+      "next_due_at": "2026-05-20T15:04:45Z",
       "coverage_gaps": [
-        "engines/concrete.py",
-        "engines/guards.py",
         "secrets/dpapi.py",
-        "state/files.py",
         "state/db.py",
-        "state/jsonl_log.py"
+        "state/files.py",
+        "state/jsonl_log.py",
+        "cli_helpers.py"
       ],
       "last_coverage_snapshot": {
-        "TOTAL": 58,
-        "cli.py": 88,
+        "TOTAL": 69,
+        "cli.py": 92,
         "errors.py": 100,
         "dispatcher.py": 81,
-        "engines/concrete.py": 20,
-        "engines/guards.py": 39,
-        "secrets/dpapi.py": 29,
+        "engines/concrete.py": 84,
+        "engines/guards.py": 100,
+        "secrets/dpapi.py": 32,
         "state/files.py": 39,
         "state/db.py": 37,
         "state/jsonl_log.py": 22,
         "adapters/loader.py": 89,
-        "cli_helpers.py": 28
-      }
+        "adapters/schema.py": 84,
+        "cli_helpers.py": 28,
+        "operator/modes.py": 100,
+        "operator/config.py": 93,
+        "operator/flags.py": 100,
+        "operator/__init__.py": 100,
+        "engines/base.py": 67
+      },
+      "gaps_resolved_in_this_session": [
+        "engines/concrete.py (20% \u2192 84%)",
+        "engines/guards.py (39% \u2192 100%)"
+      ]
     },
     "integrating": {
       "last_run_at": null,
@@ -211,7 +220,53 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [],
+  "active_dispatches": [
+    {
+      "task_id": "swarm-2026-05-20T13-50-waveB2-dpapi",
+      "packet": "coord/packets/2026-05-20-waveB2-dpapi-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T14:12:21Z",
+      "phase": "developing",
+      "wave_id": "wave-B2/dpapi",
+      "timeout_seconds": 1200
+    },
+    {
+      "task_id": "swarm-2026-05-20T13-50-waveB2-state-files",
+      "packet": "coord/packets/2026-05-20-waveB2-state-files-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T14:12:21Z",
+      "phase": "developing",
+      "wave_id": "wave-B2/state-files",
+      "timeout_seconds": 1200
+    },
+    {
+      "task_id": "swarm-2026-05-20T13-50-waveB2-state-db",
+      "packet": "coord/packets/2026-05-20-waveB2-state-db-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T14:12:21Z",
+      "phase": "developing",
+      "wave_id": "wave-B2/state-db",
+      "timeout_seconds": 1200
+    },
+    {
+      "task_id": "swarm-2026-05-20T13-50-waveB2-state-jsonl",
+      "packet": "coord/packets/2026-05-20-waveB2-state-jsonl-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T14:12:21Z",
+      "phase": "developing",
+      "wave_id": "wave-B2/state-jsonl",
+      "timeout_seconds": 1200
+    },
+    {
+      "task_id": "swarm-2026-05-20T13-50-waveB2-cli-helpers",
+      "packet": "coord/packets/2026-05-20-waveB2-cli-helpers-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T14:12:21Z",
+      "phase": "developing",
+      "wave_id": "wave-B2/cli-helpers",
+      "timeout_seconds": 1200
+    }
+  ],
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -337,6 +392,16 @@
       "completed_at_7A": "2026-05-20T13:53:38Z",
       "completed_at": "2026-05-20T13:59:13Z",
       "completion_note": "7/A foundation (operator/* module + 14 tests) + 7/B CLI integration (apply_operator_flags on @cli.group, ctx.obj, dispatch dry_run handling) both inline; 185/185 tests green; harness --help shows 7 new flags; smoke confirmed --mode dry_run dispatch exits 0 without dispatch. Schema OperatorSection deferred to Wave 7/C (low priority polish)."
+    },
+    {
+      "id": "wave-B2",
+      "name": "boundary tests for remaining 5 coverage gaps (dpapi/state-*/cli_helpers)",
+      "status": "in_progress",
+      "depends_on": [
+        "wave-A"
+      ],
+      "dispatched_via": "xaxiu-swarm swarm --max-concurrent 3 (5 packets queued)",
+      "current_swarm_run": "2026-05-20T13:50"
     }
   ],
   "blockers": [],
@@ -346,7 +411,13 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 3,
-      "in_flight": [],
+      "in_flight": [
+        "swarm-2026-05-20T13-50-waveB2-dpapi",
+        "swarm-2026-05-20T13-50-waveB2-state-files",
+        "swarm-2026-05-20T13-50-waveB2-state-db",
+        "swarm-2026-05-20T13-50-waveB2-state-jsonl",
+        "swarm-2026-05-20T13-50-waveB2-cli-helpers"
+      ],
       "fill_policy": "aggressive"
     },
     "kimi-api": {
