@@ -77,6 +77,31 @@ From warehouse `dev-panel-runs/.../observer/daily/`:
 - **`planner.html` race condition** — never run two supervisors simultaneously that write to the same file. The dev manager enforces one-supervisor-per-tick.
 - **Same-engine ship-audit** — never dispatch a Claude-sub-agent to validate Claude's own work, OR a Kimi packet to validate a Kimi-authored patch. Cross-engine only.
 
+## Engine slot policy (don't let cheap engines sit idle)
+
+| Engine | max_parallel | fill_policy | Why |
+|---|---|---|---|
+| `kimi` (CLI) | 3 | aggressive | Subscription-cost; cheap to keep busy |
+| `kimi-api` (REST) | 2 | aggressive_overflow | Same provider but different transport; use when CLI slots full and task is REST-friendly (no shell tool use needed) |
+| `deepseek` (v4-flash/pro) | 1 | on_demand | Per-API cost; only dispatch when task needs DeepSeek's strengths |
+
+After supervisors return diffs in a tick, the manager runs slot-fill (see `coord/dev_loop/manager.md` slot-filling section):
+1. Count `engine_slots.kimi.in_flight`. If `< max_parallel`, find queued waves with deps met whose file scopes don't overlap any in-flight dispatch. Dispatch each via `xaxiu-swarm dispatch --backend kimi ...` (or `xaxiu-swarm swarm` for a batch).
+2. If `kimi` slots are full and more eligible work exists, dispatch overflow to `kimi-api`.
+3. Never auto-fill DeepSeek slots from slot-fill — that's reserved for explicit supervisor requests per engine-strength routing.
+
+**Conflict-avoidance for parallel Kimi dispatches:**
+- Two parallel dispatches MUST touch disjoint file sets. Compute "files claimed" per packet (read the packet's Scope section) before dispatch.
+- Cross-file refactors (e.g. "rename X across all uses") must stay as ONE dispatch.
+- Sub-waves naturally split: e.g. Wave B has two natural halves (engines/concrete tests + engines/guards tests) — dispatch as 2 packets in parallel if no shared fixture work.
+
+## Wave-splitting heuristics
+
+When a wave touches N independent modules, split into N packets and fan out:
+- Per-module isolation: each Kimi worker gets ONE module + its existing test file
+- Per-feature isolation: distinct CLI verbs or distinct engine adapters split cleanly
+- Anti-pattern: do NOT split a single function's refactor across workers; the cross-cutting changes will conflict
+
 ## When to escalate
 
 | Condition | Level | Notes |

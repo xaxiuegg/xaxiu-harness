@@ -22,8 +22,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T11:26:27Z",
-  "tick_count": 1,
+  "last_tick_at": "2026-05-20T11:37:18Z",
+  "tick_count": 2,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -54,9 +54,34 @@
   },
   "phase_cursors": {
     "creativity": {
-      "last_run_at": null,
-      "next_due_at": null,
-      "queue": []
+      "last_run_at": "2026-05-20T11:30:00Z",
+      "next_due_at": "2026-05-20T17:30:00Z",
+      "queue": [
+        {
+          "id": "idea-20260520-decision-archaeology-cli",
+          "title": "`harness replay` CLI verb - decision archaeology for dispatches",
+          "description": "CLI verb reading state/jsonl_log + cost ledger for a task_id; renders dispatch timeline (engines tried, guards fired, fallbacks, redaction events). Satisfactory-flavored UX. Foundation for Wave 3 dashboard.",
+          "strategic_score": 86,
+          "operator_alignment_score": 92,
+          "estimated_loc": 220,
+          "estimated_kimi_minutes": 18,
+          "status": "proposed",
+          "queued_at": "2026-05-20T11:30:00Z",
+          "note": "Needs operator approval before dispatch; wave_plan items take priority"
+        }
+      ],
+      "parked_ideas": [
+        {
+          "id": "idea-20260520-dispatch-budget-meter",
+          "score": 82,
+          "title": "Dispatch budget meter + per-engine cost ledger"
+        },
+        {
+          "id": "idea-20260520-gemini-adapter",
+          "score": 71,
+          "title": "Gemini 2.x engine adapter for triangulation tier"
+        }
+      ]
     },
     "developing": {
       "last_run_at": "2026-05-20T11:26:27Z",
@@ -64,17 +89,30 @@
       "current_dispatch_task_id": null
     },
     "testing": {
-      "last_run_at": null,
-      "next_due_at": null,
+      "last_run_at": "2026-05-20T11:30:37Z",
+      "next_due_at": "2026-05-20T12:30:37Z",
       "coverage_gaps": [
         "engines/concrete.py",
         "engines/guards.py",
         "secrets/dpapi.py",
         "state/files.py",
         "state/db.py",
-        "state/jsonl_log.py",
-        "cli.py"
-      ]
+        "state/jsonl_log.py"
+      ],
+      "last_coverage_snapshot": {
+        "TOTAL": 58,
+        "cli.py": 88,
+        "errors.py": 100,
+        "dispatcher.py": 81,
+        "engines/concrete.py": 20,
+        "engines/guards.py": 39,
+        "secrets/dpapi.py": 29,
+        "state/files.py": 39,
+        "state/db.py": 37,
+        "state/jsonl_log.py": 22,
+        "adapters/loader.py": 89,
+        "cli_helpers.py": 28
+      }
     },
     "integrating": {
       "last_run_at": null,
@@ -119,7 +157,20 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [],
+  "active_dispatches": [
+    {
+      "task_id": "bv4wtqu7g",
+      "packet": "coord/packets/2026-05-20-waveA6-error-retrofit/packet.md",
+      "engine": "kimi",
+      "model": null,
+      "dispatched_at": "2026-05-20T11:41:28Z",
+      "phase": "developing",
+      "output_file": "C:/Users/xaxiu/AppData/Local/Temp/claude/D--Projects/dd39948c-1ea0-418b-895c-71d5d8befabd/tasks/bv4wtqu7g.output",
+      "deliverable_dir": "D:/Projects/xaxiu-harness",
+      "expected_completion": "5-15 min from dispatch",
+      "wave_id": "wave-A.6"
+    }
+  ],
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -145,10 +196,11 @@
     {
       "id": "wave-A.6",
       "name": "retrofit raises across codebase to HarnessError subclasses",
-      "status": "queued",
+      "status": "in_progress",
       "depends_on": [
         "wave-A.5"
-      ]
+      ],
+      "current_dispatch": "bv4wtqu7g"
     },
     {
       "id": "wave-B",
@@ -197,5 +249,27 @@
   ],
   "blockers": [],
   "escalations": [],
-  "event_log_path": "coord/dev_loop/log.jsonl"
+  "event_log_path": "coord/dev_loop/log.jsonl",
+  "engine_slots": {
+    "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
+    "kimi": {
+      "max_parallel": 3,
+      "in_flight": [
+        "bv4wtqu7g"
+      ],
+      "fill_policy": "aggressive"
+    },
+    "kimi-api": {
+      "max_parallel": 2,
+      "in_flight": [],
+      "fill_policy": "aggressive_overflow",
+      "note": "second Kimi transport; use when kimi (CLI) slots full"
+    },
+    "deepseek": {
+      "max_parallel": 1,
+      "in_flight": [],
+      "fill_policy": "on_demand",
+      "note": "DeepSeek costs per API call; only dispatch when task needs its strengths (V-file, math/schema, novel-feature drafting)"
+    }
+  }
 }

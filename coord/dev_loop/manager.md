@@ -15,13 +15,46 @@ The operator has granted full dev authority (`feedback_xaxiu_harness_full_dev_au
    - If done with success: move to the integrating supervisor (step 5).
    - If done with failure: classify the failure level, append to `escalations` if L5, otherwise log and decide whether to retry or fall back to the alternate engine per `feedback_cross_engine_fallback`.
    - If still running: log progress only.
-4. **Pick the phase that's most due.** Compare current UTC time against `phase_cursors[*].next_due_at`. The phase with the oldest overdue cursor wins. If nothing is due, pick the phase with no `last_run_at` yet (first run).
-5. **Spawn the matching supervisor sub-agent** by invoking the `Agent` tool with:
+4. **Pick a SET of compatible phases per the parallelism rules below.** A phase is eligible if `phase_status[<phase>] == "armed"` AND its `next_due_at <= now` (or no `last_run_at` yet, meaning first run).
+5. **Spawn ALL selected supervisors in a single message — parallel Agent calls.** Each Agent invocation:
    - `subagent_type: "general-purpose"`
    - `description: "<phase> supervisor tick"`
    - `prompt: <contents of coord/dev_loop/supervisors/<phase>.md plus the relevant excerpt from state.json>`
-   - Background mode OFF — wait for the supervisor's return value before continuing the tick.
-6. **Apply the supervisor's returned actions to state.json.** Supervisors return a JSON payload describing what they did (dispatched a packet, ran tests, committed, etc.). Update `phase_cursors`, `active_dispatches`, `wave_plan` accordingly.
+   - Foreground mode (no `run_in_background`) — multiple Agent calls in one message execute concurrently per the harness's parallel-tool-call semantics.
+6. **Wait for ALL supervisors to return**, then merge their state diffs in this deterministic order: creativity → testing → developing → integrating. This order is chosen so later supervisors' writes win on conflicts where ordering matters (integrating's commit-state takes precedence over developing's mid-flight markers).
+
+## Parallelism rules (which supervisors can co-run)
+
+Goal: maximize per-tick throughput without race conditions on shared state or the filesystem.
+
+| Pair | Co-run? | Reason |
+|---|---|---|
+| creativity + anything | YES | Idea generation is read-only on the codebase; writes only to its own queue |
+| testing + creativity | YES | Disjoint write sets |
+| testing + developing (same wave) | NO | Developing may be modifying test files; testing reads them — sequential within a wave |
+| testing + developing (different waves, different file scopes) | YES | If write sets are disjoint, safe |
+| testing + integrating | YES (redundant pytest both run, but safe) | Both are read-only or stage-then-commit; pytest invocation is idempotent |
+| developing + integrating (same wave) | NO | Integrating wants a stable artifact; developing is producing it |
+| developing + integrating (different waves) | YES | Disjoint file scopes per wave |
+| developing + developing (two waves in parallel) | YES if non-overlapping files | Each dispatches to its own engine; xaxiu-swarm runs are independent |
+
+**Conflict-detection algorithm** (in priority order):
+1. If any phase has `phase_status == "paused_by_escalation"` AND `next_retry_at > now`, skip that phase.
+2. For each candidate (creativity, testing, developing, integrating) that is due:
+   - Compute its `read_set` and `write_set` from the supervisor's declared scope (in the supervisor prompt's "Co-run safety" section).
+   - If candidate's `write_set` intersects ANY already-selected supervisor's `write_set`, defer this candidate to the next tick.
+3. Spawn all selected. If no candidates are due, log a no-op tick and exit.
+
+## Diff merge order
+
+Apply state diffs in this order so the final state is deterministic:
+
+1. **creativity** diff first (only writes to `phase_cursors.creativity.queue` and `phase_cursors.creativity.{last_run_at,next_due_at}`)
+2. **testing** diff (writes to `phase_cursors.testing.*` + may set `block_commit: true` on pending merges)
+3. **developing** diff (writes to `active_dispatches`, `phase_cursors.developing.*`, may move wave to `in_progress`)
+4. **integrating** diff last (writes to `wave_plan` status `done`, removes from `pending_merges`, may set commit shas)
+
+If two diffs touch the same key, the later one in this order wins.
 7. **Append a structured entry to `coord/dev_loop/log.jsonl`** with: `tick_count`, `phase_acted_on`, `supervisor_summary`, `state_diff_summary`, `next_due_at` for that phase.
 8. **Increment `tick_count` and set `last_tick_at`. Write state.json atomically (tempfile + os.replace).**
 9. **Exit.** The next tick comes from Task Scheduler.
@@ -53,19 +86,31 @@ There is no `halted_L5` state — L5 escalations pause only the affected phases 
 - Only one tick runs at a time (Task Scheduler ensures this — default is "do not start a new instance" if previous is still running).
 - Worker dispatches (xaxiu-swarm) run in background and can overlap across ticks; that's fine because each has its own output file path tied to its task ID.
 
+## Slot-filling (don't let Kimi sit idle)
+
+After supervisors return their diffs and BEFORE writing state, the manager scans `engine_slots` and fills idle Kimi capacity:
+
+1. Read `engine_slots.kimi.in_flight` and `engine_slots.kimi.max_parallel`.
+2. If `in_flight < max_parallel` AND there's unstarted work eligible for Kimi (queued wave with deps met, or operator-approved creativity idea), draft a packet OR pick the next queued wave's packet, and dispatch via `xaxiu-swarm dispatch --backend kimi ...` (or `swarm` for multiple at once).
+3. Repeat for `kimi-api` if `kimi` slots are full and there's more eligible work.
+4. NEVER fill DeepSeek slots from this loop — DeepSeek is on-demand only (cost-per-API). Supervisors explicitly request DeepSeek when its strengths are needed (V-file, math/schema, novel-feature drafting).
+5. Conflict-avoidance: two parallel Kimi dispatches must touch disjoint file sets. If splitting a wave by file is unsafe (e.g. cross-file refactor), keep it as one dispatch.
+
+Track all in-flight task IDs in `engine_slots.<engine>.in_flight`. On dispatch completion, supervisor (or manager) removes the task ID from `in_flight`.
+
 ## Engine routing
 
-Read `operator_directives.approved_engine_routing.<phase>` to determine which engine to use when dispatching for that phase. If no preference set, default to Kimi for code/test work, Claude-in-session for creativity/integration.
+Read `operator_directives.approved_engine_routing.<phase>` to determine which engine to use when dispatching for that phase. If no preference set, default to Kimi for code/test work, Claude-in-session for creativity/integration. Slot-fill cycles (above) dispatch additional work to whichever engine has open capacity per the policy.
 
 ## Logging
 
-`coord/dev_loop/log.jsonl` is the audit trail. Each entry must include `timestamp`, `tick_count`, `phase_acted_on`, `outcome` ∈ `{"normal", "skipped", "halted", "exhausted"}`, and a short `summary` (~1 sentence).
+`coord/dev_loop/log.jsonl` is the audit trail. Each entry must include `timestamp`, `tick_count`, `phases_acted_on` (array of phase names — parallel supervisors), `outcome` ∈ `{"normal", "skipped", "exhausted"}`, and a short `summary` (~1 sentence). Parallel ticks log a single entry covering all phases that ran.
 
 ## What you do NOT do in a tick
 
-- Do not run more than one supervisor per tick (avoids parallel state edits)
-- Do not dispatch packets directly — always go through a supervisor
-- Do not commit/push from the manager — that's the integrating supervisor's job
-- Do not contact the operator unless `halt_status == "halted_L5"` — write the diagnostic to state.json and exit
+- Do not dispatch packets directly when a supervisor exists for that phase — always delegate. The slot-fill step at the end of the tick is the exception: it can dispatch additional Kimi packets to fill idle capacity.
+- Do not commit/push from the manager — that's the integrating supervisor's job.
+- Do not contact the operator unless an L5 escalation requires it AND the escalation is non-auto-recoverable. L5s with auto-retry stay autonomous; the operator notification is informational (via `coord/dev_loop/escalations.md`).
+- Do not let supervisors that touch overlapping write sets run in the same tick. See the parallelism rules above for conflict detection.
 
 Begin the tick.
