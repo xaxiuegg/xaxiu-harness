@@ -81,10 +81,29 @@ Set `loop_status` to a non-`"armed"` value ONLY when:
 
 There is no `halted_L5` state — L5 escalations pause only the affected phases and auto-retry. The operator's sole responsibility is to fix the underlying L5 condition; the loop self-heals on the next successful retry.
 
+## Event-driven, not cadence-driven (cadence is the FLOOR)
+
+The cadence_minutes per phase is the **minimum** wait between work batches — NOT the schedule. The manager runs whenever a triggering event fires; cadence only enforces "don't dispatch hotter than X" and "if absolutely nothing is happening, check in every Y min."
+
+**Triggering events that prompt an immediate tick (no waiting for cadence)**:
+1. A background dispatch task completes (task-notification arrives) → immediately classify outcome and either integrate or fall back.
+2. An engine cooldown expires AND there's queued work eligible for that engine → immediately dispatch.
+3. Operator interjects with a directive → immediately apply.
+4. A wave completes and the next wave is unblocked (deps met) → immediately dispatch.
+5. CI returns a result (GitHub Actions webhook, when wired in Wave 4+) → immediately classify.
+
+**Cadence wakeup behavior**:
+- ScheduleWakeup at `min(now + cadence, next_dependency_unlock)` so the loop wakes for whichever comes first.
+- On wake, the manager scans for events that happened during sleep AND any new eligibility — both trigger immediate action; the wake is not the actor itself.
+- If genuinely nothing actionable: log a no-op tick, re-arm next wake at min(cadence) of all idle phases.
+
+**Anti-pattern**: blocking for a fixed cadence after completing work, when more work is queued and eligible. The "30-min countdown" between ticks must not become a default cooldown on the dev manager's own activity.
+
 ## Concurrency safety
 
 - Only one tick runs at a time (Task Scheduler ensures this — default is "do not start a new instance" if previous is still running).
 - Worker dispatches (xaxiu-swarm) run in background and can overlap across ticks; that's fine because each has its own output file path tied to its task ID.
+- Event-triggered ticks may overlap with cadence ticks; the same one-instance lock applies (subsequent triggers wait, queue is depth-1).
 
 ## Slot-filling (don't let Kimi sit idle)
 
