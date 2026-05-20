@@ -1,0 +1,88 @@
+# Dispatch rules — engine routing for the autonomous loop
+
+These rules are extracted from the operator's warehouse project retrospective (2026-05-20). They are load-bearing for the `developing` and `integrating` supervisors. Treat as the authoritative source of truth when packet drafting and dispatch decisions are made; if a supervisor's behavior conflicts with these rules, fix the supervisor.
+
+## Engine selection
+
+| Task shape | Engine | Model | Notes |
+|---|---|---|---|
+| Surgical FIND/REPLACE, single file, ≤40 LOC | Kimi CLI | default | Kimi-API also works if `--timeout >=420` |
+| Multi-file Python implementation, single concern | Kimi CLI | default | Same domain only |
+| V-file or context >500KB | DeepSeek | `deepseek-v4-flash` | 1M window required |
+| Novel-feature drafting | DeepSeek | `deepseek-v4-flash` | Kimi consistently times out on novelty |
+| Schema/math/logic verification | DeepSeek | `deepseek-v4-pro` | Reserve v4-pro for ship-blocking work; v4-flash for routine |
+| Cross-engine ship audit | DeepSeek (vs prior Kimi work) or Kimi (vs prior DeepSeek work) | as above | Never the SAME engine that produced the artifact |
+
+Never:
+- Dispatch to Claude as a swarm worker (`--backend claude`). Use in-session Claude for judgment.
+- Use Claude Agent-tool sub-agents for ship-gate audits. They share Claude's blind spots. Use the swarm cross-engine path.
+- Bundle multi-domain work in one packet. Split by concern; dispatch separately.
+
+## Timeouts and retries
+
+| Backend | Minimum `--timeout` | Retry on timeout |
+|---|---|---|
+| `kimi` (CLI) | 420 | Fall back to `deepseek` immediately; do NOT retry `kimi` within 60 min |
+| `kimi-api` | 420 | Same fallback rule |
+| `deepseek` v4-flash | 600 | Fall back to `deepseek` v4-pro if recoverable, else `kimi` |
+| `deepseek` v4-pro | 1200 | Fall back to `kimi`; escalate to L5 if both fail |
+
+Cooldown state lives in `state.json::engine_cooldowns[<engine>]`:
+```json
+{
+  "last_failure_at": "<iso>",
+  "failure_reason": "timeout|api_error|refusal|trap",
+  "cooldown_until": "<iso, last_failure_at + 60min>"
+}
+```
+Supervisors must check `cooldown_until` before dispatching; if the chosen engine is cooling, switch to the alternate.
+
+## Required flags per dispatch
+
+Every `xaxiu-swarm dispatch` invocation MUST include:
+- `--backend <name>`
+- `--deliverable <project root>` (so worker writes back to the right place)
+- `--add-dir <project root>` (so worker can read project files)
+- `--context-file D:/Projects/xaxiu-harness/CLAUDE.md` (memory + conventions)
+- `--progress 30` (heartbeat for long runs)
+- `--timeout <per-table-above>`
+
+For DeepSeek surgical patches (FIND/REPLACE without investigation), also pass `--no-thinking` to avoid the v4-pro "thinking eats the output budget" trap.
+
+## Packet scope validation (pre-dispatch checklist)
+
+Before dispatching, the developing supervisor MUST confirm the packet:
+- [ ] Touches a single domain (single module or tightly-related sibling files)
+- [ ] Has explicit acceptance criteria listing concrete artifacts (file paths, function names)
+- [ ] For surgical patches: includes verifiable anchors (3+ lines of unchanged context around each FIND block)
+- [ ] Specifies output format unambiguously (e.g. "FIND/REPLACE blocks" vs "complete file rewrite")
+- [ ] References the relevant CLAUDE.md sections, memory entries, or spec files by path
+
+If any check fails, the packet is split or revised before dispatch. Vague packets are the #1 cause of engine hallucination.
+
+## Post-dispatch verification (before integrating)
+
+The integrating supervisor MUST run these gates IN ORDER. Stop at first failure.
+
+1. **`git diff --stat`** — refuse to integrate single-file diffs >1500 LOC without explicit `confirm_large_diff: true` on the merge entry.
+2. **Anchor byte-verification** — for surgical patches, the developing supervisor must have verified that all FIND blocks match source exactly. If not done, integrating supervisor reruns the check.
+3. **`pytest tests/ -q`** — full suite must be green. If newly failing, classify as regression and block.
+4. **CLI smoke test** — for verbs the wave affected, `harness <verb> --help` must succeed.
+5. **Cross-engine audit (optional, ship-gate only)** — for waves marked `ship_blocking: true`, dispatch a verification packet to the alternate engine. Both must concur before integrate.
+
+## Observer-flagged anti-patterns (do NOT repeat)
+
+From warehouse `dev-panel-runs/.../observer/daily/`:
+- **REV 202 Babel TDZ crash shipped undetected** — never claim "live" without a curl smoke test confirming the artifact loads and renders.
+- **`planner.html` race condition** — never run two supervisors simultaneously that write to the same file. The dev manager enforces one-supervisor-per-tick.
+- **Same-engine ship-audit** — never dispatch a Claude-sub-agent to validate Claude's own work, OR a Kimi packet to validate a Kimi-authored patch. Cross-engine only.
+
+## When to escalate
+
+| Condition | Level | Notes |
+|---|---|---|
+| Same wave fails on both engines 3 retries each | L5 | `L5.dispatch.E_WAVE_PERSISTENTLY_FAILING` |
+| All engines in cooldown simultaneously | L5 | `L5.network.E_ALL_ENGINES_UNREACHABLE` |
+| `pytest` red, regression introduced, fix unclear after one retry | L4 | `L4.testing.E_REGRESSION_PERSISTENT` |
+| Anchor verification fails after engine fallback | L3 | Re-draft packet, dispatch fresh |
+| Single engine timeout, fallback succeeded | L1 | Logged, no action |
