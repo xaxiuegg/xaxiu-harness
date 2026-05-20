@@ -22,8 +22,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T12:43:34Z",
-  "tick_count": 4,
+  "last_tick_at": "2026-05-20T12:58:34Z",
+  "tick_count": 5,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -124,12 +124,12 @@
     "kimi": {
       "last_failure_at": "2026-05-20T11:53:14Z",
       "failure_reason": "timeout_600s_on_wave_A6_multifile_refactor",
-      "cooldown_until": "2026-05-20T12:53:14Z"
+      "cooldown_until": null
     },
     "kimi-api": {
       "last_failure_at": "2026-05-20T12:08:10Z",
       "failure_reason": "non_agentic_packet_trap_assumed_tool_use",
-      "cooldown_until": "2026-05-20T12:23:10Z"
+      "cooldown_until": null
     },
     "deepseek": {
       "last_failure_at": null,
@@ -157,7 +157,32 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [],
+  "active_dispatches": [
+    {
+      "task_id": "swarm-2026-05-20T12-54-waveB-concrete",
+      "packet": "coord/packets/2026-05-20-waveB-concrete-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T12:58:34Z",
+      "phase": "developing",
+      "wave_id": "wave-B/1"
+    },
+    {
+      "task_id": "swarm-2026-05-20T12-54-waveB-guards",
+      "packet": "coord/packets/2026-05-20-waveB-guards-tests/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T12:58:34Z",
+      "phase": "developing",
+      "wave_id": "wave-B/2"
+    },
+    {
+      "task_id": "swarm-2026-05-20T12-54-wave7",
+      "packet": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-20T12:58:34Z",
+      "phase": "developing",
+      "wave_id": "wave-7"
+    }
+  ],
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -195,7 +220,7 @@
     {
       "id": "wave-B",
       "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI",
-      "status": "partial_in_progress",
+      "status": "in_progress",
       "depends_on": [
         "wave-A"
       ],
@@ -209,7 +234,8 @@
       "pending_work": [
         "tests/test_engines_concrete_boundary.py",
         "tests/test_engines_guards_boundary.py"
-      ]
+      ],
+      "current_swarm_run": "2026-05-20T12:54"
     },
     {
       "id": "wave-4",
@@ -246,12 +272,14 @@
       ],
       "operator_added": "2026-05-20",
       "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration",
-      "scope_expansion_2026_05_20": "Must include operator-modes config surface: every directive given in this dev-loop session becomes a discoverable CLI flag / YAML key. See memory feedback_operator_inputs_become_harness_config for the directive table (full-dev-authority, L5 escalation, parallelism, engine-fill, etc.)."
+      "scope_expansion_2026_05_20": "Must include operator-modes config surface: every directive given in this dev-loop session becomes a discoverable CLI flag / YAML key. See memory feedback_operator_inputs_become_harness_config for the directive table (full-dev-authority, L5 escalation, parallelism, engine-fill, etc.).",
+      "feature_roster": "spec/session-derived-feature-roster.md",
+      "acceptance_gate": "Every row in feature roster must be checked \u2705 before Wave 6 ships"
     },
     {
       "id": "wave-7",
       "name": "operator-mode CLI flags + adapter.operator YAML section",
-      "status": "planned",
+      "status": "in_progress",
       "depends_on": [
         "wave-A",
         "wave-B"
@@ -260,7 +288,8 @@
       "note": "Surface session directives as harness config (--full-dev-authority, --escalation-threshold L5, --engine-fill aggressive, etc.). Foundation for Wave 6. Smaller scope than full productization.",
       "packet_ready": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
       "spec_ready": "spec/operator-modes.md",
-      "awaiting": "swarm/kimi cooldown lift at 12:53:14Z"
+      "awaiting": "swarm/kimi cooldown lift at 12:53:14Z",
+      "current_swarm_run": "2026-05-20T12:54"
     }
   ],
   "blockers": [],
@@ -270,7 +299,11 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 3,
-      "in_flight": [],
+      "in_flight": [
+        "swarm-2026-05-20T12-54-waveB-concrete",
+        "swarm-2026-05-20T12-54-waveB-guards",
+        "swarm-2026-05-20T12-54-wave7"
+      ],
       "fill_policy": "aggressive"
     },
     "kimi-api": {
