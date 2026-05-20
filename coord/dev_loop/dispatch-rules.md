@@ -20,12 +20,15 @@ Never:
 
 ## Timeouts and retries
 
-| Backend | Minimum `--timeout` | Retry on timeout |
-|---|---|---|
-| `swarm/kimi` (xaxiu-swarm wrapping Kimi-Code CLI subprocess) | 420 | Fall back to `deepseek` immediately; do NOT retry `kimi` within 60 min |
-| `kimi-api` | 420 | Same fallback rule |
-| `deepseek` v4-flash | 600 | Fall back to `deepseek` v4-pro if recoverable, else `kimi` |
-| `deepseek` v4-pro | 1200 | Fall back to `kimi`; escalate to L5 if both fail |
+| Backend | Packet shape | Minimum `--timeout` | Retry on timeout |
+|---|---|---|---|
+| `swarm/kimi` | Single-file surgical (≤40 LOC delta) | 420 | Fall back to `swarm/deepseek` (revise to FIND/REPLACE); no `swarm/kimi` retry within 60min |
+| `swarm/kimi` | Multi-file refactor / new module (≥200 LOC delta) | **1200** | Same fallback; partial files that landed BEFORE timeout per `[[feedback_kimi_cli_incremental_edits]]` are kept — re-dispatch only the unfinished portion |
+| `swarm/kimi-api` | Single-file (NON-agentic; produces FIND/REPLACE response) | 420 | Same fallback rule |
+| `swarm/deepseek` v4-flash | Single-file surgical | 600 | Fall back to v4-pro if recoverable, else `swarm/kimi` after cooldown |
+| `swarm/deepseek` v4-pro | Complex / V-file / math | 1200 | Fall back to `swarm/kimi`; escalate L5 if both fail |
+
+**Key insight:** a swarm-reported "timeout" on `swarm/kimi` does NOT mean nothing landed. Always run `bin/parse-swarm-status.py <output> --expect-edits-in <paths>` (or check `git diff` directly) to see actual file state before deciding retry vs partial-success. See [[feedback_kimi_cli_incremental_edits]] in memory.
 
 Cooldown state lives in `state.json::engine_cooldowns[<engine>]`:
 ```json

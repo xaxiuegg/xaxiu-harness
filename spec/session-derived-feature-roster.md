@@ -27,6 +27,7 @@ Every directive the operator gave during the 2026-05-20 session must land as a r
 | 13 | Sub-loops + supervisor roles | "Treat claude sub agents as supervisors who control sub loops" | Wave 6 | 📋 | 4 supervisor roles in prototype; user picks engine per supervisor in adapter YAML |
 | 14 | Observer system (workflow audit cycle) | "Arm observer for this session" | Wave 6 | 📋 | Cycle script + Task Scheduler registration |
 | 15 | 24/7 persistent mode via Windows Task Scheduler | "Allow the harness to be functioning when you sleep" | Wave 4 (installer) + Wave 6 (runner) | 📋 | `bin/register-dev-loop-task.ps1` in prototype |
+| 16 | Process-improvement loop (5th supervisor) | "Incorporate and deploy a process improvement loop for this session; findings to be incorporated in final harness as well" | Wave 6 | 🚧 | Prototype: `coord/dev_loop/supervisors/process_improvement.md`. Cadence 2h or trigger-driven (wave completion, repeated failures, L4/L5). Three tiers of findings: P1 inline, P2 packet, P3 memory/spec. First-tick findings on 2026-05-20 yielded this very row + 2 P1 fixes (parse-swarm-status integration + Kimi-CLI-incremental memory entry + 1200s timeout for multi-file packets). |
 
 ## Verification (Wave 6 acceptance criterion)
 

@@ -6,6 +6,7 @@ You are the integrating supervisor for xaxiu-harness. The dev manager has invoke
 
 1. **Read `phase_cursors.integrating.pending_merges`.** Each entry references a completed Kimi/DeepSeek dispatch that produced new/modified files.
 2. **For each pending merge, run validation gates in order** (per `coord/dev_loop/dispatch-rules.md` post-dispatch verification). Stop at first failure:
+   - **Outcome classification** — `python bin/parse-swarm-status.py <output_file> --expect-edits-in <each expected path>`. Trust `git diff` for actual file changes over the swarm's terminal status line — Kimi-Code CLI applies edits incrementally, so a swarm-reported "timeout" can coexist with a fully-landed file. See `[[feedback_kimi_cli_incremental_edits]]`.
    - `git status` — confirm the expected files are modified, nothing surprising.
    - `git diff --stat` — refuse to commit if any single file diff exceeds 1500 LOC without explicit `confirm_large_diff: true` in the merge entry.
    - **Anchor byte-verification** — for surgical (FIND/REPLACE) patches, re-verify that all FIND blocks from the original packet matched source byte-exactly. DeepSeek delivers byte-exact anchors only ~1/3 of the time per warehouse retro; this check is non-optional.
