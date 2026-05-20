@@ -28,6 +28,7 @@ DEV-LOOP-CALIBRATION,Dev Loop,Empirical concurrency calibration from warehouse,s
 DEV-LOOP-STATUS-CSV,Dev Loop,Canonical STATUS.csv tracker (this file),shipped,Claude,15 min,2026-05-20,Replicated from warehouse pattern; update on every task transition
 HEARTBEAT,Backlog (P2),harness heartbeat CLI verb (passive operator status),todo,Kimi,~30 min,-,Pulse to coord/dev_loop/heartbeat.json every N sec; harness status reads it
 STATE-INSPECT,Backlog (P2),harness state inspect CLI verb (pretty-print state.json),todo,Kimi,~30 min,-,Non-technical operator can't read state.json directly
+SESSION-BOOTSTRAP,Doc,Durable session-bootstrap prompt (paste-to-boot-new-Claude),shipped,Claude,30 min,2026-05-20,"coord/SESSION_BOOTSTRAP.md; recovery artifact authored by a parallel Claude session, saved + annotated with state-delta; consider Wave 6 candidate for `harness session bootstrap` CLI verb"
 REPLAY-CLI,Backlog (creativity),harness replay CLI verb - decision archaeology for dispatches,proposed,Claude+Kimi,~3 hr,2026-05-20,creativity tick #1; needs operator approval before dispatch
 BUDGET-METER,Backlog (parked),Dispatch budget meter + per-engine cost ledger,parked,Claude+Kimi,~2 hr,2026-05-20,Idea score 82; revisit after Wave 3-5 done
 GEMINI-ADAPTER,Backlog (parked),Gemini 2.x engine adapter for cross-engine triangulation,parked,Kimi,~3 hr,2026-05-20,Idea score 71; revisit when cross-engine ship audits become routine
