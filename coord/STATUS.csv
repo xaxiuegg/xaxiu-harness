@@ -15,13 +15,15 @@ W4,Wave 4,Windows installer + first-run wizard,shipped,Kimi+Claude,~2 hr,2026-05
 W7A,Wave 7/A,Operator-modes foundation (operator/* module + 14 tests),shipped,Claude,45 min,2026-05-20,Inline after 2 swarm/kimi attempts failed on too-broad packet
 W7B,Wave 7/B,Operator-modes CLI integration (apply_operator_flags + dispatch dry_run),shipped,Claude,20 min,2026-05-20,7 new flags on @cli.group; dry_run mode works end-to-end
 W7C,Wave 7/C,Operator-modes polish (schema OperatorSection + init verb operator: YAML emission),todo,Claude or Kimi,~30 min,-,Low priority; CLI flags + env vars already cover full functionality
-W5,Wave 5,Templates + NL→YAML translator,spec-done,Kimi+Claude,multi-day,2026-05-20,spec/wave-5-templates-nl-yaml.md drafted; packet not drafted yet
+W5-PACKETS,Wave 5,"Wave 5 split into 5/A (templates) + 5/B (NL→YAML), both packets drafted",spec-done,Claude,30 min,2026-05-20,Pre-staged; ready to dispatch when swarm/kimi slot opens
+W5A,Wave 5/A,Template refresh: add operator: section to all 6 templates,queued,Kimi via swarm,~10 min,2026-05-20,Packet ready at coord/packets/2026-05-20-wave5A-template-refresh/
+W5B,Wave 5/B,NL→YAML translator + harness adapter verb group,queued,Kimi via swarm,~30 min,2026-05-20,Packet ready at coord/packets/2026-05-20-wave5B-nl-to-yaml/
 W3,Wave 3,Dashboard backend + frontend (FastAPI + WebSocket),planned,Kimi+Claude,multi-day,-,Depends on W4 (now done); unblocked
 W6,Wave 6,Productize autonomous loops as harness feature,planned,Kimi+Claude,multi-week,-,Acceptance gate = all 18 rows in spec/session-derived-feature-roster checked off
 DEV-LOOP-SCAFFOLD,Dev Loop,coord/dev_loop/ scaffolding (state.json + manager.md + 5 supervisors + dispatch-rules + escalations + log),shipped,Claude,~3 hr,2026-05-20,Prototype for Wave 6; loop running in this session
 DEV-LOOP-PROCESS-IMPROVE,Dev Loop,5th supervisor: process_improvement,shipped,Claude,30 min,2026-05-20,Cadence 2h or trigger-driven; first tick produced 5 findings; 3 P1 applied
-DEV-LOOP-EVENT-DRIVEN,Dev Loop,Cadence-is-the-floor / event-driven tick rule,shipped,Claude,15 min,2026-05-20,manager.md "What you do NOT do" + roster row #18
-DEV-LOOP-NO-IDLE-DM,Dev Loop,"Dev manager does not idle either" rule,shipped,Claude,5 min,2026-05-20,Same commit; roster row #18 origin
+DEV-LOOP-EVENT-DRIVEN,Dev Loop,Cadence-is-the-floor / event-driven tick rule,shipped,Claude,15 min,2026-05-20,"manager.md ""What you do NOT do"" + roster row #18"
+DEV-LOOP-NO-IDLE-DM,Dev Loop,Dev manager does not idle either rule,shipped,Claude,5 min,2026-05-20,Same commit; roster row #18 origin
 DEV-LOOP-CALIBRATION,Dev Loop,Empirical concurrency calibration from warehouse,shipped,Claude,30 min,2026-05-20,engine_slots kimi 3→6 / kimi-api 2→6; cooldowns removed (immediate_fallback)
 DEV-LOOP-STATUS-CSV,Dev Loop,Canonical STATUS.csv tracker (this file),shipped,Claude,15 min,2026-05-20,Replicated from warehouse pattern; update on every task transition
 HEARTBEAT,Backlog (P2),harness heartbeat CLI verb (passive operator status),todo,Kimi,~30 min,-,Pulse to coord/dev_loop/heartbeat.json every N sec; harness status reads it
