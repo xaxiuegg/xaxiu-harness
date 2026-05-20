@@ -197,10 +197,11 @@ def init(project: str, template: str, force: bool) -> None:
 @click.option("--show-set", is_flag=True, help="Show which API keys are set.")
 def env(show_set: bool) -> None:
     """Check which API keys are set (echo SET only)."""
+    from harness.secrets.dpapi import has_secret
+
     keys = ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY"]
     for key_name in keys:
-        val = os.environ.get(key_name)
-        if val:
+        if os.environ.get(key_name) or has_secret(key_name):
             click.echo(f"{key_name}: SET")
         else:
             click.echo(f"{key_name}: MISSING")

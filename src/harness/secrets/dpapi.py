@@ -307,3 +307,30 @@ def has_secret(name: str) -> bool:
     _require_windows()
     data = _load_data()
     return name in data
+
+
+# ---------------------------------------------------------------------------
+# CLI helper (used by install wizard)
+# ---------------------------------------------------------------------------
+
+
+def _cli_set(name: str) -> None:
+    """Read plaintext from stdin, encrypt under *name*, and persist."""
+    import sys
+
+    value = sys.stdin.read().rstrip("\n")
+    if not value:
+        sys.exit(2)  # blank input
+    encrypt_secret(name, value)
+    sys.stdout.write(f"{name}: SET\n")
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) >= 3 and sys.argv[1] == "set":
+        _cli_set(sys.argv[2])
+        sys.exit(0)
+    else:
+        sys.stderr.write("Usage: python -m harness.secrets.dpapi set <NAME>\n")
+        sys.exit(2)
