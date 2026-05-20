@@ -131,5 +131,7 @@ Read `operator_directives.approved_engine_routing.<phase>` to determine which en
 - Do not commit/push from the manager — that's the integrating supervisor's job.
 - Do not contact the operator unless an L5 escalation requires it AND the escalation is non-auto-recoverable. L5s with auto-retry stay autonomous; the operator notification is informational (via `coord/dev_loop/escalations.md`).
 - Do not let supervisors that touch overlapping write sets run in the same tick. See the parallelism rules above for conflict detection.
+- **Do not stop the tick after spawning a fast supervisor when engines are idle and there's queued work.** A supervisor returning is itself an event — re-evaluate cadence/queue immediately before scheduling next wakeup. The dev manager itself must not idle either.
+- **Do not treat the wakeup as a stopping point.** Wakeup is the floor when nothing else is happening; whenever a triggering event (supervisor return, dispatch complete, engine cooldown lift, operator message) occurs, run the full tick procedure again, not just an acknowledgment.
 
 Begin the tick.
