@@ -32,6 +32,9 @@ audit/
 # Windows / PowerShell pollution (ModuleAnalysisCache when $LOCALAPPDATA not set)
 /Microsoft/
 
+# pip cache pollution when --cache-dir not set during tool runs
+/pip/
+
 # Local dev_loop runtime state (the seed state.json is tracked; ad-hoc runtime
 # overrides are not. Uncomment if you want to keep the seed only.)
 # coord/dev_loop/state.runtime.json
