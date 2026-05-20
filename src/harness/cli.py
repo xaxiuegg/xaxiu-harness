@@ -1,18 +1,27 @@
 """xaxiu-harness CLI.
 
 Cross-project multi-engine LLM dispatch + monitoring tool.
-All commands are currently stubbed for Wave 1 scaffolding.
+Wave A: init, status, engines, priority, burst, lock are wired to internal
+backends.  observer-tick, retro, install, dashboard-serve, loops remain
+stubbed with pending-wave messages.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional
 
 import click
+import yaml
 
+from harness.adapters.loader import _repo_root, load_project_adapter, load_template
+from harness.cli_helpers import probe_all_engines
 from harness.engines.dispatcher import dispatch_packet
+from harness.state.files import read_engine_health, update_engine_health
 
 
 @click.group()
@@ -64,8 +73,50 @@ def dispatch(
 @click.option("--format", "fmt", type=click.Choice(["csv", "json"]), help="Output format.")
 def status(project: Optional[str], report: bool, fmt: Optional[str]) -> None:
     """Print current status (or report to configured backend)."""
-    click.echo(f"status: project={project} report={report} format={fmt}")
-    click.echo("not implemented yet")
+    if not project:
+        click.echo("error: --project is required", err=True)
+        sys.exit(2)
+
+    try:
+        cfg = load_project_adapter(project)
+    except (ValueError, FileNotFoundError) as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    if report:
+        click.echo("status: report backend not yet implemented")
+        sys.exit(1)
+
+    backend = cfg.status_tracking.backend
+    config = cfg.status_tracking.config
+    root = Path(cfg.project_root)
+
+    if backend == "csv":
+        csv_path = root / config.get("csv_path", "STATUS.csv")
+    elif backend == "markdown":
+        csv_path = root / config.get("path", "STATUS.md")
+    else:
+        click.echo(f"status: backend '{backend}' not yet supported for CLI display")
+        sys.exit(1)
+
+    if not csv_path.exists():
+        click.echo(f"error: status file not found: {csv_path}", err=True)
+        sys.exit(1)
+
+    if fmt == "json":
+        import csv as csv_mod
+
+        with csv_path.open("r", encoding="utf-8") as f:
+            reader = csv_mod.DictReader(f)
+            rows = list(reader)
+        click.echo(
+            json.dumps(
+                {"project": project, "backend": backend, "path": str(csv_path), "rows": rows},
+                indent=2,
+            )
+        )
+    else:
+        click.echo(csv_path.read_text(encoding="utf-8"))
     sys.exit(0)
 
 
@@ -73,9 +124,8 @@ def status(project: Optional[str], report: bool, fmt: Optional[str]) -> None:
 @click.option("--project", "-p", help="Project name.")
 def observer_tick(project: Optional[str]) -> None:
     """Run one observer cycle: check status changes, flag patterns."""
-    click.echo(f"observer-tick: project={project}")
-    click.echo("not implemented yet")
-    sys.exit(0)
+    click.echo("observer-tick: backend pending Wave A.2 (observer module not yet built)")
+    sys.exit(1)
 
 
 @cli.command()
@@ -83,18 +133,16 @@ def observer_tick(project: Optional[str]) -> None:
 @click.option("--date", help="Retro date (YYYY-MM-DD).")
 def retro(project: Optional[str], date: Optional[str]) -> None:
     """Generate daily retro summary from history."""
-    click.echo(f"retro: project={project} date={date}")
-    click.echo("not implemented yet")
-    sys.exit(0)
+    click.echo("retro: backend pending Wave A.2")
+    sys.exit(1)
 
 
 @cli.command()
 @click.option("--uninstall", is_flag=True, help="Remove scheduled tasks and config.")
 def install(uninstall: bool) -> None:
     """Setup Task Scheduler entries and first-run wizard."""
-    click.echo(f"install: uninstall={uninstall}")
-    click.echo("not implemented yet")
-    sys.exit(0)
+    click.echo("install: pending Wave 4 (Windows installer + first-run wizard)")
+    sys.exit(1)
 
 
 @cli.command()
@@ -109,15 +157,39 @@ def install(uninstall: bool) -> None:
             "writing-content",
             "research-comparison",
             "solo-dev",
-            "basic",
         ]
     ),
-    default="basic",
+    default="warehouse-style",
     help="Starter template.",
 )
-def init(project: str, template: str) -> None:
+@click.option("--force", is_flag=True, help="Overwrite existing adapter.")
+def init(project: str, template: str, force: bool) -> None:
     """Create starter adapter YAML for a project."""
-    click.echo(f"init: would create template {template} for project {project}")
+    adapter_dir = _repo_root() / "adapters" / project
+    adapter_path = adapter_dir / "harness-adapter.yaml"
+
+    if adapter_path.exists() and not force:
+        click.echo(
+            f"error: adapter already exists for '{project}'; use --force to overwrite",
+            err=True,
+        )
+        sys.exit(2)
+
+    try:
+        cfg = load_template(template)
+    except (ValueError, FileNotFoundError) as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    data = cfg.model_dump(mode="json")
+    data["name"] = project
+
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    adapter_path.write_text(
+        yaml.safe_dump(data, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+    click.echo(str(adapter_path))
     sys.exit(0)
 
 
@@ -139,9 +211,8 @@ def env(show_set: bool) -> None:
 @click.option("--port", default=7878, type=int, help="Dashboard server port.")
 def dashboard_serve(port: int) -> None:
     """Start FastAPI dashboard server."""
-    click.echo(f"dashboard-serve: port={port}")
-    click.echo("not implemented yet")
-    sys.exit(0)
+    click.echo("dashboard-serve: pending Wave 3 (FastAPI + WebSocket)")
+    sys.exit(1)
 
 
 @cli.command()
@@ -154,31 +225,33 @@ def loops(
     remove: Optional[str],
 ) -> None:
     """Manage user-defined scheduled loops."""
-    click.echo(f"loops: project={project} add={add} remove={remove}")
-    click.echo("not implemented yet")
-    sys.exit(0)
+    click.echo("loops: pending scheduler integration")
+    sys.exit(1)
 
 
 @cli.command()
 @click.option("--list", "list_", is_flag=True, help="List engines.")
 @click.option("--health", is_flag=True, help="Check engine health.")
-@click.option("--priority", nargs=2, help="Set engine priority: ENGINE PRIORITY.")
-@click.option("--burst", nargs=2, help="Burst engine: ENGINE DURATION.")
-@click.option("--lock", help="Lock engine.")
-@click.option("--release", is_flag=True, help="Release engine lock.")
-def engines(
-    list_: bool,
-    health: bool,
-    priority: Optional[tuple[str, str]],
-    burst: Optional[tuple[str, str]],
-    lock: Optional[str],
-    release: bool,
-) -> None:
+def engines(list_: bool, health: bool) -> None:
     """Query or modify the engine pool."""
-    click.echo(
-        f"engines: list={list_} health={health} priority={priority} burst={burst} lock={lock} release={release}"
-    )
-    click.echo("not implemented yet")
+    state = read_engine_health()
+
+    if health:
+        probes = probe_all_engines()
+        for name, (st, err) in probes.items():
+            click.echo(f"{name}: {st}" + (f" ({err})" if err else ""))
+        sys.exit(0)
+
+    # Default / --list
+    for name in ["deepseek", "kimi", "anthropic"]:
+        cfg = state.get(name)
+        if cfg:
+            click.echo(
+                f"{name}: priority={cfg.priority} locked={cfg.locked} "
+                f"status={cfg.status}"
+            )
+        else:
+            click.echo(f"{name}: priority=NORMAL locked=False status=up")
     sys.exit(0)
 
 
@@ -187,8 +260,12 @@ def engines(
 @click.argument("level", type=click.Choice(["HIGH", "NORMAL", "AVOID"]))
 def priority(engine: str, level: str) -> None:
     """Set persistent routing priority per engine."""
-    click.echo(f"priority: engine={engine} level={level}")
-    click.echo("not implemented yet")
+    try:
+        update_engine_health(engine, {"priority": level})
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"priority: {engine} -> {level}")
     sys.exit(0)
 
 
@@ -197,8 +274,17 @@ def priority(engine: str, level: str) -> None:
 @click.argument("duration_min", type=int)
 def burst(engine: str, duration_min: int) -> None:
     """Temporarily route all traffic to one engine."""
-    click.echo(f"burst: engine={engine} duration_min={duration_min}")
-    click.echo("not implemented yet")
+    if duration_min <= 0:
+        click.echo("error: duration_min must be positive", err=True)
+        sys.exit(2)
+
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=duration_min)
+    try:
+        update_engine_health(engine, {"burst_until": expiry.isoformat()})
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"burst: {engine} until {expiry.isoformat()}")
     sys.exit(0)
 
 
@@ -207,6 +293,11 @@ def burst(engine: str, duration_min: int) -> None:
 @click.option("--release", is_flag=True, help="Release the lock.")
 def lock(engine: str, release: bool) -> None:
     """Exclusive routing lock (disables auto-routing)."""
-    click.echo(f"lock: engine={engine} release={release}")
-    click.echo("not implemented yet")
+    try:
+        update_engine_health(engine, {"locked": not release})
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    action = "released" if release else "locked"
+    click.echo(f"lock: {engine} {action}")
     sys.exit(0)
