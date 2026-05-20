@@ -173,7 +173,11 @@ def _load_data() -> dict[str, str]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError("Corrupted secrets file: top-level value is not a JSON object")
+        from harness.errors import ConfigCorruption
+        raise ConfigCorruption(
+            "Corrupted secrets file: top-level value is not a JSON object",
+            context={"file": str(path)},
+        )
     return data
 
 

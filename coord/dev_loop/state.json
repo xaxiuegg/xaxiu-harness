@@ -22,8 +22,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T11:37:18Z",
-  "tick_count": 2,
+  "last_tick_at": "2026-05-20T12:16:39Z",
+  "tick_count": 3,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -84,8 +84,8 @@
       ]
     },
     "developing": {
-      "last_run_at": "2026-05-20T11:26:27Z",
-      "next_due_at": "2026-05-20T11:56:27Z",
+      "last_run_at": "2026-05-20T12:16:39Z",
+      "next_due_at": "2026-05-20T12:46:39Z",
       "current_dispatch_task_id": null
     },
     "testing": {
@@ -122,14 +122,14 @@
   },
   "engine_cooldowns": {
     "kimi": {
-      "last_failure_at": null,
-      "failure_reason": null,
-      "cooldown_until": null
+      "last_failure_at": "2026-05-20T11:53:14Z",
+      "failure_reason": "timeout_600s_on_wave_A6_multifile_refactor",
+      "cooldown_until": "2026-05-20T12:53:14Z"
     },
     "kimi-api": {
-      "last_failure_at": null,
-      "failure_reason": null,
-      "cooldown_until": null
+      "last_failure_at": "2026-05-20T12:08:10Z",
+      "failure_reason": "non_agentic_packet_trap_assumed_tool_use",
+      "cooldown_until": "2026-05-20T12:23:10Z"
     },
     "deepseek": {
       "last_failure_at": null,
@@ -157,20 +157,7 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [
-    {
-      "task_id": "bv4wtqu7g",
-      "packet": "coord/packets/2026-05-20-waveA6-error-retrofit/packet.md",
-      "engine": "kimi",
-      "model": null,
-      "dispatched_at": "2026-05-20T11:41:28Z",
-      "phase": "developing",
-      "output_file": "C:/Users/xaxiu/AppData/Local/Temp/claude/D--Projects/dd39948c-1ea0-418b-895c-71d5d8befabd/tasks/bv4wtqu7g.output",
-      "deliverable_dir": "D:/Projects/xaxiu-harness",
-      "expected_completion": "5-15 min from dispatch",
-      "wave_id": "wave-A.6"
-    }
-  ],
+  "active_dispatches": [],
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -196,11 +183,14 @@
     {
       "id": "wave-A.6",
       "name": "retrofit raises across codebase to HarnessError subclasses",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "wave-A.5"
       ],
-      "current_dispatch": "bv4wtqu7g"
+      "current_dispatch": "bv4wtqu7g",
+      "completed_at": "2026-05-20T12:16:39Z",
+      "completion_note": "Scope refined during execution: 4 raises retrofitted (1 in dpapi.py to ConfigCorruption, 3 in jsonl_log.py to SchemaViolation). Pydantic validators, user-input validation in loader, dispatcher's contract-protected raise (L81), and assertion-style RuntimeErrors intentionally left as ValueError/RuntimeError \u2014 they don't fit the L3-L5 operational error model. 89/89 tests still green.",
+      "attempt_count": 1
     },
     {
       "id": "wave-B",
@@ -208,7 +198,11 @@
       "status": "queued",
       "depends_on": [
         "wave-A"
-      ]
+      ],
+      "last_attempt_at": "2026-05-20T12:08:10Z",
+      "attempt_count": 1,
+      "last_failure_mode": "kimi_api_packet_trap_prose_not_edits (non-agentic backend)",
+      "next_strategy": "wait for Kimi CLI cooldown lift; re-dispatch as ONE Kimi CLI packet (NOT splittable \u2014 interdependent test fixtures)"
     },
     {
       "id": "wave-4",
@@ -254,9 +248,7 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 3,
-      "in_flight": [
-        "bv4wtqu7g"
-      ],
+      "in_flight": [],
       "fill_policy": "aggressive"
     },
     "kimi-api": {
@@ -267,9 +259,22 @@
     },
     "deepseek": {
       "max_parallel": 1,
-      "in_flight": [],
+      "in_flight": [
+        "<pending \u2014 see active_dispatches>"
+      ],
       "fill_policy": "on_demand",
       "note": "DeepSeek costs per API call; only dispatch when task needs its strengths (V-file, math/schema, novel-feature drafting)"
     }
-  }
+  },
+  "dispatch_learnings": [
+    {
+      "discovered_at": "2026-05-20T12:08:10Z",
+      "insight": "xaxiu-swarm backend agentic capability differs: 'kimi' (CLI) is agentic and can apply in-place edits via Edit/Write tools. 'kimi-api' and 'deepseek' are NOT agentic \u2014 they produce a single text response written to --deliverable path. Packets requesting in-place edits must target kimi CLI; packets to api backends must request FIND/REPLACE or full-file-contents output the integrating supervisor parses.",
+      "applied_to_rules": "coord/dev_loop/dispatch-rules.md TBU next tick",
+      "evidence": [
+        "Wave A.6 on deepseek-v4-flash: exit 0, prose output, no files modified",
+        "Wave B on kimi-api: exit 0, test code in output but not written to disk"
+      ]
+    }
+  ]
 }

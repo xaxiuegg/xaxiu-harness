@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Final
 
 from harness._constants import PROJECT_NAME_REGEX, STATE_DIR, SUPPORTED_BACKENDS
+from harness.errors import SchemaViolation
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -170,18 +171,21 @@ def write_log_entry(
 
     # --- validation ---
     if outcome not in _ALLOWED_OUTCOMES:
-        raise ValueError(
-            f"outcome={outcome!r} not in allowed set: {sorted(_ALLOWED_OUTCOMES)}"
+        raise SchemaViolation(
+            f"outcome={outcome!r} not in allowed set",
+            context={"got": outcome, "allowed": sorted(_ALLOWED_OUTCOMES)},
         )
 
     if backend not in SUPPORTED_BACKENDS:
-        raise ValueError(
-            f"backend={backend!r} not in supported backends: {sorted(SUPPORTED_BACKENDS)}"
+        raise SchemaViolation(
+            f"backend={backend!r} not in supported backends",
+            context={"got": backend, "allowed": sorted(SUPPORTED_BACKENDS)},
         )
 
     if not re.fullmatch(PROJECT_NAME_REGEX, project):
-        raise ValueError(
-            f"project={project!r} does not match PROJECT_NAME_REGEX={PROJECT_NAME_REGEX!r}"
+        raise SchemaViolation(
+            f"project={project!r} does not match PROJECT_NAME_REGEX",
+            context={"got": project, "pattern": PROJECT_NAME_REGEX},
         )
 
     # --- build record (exactly 8 keys, no looping) ---
