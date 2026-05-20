@@ -12,6 +12,8 @@ from typing import Optional
 
 import click
 
+from harness.engines.dispatcher import dispatch_packet
+
 
 @click.group()
 def cli() -> None:
@@ -35,9 +37,25 @@ def dispatch(
     force_engine: Optional[str],
 ) -> None:
     """Execute a packet; auto-route if no backend is given."""
-    click.echo(f"dispatch: project={project} packet={packet} backend={backend} model={model} force_engine={force_engine}")
-    click.echo("not implemented yet")
-    sys.exit(0)
+    if not project or not packet:
+        click.echo("error: --project and --packet are required", err=True)
+        sys.exit(2)
+    forced = force_engine or backend
+    result = dispatch_packet(
+        project=project,
+        packet_path=packet,
+        force_engine=forced,
+        force_model=model,
+    )
+    if result.success:
+        click.echo(result.text)
+        sys.exit(0)
+    click.echo(
+        f"error: {result.error or 'unknown'} "
+        f"(tried: {', '.join(result.fallback_chain) or 'none'})",
+        err=True,
+    )
+    sys.exit(1)
 
 
 @cli.command()
