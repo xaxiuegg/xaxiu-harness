@@ -22,8 +22,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T12:16:39Z",
-  "tick_count": 3,
+  "last_tick_at": "2026-05-20T12:43:34Z",
+  "tick_count": 4,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -84,8 +84,8 @@
       ]
     },
     "developing": {
-      "last_run_at": "2026-05-20T12:16:39Z",
-      "next_due_at": "2026-05-20T12:46:39Z",
+      "last_run_at": "2026-05-20T12:43:34Z",
+      "next_due_at": "2026-05-20T12:54:00Z",
       "current_dispatch_task_id": null
     },
     "testing": {
@@ -257,7 +257,10 @@
         "wave-B"
       ],
       "operator_added": "2026-05-20",
-      "note": "Surface session directives as harness config (--full-dev-authority, --escalation-threshold L5, --engine-fill aggressive, etc.). Foundation for Wave 6. Smaller scope than full productization."
+      "note": "Surface session directives as harness config (--full-dev-authority, --escalation-threshold L5, --engine-fill aggressive, etc.). Foundation for Wave 6. Smaller scope than full productization.",
+      "packet_ready": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
+      "spec_ready": "spec/operator-modes.md",
+      "awaiting": "swarm/kimi cooldown lift at 12:53:14Z"
     }
   ],
   "blockers": [],
