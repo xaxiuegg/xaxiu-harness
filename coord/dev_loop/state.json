@@ -185,19 +185,22 @@
   },
   "engine_cooldowns": {
     "kimi": {
-      "last_failure_at": "2026-05-20T11:53:14Z",
-      "failure_reason": "timeout_600s_on_wave_A6_multifile_refactor",
-      "cooldown_until": null
+      "last_failure_at": null,
+      "failure_reason": null,
+      "cooldown_until": null,
+      "policy": "immediate_fallback (no delay; per warehouse calibration)"
     },
     "kimi-api": {
-      "last_failure_at": "2026-05-20T12:08:10Z",
-      "failure_reason": "non_agentic_packet_trap_assumed_tool_use",
-      "cooldown_until": null
+      "last_failure_at": null,
+      "failure_reason": null,
+      "cooldown_until": null,
+      "policy": "immediate_fallback"
     },
     "deepseek": {
       "last_failure_at": null,
       "failure_reason": null,
-      "cooldown_until": null
+      "cooldown_until": null,
+      "policy": "immediate_fallback"
     }
   },
   "dispatch_defaults": {
@@ -410,7 +413,7 @@
   "engine_slots": {
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
-      "max_parallel": 3,
+      "max_parallel": 6,
       "in_flight": [
         "swarm-2026-05-20T13-50-waveB2-dpapi",
         "swarm-2026-05-20T13-50-waveB2-state-files",
@@ -421,10 +424,10 @@
       "fill_policy": "aggressive"
     },
     "kimi-api": {
-      "max_parallel": 2,
+      "max_parallel": 6,
       "in_flight": [],
       "fill_policy": "aggressive_overflow",
-      "note": "second Kimi transport; use when kimi (CLI) slots full"
+      "note": "Production-ready up to 18 concurrent per warehouse 2026-05-12-p0-quartet (3-key pool x 6); 6 is the conservative default"
     },
     "deepseek": {
       "max_parallel": 1,
@@ -443,5 +446,11 @@
         "Wave B on kimi-api: exit 0, test code in output but not written to disk"
       ]
     }
-  ]
+  ],
+  "calibration_provenance": {
+    "source": "warehouse project empirical runs May 2026",
+    "memory_ref": "reference_xaxiu_swarm_concurrency_calibration",
+    "applied_at": "2026-05-20",
+    "previous_values_were_guesses": true
+  }
 }

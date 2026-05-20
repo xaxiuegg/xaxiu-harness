@@ -38,10 +38,13 @@ DEFAULT_ENGINE_ROUTING: dict[str, str] = {
     "process_improvement": "claude-in-session",
 }
 
-# Aggressive Kimi fill, conservative DeepSeek (per cost posture).
+# Calibrated from warehouse empirical data 2026-05-20 (see memory
+# reference_xaxiu_swarm_concurrency_calibration): production observed
+# 6 swarm/kimi workers + 18 concurrent kimi-api dispatches across 3-key
+# pool with zero failures. DeepSeek stays at 1 per cost-on-demand posture.
 DEFAULT_ENGINE_SLOTS: dict[str, int] = {
-    "swarm/kimi": 3,
-    "swarm/kimi-api": 2,
+    "swarm/kimi": 6,
+    "swarm/kimi-api": 6,
     "swarm/deepseek": 1,
 }
 
