@@ -1,59 +1,68 @@
 # CLAUDE.md — xaxiu-harness
 
-You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope. Don't update warehouse's STATUS.csv; don't dispatch warehouse work. See `feedback_multi_session_scoping.md` in memory.
+You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope. Don't update warehouse's STATUS.csv; don't dispatch warehouse work. See `feedback_multi_session_scoping.md`.
 
-## Current state — v0.3.0 (2026-05-16)
+## Current state — v0.3.x (in active dev loop)
 
 | Component | Status | Files |
 |---|---|---|
-| Adapter schema (Pydantic v2 + validators) | Done | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
-| CLI (13 verbs, Click) | Done — all stubbed except `env` | [src/harness/cli.py](src/harness/cli.py) |
-| Engine ABC + 3 concrete impls (DeepSeek/Kimi/Anthropic httpx) | Done | [src/harness/engines/base.py](src/harness/engines/base.py), [concrete.py](src/harness/engines/concrete.py) |
-| Engine guards (packet-trap / kimi-empty / anthropic-refusal / anchor-fuzzy) | Done | [src/harness/engines/guards.py](src/harness/engines/guards.py) |
-| Auto-fallback orchestrator | Done — LOCK>BURST>priority>rules | [src/harness/engines/dispatcher.py](src/harness/engines/dispatcher.py) |
-| State layer (JSON + SQLite + closed-schema JSONL with redact) | Done | [src/harness/state/](src/harness/state/) |
-| Adapter loader + path validation | Done | [src/harness/adapters/loader.py](src/harness/adapters/loader.py) |
+| Adapter schema (Pydantic v2) | Done | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
+| CLI verbs (Wave A) | Done — 13 verbs wired or with explicit pending messages | [src/harness/cli.py](src/harness/cli.py) |
+| Engine ABC + 3 concrete impls | Done | [src/harness/engines/](src/harness/engines/) |
+| Auto-fallback orchestrator | Done | [src/harness/engines/dispatcher.py](src/harness/engines/dispatcher.py) |
+| State layer (JSON + SQLite + JSONL+redact) | Done | [src/harness/state/](src/harness/state/) |
 | DPAPI secrets (Windows-only v0.x) | Done | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
-| Dashboard backend + frontend | **Pending Wave 3** | — |
-| Windows installer + first-run wizard | **Pending Wave 4** | — |
-| Templates + NL→YAML translator + visual config builder | **Pending Wave 5** | — |
+| **HarnessError taxonomy (Wave A.5)** | **Done** — L1-L5 levels × domain × code | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
+| **Operational raises retrofit (Wave A.6)** | **Done** — 4 raises in jsonl_log + dpapi | (in respective modules) |
+| Boundary tests + CI (Wave B) | Partial — CI live in [.github/workflows/test.yml](.github/workflows/test.yml); test files queued | (in flight) |
+| **Operator-modes config surface (Wave 7)** | **Spec done** — Kimi packet queued | [spec/operator-modes.md](spec/operator-modes.md) |
+| Dashboard (Wave 3), Installer (Wave 4), Templates+NL→YAML (Wave 5) | Planned | — |
+| Productized autonomous loops (Wave 6) | Planned — see [coord/dev_loop/](coord/dev_loop/) prototype | — |
 
-Smoke test that everything imports: `PYTHONPATH=src python -c "from harness import cli; print(sorted(cli.cli.commands.keys()))"`
+Smoke test: `PYTHONPATH=src python -c "from harness import cli; print(sorted(cli.cli.commands.keys()))"` — should list 13 verbs.
 
-## Where to look
+## Operator authority + escalation (load-bearing)
 
-- **Architecture specs**: [spec/v1-architecture.md](spec/v1-architecture.md) (technical skeleton, 411L), [spec/v1.1-operator-experience.md](spec/v1.1-operator-experience.md) (operator UX, 479L), [spec/v1.2-security-amendments.md](spec/v1.2-security-amendments.md) (drop-in security spec text for 11 HIGH + 14 MED audit findings, 582L)
-- **Accepted v0.x limitations**: [spec/ACCEPTED_LIMITATIONS.md](spec/ACCEPTED_LIMITATIONS.md) — 3 explicit gaps (chmod-on-Windows / rotation lock / broad-except) with resolution paths. Auditor protocol included.
-- **Security audits**: [security/audits/](security/audits/) — 7 audit reports from agents 1-7, all clean or amended.
-- **Dispatch packets**: [coord/packets/](coord/packets/) — every engine dispatch's packet preserved.
+Per operator directive 2026-05-20 ([feedback_xaxiu_harness_full_dev_authority](https://github.com/xaxiuegg/xaxiu-harness/) in memory):
 
-## Operator profile (load-bearing)
+- **Full dev authority** within xaxiu-harness scope. Commit, push, dispatch, install dependencies, modify code without per-action confirmation. Supersedes the prior 30 LOC ceiling **for this project only** — other projects (warehouse) still under [feedback_claude_strategic_role].
+- **Escalate to operator ONLY for L5 errors.** Definition in [reference_xaxiu_harness_error_taxonomy] — L5 = FATAL = operator action required (e.g. DPAPI unreadable, git auth lost). L1-L4 stay autonomous; the loop self-heals via cooldowns + auto-retry. The loop never globally halts on L5 — only the affected phase pauses with exponential backoff.
 
-Operator is **non-technical**: can edit YAML/run commands/manage Task Scheduler, **cannot** author Python/shell from scratch. Tools shipped TO operator must be no-code (YAML, GUI, NL). See memory `user_non_technical_role.md`.
+## Engine routing (read [coord/dev_loop/dispatch-rules.md](coord/dev_loop/dispatch-rules.md) for the full table)
 
-## Engine routing rules (per memory `feedback_engine_routing_2026_05_11.md`)
+- **swarm/kimi** (xaxiu-swarm wrapping Kimi-Code CLI subprocess) → agentic, applies in-place edits. Use for multi-file refactors, in-place edit packets.
+- **swarm/kimi-api** (xaxiu-swarm + Kimi REST) → non-agentic. Single text response to deliverable path. Use for FIND/REPLACE blocks or full-file output the integrating supervisor parses.
+- **swarm/deepseek** (xaxiu-swarm + DeepSeek REST) → non-agentic. Same as kimi-api. V-file-spanning, math/schema-correctness, novel-feature drafting. Pair with `--no-thinking` for surgical patches.
+- **Never** dispatch to `--backend claude`; never use Claude Agent sub-agents for ship-gate audits ([feedback_no_claude_swarm_worker]).
+- **Multi-packet dispatch**: prefer `xaxiu-swarm swarm --max-concurrent N packet1 packet2 ...` over N separate `dispatch` calls.
+- **Mandatory flags**: `--timeout 420+` (swarm/kimi), `--deliverable`, `--add-dir`, `--context-file CLAUDE.md`, `--progress 30`.
+- **Cooldowns**: on any engine failure, set 60min cooldown for swarm/kimi, 15-30min for non-agentic backends. Fall back to alternate engine, don't retry the same one until cooldown lifts.
 
-- **Kimi-first** for non-V-file tasks (subscription cost, surgical patches reliable)
-- **DeepSeek** for V-file-spanning + math + structured code generation (1M context window, schema correctness)
-- **Claude in-session only** — never as swarm worker
-- Default DeepSeek model: `deepseek-v4-flash` (5× cheaper than v4-pro)
-- Dispatch tool: `xaxiu-swarm dispatch --backend <name> --model <model> --deliverable <path> --context-file <ctx> <packet.md>` (note: this IS the predecessor tool — xaxiu-harness itself isn't installed yet)
-- **Never echo env-var values** — `[ -n "$VAR" ] && echo SET`, never `${VAR:+SET}`
+## Parallelism + slot-filling
 
-## Claude operating role (inherited from warehouse role)
+- **Supervisors run in parallel** where their write-sets don't intersect. See [coord/dev_loop/manager.md](coord/dev_loop/manager.md) for the conflict-detection rules.
+- **Engine slot policy**: keep `swarm/kimi` slots full (subscription cost) per [coord/dev_loop/dispatch-rules.md]. `swarm/deepseek` stays idle unless needed (per-API cost).
+- **Wave-splitting**: when a wave touches N independent modules, split into N packets, fan out via `xaxiu-swarm swarm --max-concurrent N`.
+- **When uncertain → deploy more Kimi.** Dispatch 2-3 packets with alternative framings rather than agonizing alone.
 
-Direct authorship limited to 7 classes: chat / spec docs / packet drafts / validation runs / merge ops / summaries / memory writes. Hard ceiling: 30 LOC code, 80 LOC doc per artifact. Everything else dispatches to Kimi (Python scaffolding) or DeepSeek (V-file or schema correctness).
+## Dev loop (autonomous)
 
-## Wave 3 candidates (operator to pick)
+[coord/dev_loop/](coord/dev_loop/) is the prototype autonomous loop driving this project. Shared state in `state.json`. Four supervisors (creativity/developing/testing/integrating) per [supervisors/](coord/dev_loop/supervisors/). Manager logic in `manager.md`. Engine routing rules in `dispatch-rules.md`. Currently runs as in-session ScheduleWakeup ticks; will run via `bin/register-dev-loop-task.ps1` (Windows Task Scheduler) when operator activates persistent mode.
 
-1. Dashboard backend + frontend (FastAPI + WebSocket + Satisfactory-themed HTML/CSS/JS)
-2. Templates + NL→YAML translator + visual config builder
-3. Windows installer + first-run wizard
+## Memory entries this session inherits
+
+Load these from `~/.claude/projects/D--Projects/memory/` (operator's Claude memory) at session start:
+
+- `feedback_xaxiu_harness_full_dev_authority` — authority + escalation rule
+- `reference_xaxiu_harness_error_taxonomy` — L1-L5 + domain + code scheme
+- `feedback_xaxiu_swarm_backend_agentic_differences` — swarm/kimi vs api backends
+- `feedback_operator_inputs_become_harness_config` — Wave 7 origin + uncertainty rule
+- `user_non_technical_role` — operator profile (still applies for end-user-facing tools)
+- `feedback_multi_session_scoping` — don't cross into warehouse
 
 ## Session discipline
 
-- DeepSeek wraps outputs in ` ```python `/` ```markdown ` fences — strip before commit
-- Every Wave landing → spawn security audit agent before commit
-- All audit findings → fix inline OR document in `ACCEPTED_LIMITATIONS.md` with resolution path
-- Use TodoWrite for multi-step work
-- Don't touch warehouse files or STATUS.csv from this session
+- DeepSeek and api-backend Kimi output via `--deliverable` path; integrating supervisor parses and applies.
+- Every wave landing → tests must remain green; CI on GitHub Actions gates regressions.
+- Cooldowns are operational rules, not punishments — respect them; do other work meanwhile.
+- Don't touch warehouse files or its STATUS.csv from this session.
