@@ -244,7 +244,10 @@
       "depends_on": [
         "wave-A",
         "wave-B"
-      ]
+      ],
+      "spec_ready": "spec/wave-4-installer.md",
+      "packet_ready": "coord/packets/2026-05-20-wave4-installer/packet.md",
+      "awaiting": "Wave B/1 + B/2 to complete (frees swarm/kimi slot); ideally also Wave 7 for operator-mode wizard prompt"
     },
     {
       "id": "wave-5",
