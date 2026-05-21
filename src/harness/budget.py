@@ -26,11 +26,17 @@ DEFAULT_LEDGER_PATH: Final = Path("coord/dev_loop/budget_ledger.jsonl")
 DEFAULT_CAP_PATH: Final = Path("coord/dev_loop/budget_cap.json")
 
 PRICING_USD_PER_M_TOKENS: Final[dict[str, dict[str, float]]] = {
-    "kimi":         {"input": 0.0,  "output": 0.0},
-    "kimi-api":     {"input": 0.15, "output": 2.50},
-    "deepseek":     {"input": 0.27, "output": 1.10},
-    "deepseek-pro": {"input": 0.55, "output": 2.19},
-    "anthropic":    {"input": 3.00, "output": 15.00},
+    # input, output (USD per 1M tokens) — approximate published rates as of
+    # v0.4.1 (2026-05-21). Vendors update frequently; verify before relying
+    # on absolute totals. Operator overrides via HARNESS_BUDGET_PRICING_JSON.
+    "kimi":            {"input": 0.0,   "output": 0.0},    # subscription
+    "kimi-api":        {"input": 0.15,  "output": 2.50},   # Moonshot K2
+    "deepseek":        {"input": 0.27,  "output": 1.10},   # DeepSeek v4-flash
+    "deepseek-pro":    {"input": 0.55,  "output": 2.19},   # DeepSeek v4-pro
+    "anthropic":       {"input": 3.00,  "output": 15.00},  # Claude Sonnet
+    "anthropic-opus":  {"input": 15.0,  "output": 75.0},   # Claude Opus
+    "gemini":          {"input": 0.075, "output": 0.30},   # Gemini 2.0 Flash
+    "gemini-pro":      {"input": 1.25,  "output": 5.00},   # Gemini 2.5 Pro
 }
 
 # ---------------------------------------------------------------------------

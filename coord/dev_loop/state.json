@@ -334,15 +334,20 @@
     {
       "id": "wave-3",
       "name": "dashboard backend + frontend (FastAPI + WebSocket)",
-      "status": "planned",
+      "status": "done",
       "depends_on": [
         "wave-4"
-      ]
+      ],
+      "completed_at": "2026-05-21T03:35:00Z",
+      "completion_note": "Shipped Round 5 via Kimi clean exit (biatdaadg); 9 files (cli wiring + dashboard module + static + tests); 15 tests; commit 71225ad."
     },
     {
       "id": "wave-6",
       "name": "autonomous loops as harness feature (productize dev_loop pattern)",
-      "status": "planned",
+      "status": "done",
+      "completed_at": "2026-05-21T04:18:00Z",
+      "completion_note": "Shipped via Wave 6/A (loops core; commit a7ef925) + 6/B (CLI + scheduler; inline) + 6/C (real supervisors; commit d25db4d). harness loop init/tick/start/stop/status all operational. CreativitySupervisor/DevelopingSupervisor/IntegratingSupervisor/ProcessImprovementSupervisor + TestingSupervisor all real per Wave 6/C.",
+      "ignored": "planned-status-line-below-historical",
       "depends_on": [
         "wave-3",
         "wave-5"
