@@ -66,13 +66,22 @@ def test_count_zero_when_all_shipped(tmp_path: Path) -> None:
 
 
 def test_creativity_log_missing_returns_false(tmp_path: Path) -> None:
-    assert _creativity_recently_fired(tmp_path / "nope.jsonl") is False
+    # Override BOTH log_path AND status_csv to point at the empty tmp dir
+    # so the live STATUS.csv-mtime fallback doesn't fire.
+    assert _creativity_recently_fired(
+        log_path=tmp_path / "nope.jsonl",
+        status_csv=tmp_path / "nope-status.csv",
+    ) is False
 
 
 def test_creativity_log_fresh_returns_true(tmp_path: Path) -> None:
     log = tmp_path / "log.jsonl"
     log.write_text("any text\n", encoding="utf-8")
-    assert _creativity_recently_fired(log, window_seconds=3600) is True
+    assert _creativity_recently_fired(
+        log_path=log,
+        window_seconds=3600,
+        status_csv=tmp_path / "nope-status.csv",
+    ) is True
 
 
 def test_creativity_log_old_returns_false(tmp_path: Path) -> None:
@@ -81,7 +90,21 @@ def test_creativity_log_old_returns_false(tmp_path: Path) -> None:
     log.write_text("old\n", encoding="utf-8")
     old = time.time() - 7200  # 2h ago
     os.utime(log, (old, old))
-    assert _creativity_recently_fired(log, window_seconds=3600) is False
+    assert _creativity_recently_fired(
+        log_path=log,
+        window_seconds=3600,
+        status_csv=tmp_path / "nope-status.csv",
+    ) is False
+
+
+def test_creativity_status_csv_fresh_returns_true(tmp_path: Path) -> None:
+    """STATUS.csv-mtime fallback fires when log.jsonl is missing/old."""
+    status = tmp_path / "STATUS.csv"
+    status.write_text("ID,Category\n", encoding="utf-8")
+    assert _creativity_recently_fired(
+        log_path=tmp_path / "nope.jsonl",
+        status_csv=status,
+    ) is True
 
 
 # ---------------------------------------------------------------------------
@@ -124,13 +147,18 @@ def test_ok_to_stop_says_yes_on_operator_flag(monkeypatch, tmp_path: Path) -> No
 
 
 def test_ok_to_stop_says_no_when_empty_backlog_but_no_creativity(monkeypatch, tmp_path: Path) -> None:
-    """0 queued AND no recent creativity ⇒ NOT-YET (must fire creativity first)."""
+    """0 queued AND no recent activity (STATUS.csv + log both old) ⇒ NOT-YET."""
+    import os
     monkeypatch.chdir(tmp_path)
     coord = tmp_path / "coord"
     coord.mkdir()
     _write_status_csv(coord, [
         {"ID": "A", "Category": "Production", "Title": "t", "Status": "shipped"},
     ])
+    # Force STATUS.csv mtime far in the past so the freshness fallback
+    # does NOT trigger.  This isolates the "no creativity" branch.
+    old = time.time() - 7200
+    os.utime(coord / "STATUS.csv", (old, old))
     with patch("harness.session.stop_check._session_handoff_recommendation",
                return_value="NONE"):
         ok, reason = ok_to_stop()

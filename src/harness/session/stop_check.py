@@ -74,20 +74,42 @@ def _count_queued_production_rows(csv_path: Path = _STATUS_CSV) -> int:
 def _creativity_recently_fired(
     log_path: Path = _CREATIVITY_LOG,
     window_seconds: int = _CREATIVITY_WINDOW_SECONDS,
+    status_csv: Path | None = None,
 ) -> bool:
-    """Return True if any dev_loop log entry within *window_seconds* mentions creativity."""
-    if not log_path.exists():
-        return False
+    """Return True if creativity supervisor appears to have run within *window_seconds*.
+
+    Robust signal — checks BOTH:
+    1. dev_loop/log.jsonl recently modified (productized loop creativity), OR
+    2. STATUS.csv was modified within the window (interactive Agent-tool
+       creativity invocations write new rows to STATUS.csv directly).
+
+    Either path counts.  We need only one positive signal so the gate
+    doesn't issue false negatives during interactive sessions where
+    creativity is fired via Agent rather than the dev-loop runner.
+
+    *status_csv* is parameterized for testability — leave at default
+    (None → live STATUS.csv) in production.
+    """
+    # Path 1: dev_loop log mtime
     try:
-        mtime = log_path.stat().st_mtime
+        if log_path.exists():
+            age = time.time() - log_path.stat().st_mtime
+            if age <= window_seconds:
+                return True
     except OSError:
-        return False
-    age = time.time() - mtime
-    if age > window_seconds:
-        return False
-    # File modified recently — assume something was logged.  The
-    # creativity supervisor writes its dispatches via this same path.
-    return True
+        pass
+
+    # Path 2: STATUS.csv was modified within the window
+    status_csv = status_csv if status_csv is not None else _STATUS_CSV
+    try:
+        if status_csv.exists():
+            age = time.time() - status_csv.stat().st_mtime
+            if age <= window_seconds:
+                return True
+    except OSError:
+        pass
+
+    return False
 
 
 def _session_handoff_recommendation() -> str:

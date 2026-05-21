@@ -675,6 +675,42 @@ def panic_dump_cmd(target_dir: Path | None) -> None:
     click.echo(f"size: {p.stat().st_size} bytes")
 
 
+@cli.command(name="swarm-verify")
+@click.option("--expect-edits-in", "expect_paths", multiple=True, required=True,
+              help="Path(s) expected to be mutated by the last swarm.")
+@click.option("--run-id", default=None,
+              help="Swarm run_id (defaults to latest under .swarm/runs/).")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty")
+def swarm_verify_cmd(expect_paths: tuple[str, ...], run_id: str | None, fmt: str) -> None:
+    """Verify the last (or named) swarm actually wrote the expected paths.
+
+    Exits 0 only when EVERY expected path has status='mutated'.  Closes
+    the 'Kimi timeout coexists with landed edits' gap.
+    """
+    import dataclasses
+    from harness.swarm_verify import verify_landings, summarize
+
+    results = verify_landings(list(expect_paths), run_id=run_id)
+    summary = summarize(results)
+    all_landed = summary["mutated"] == len(results) and summary["unmutated"] == 0 and summary["not_in_diff"] == 0
+
+    if fmt == "json":
+        click.echo(json.dumps({
+            "all_landed": all_landed,
+            "summary": summary,
+            "results": [dataclasses.asdict(r) for r in results],
+        }, indent=2))
+    else:
+        click.echo(f"summary: {summary}  (all_landed={all_landed})")
+        for r in results:
+            click.echo(
+                f"  {r.status:<14} {r.expected_path}  "
+                f"worker={r.worker_id or '-'} swarm_status={r.swarm_status or '-'}"
+            )
+    sys.exit(0 if all_landed else 1)
+
+
 @cli.command()
 @click.option("--project", "-p", help="Project name.")
 @click.option("--add", help="Add loop: NAME::COMMAND::CRON")
