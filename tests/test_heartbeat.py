@@ -154,6 +154,128 @@ class TestFormat:
         assert "STALE" in s
 
 
+class TestEdgeCases:
+    # _age_seconds
+
+    def test_age_seconds_microsecond_iso(self) -> None:
+        now = datetime(2026, 5, 21, 2, 0, 0, tzinfo=timezone.utc)
+        beat = Heartbeat(
+            pulsed_at="2026-05-21T01:00:00.123456Z",
+            tick_count=1,
+            loop_status="armed",
+            active_dispatches=0,
+            in_flight_kimi=0,
+            in_flight_deepseek=0,
+        )
+        age = hb._age_seconds(beat, now=now)
+        assert 3599 < age < 3601
+
+    def test_age_seconds_offset_aware_iso(self) -> None:
+        now = datetime(2026, 5, 21, 2, 0, 0, tzinfo=timezone.utc)
+        beat = Heartbeat(
+            pulsed_at="2026-05-21T01:00:00+00:00",
+            tick_count=1,
+            loop_status="armed",
+            active_dispatches=0,
+            in_flight_kimi=0,
+            in_flight_deepseek=0,
+        )
+        age = hb._age_seconds(beat, now=now)
+        assert age == 3600.0
+
+    def test_age_seconds_malformed_raises(self) -> None:
+        beat = Heartbeat(
+            pulsed_at="2026-05-21T01:00:00Z",  # valid baseline
+            tick_count=1,
+            loop_status="armed",
+            active_dispatches=0,
+            in_flight_kimi=0,
+            in_flight_deepseek=0,
+        )
+        # mutate after construction to bypass pydantic regex
+        beat.pulsed_at = "not-an-iso"
+        with pytest.raises(ValueError):
+            hb._age_seconds(beat)
+
+    # _safe_int
+
+    def test_safe_int_none_returns_zero(self) -> None:
+        assert hb._safe_int(None) == 0
+
+    def test_safe_int_non_numeric_string_returns_zero(self) -> None:
+        assert hb._safe_int("abc") == 0
+
+    def test_safe_int_float_truncates(self) -> None:
+        assert hb._safe_int(3.14) == 3
+
+    # _engine_inflight
+
+    def test_engine_inflight_missing_engine_slots(self) -> None:
+        assert hb._engine_inflight({}, "kimi") == 0
+
+    def test_engine_inflight_non_dict_slot(self) -> None:
+        assert hb._engine_inflight({"engine_slots": {"kimi": "bad"}}, "kimi") == 0
+
+    def test_engine_inflight_inflight_string(self) -> None:
+        assert (
+            hb._engine_inflight(
+                {"engine_slots": {"kimi": {"in_flight": "x"}}}, "kimi"
+            )
+            == 0
+        )
+
+    # _last_escalation_id
+
+    def test_last_escalation_id_empty(self) -> None:
+        assert hb._last_escalation_id({"escalations": []}) is None
+
+    def test_last_escalation_id_non_dict_entry(self) -> None:
+        assert hb._last_escalation_id({"escalations": ["bad"]}) is None
+
+    # pulse with minimal state
+
+    def test_pulse_missing_optional_fields(self, tmp_path: Path) -> None:
+        p = tmp_path / "state.json"
+        p.write_text("{}", encoding="utf-8")
+        out = tmp_path / "heartbeat.json"
+        beat = pulse(state_path=p, heartbeat_path=out)
+        assert beat.tick_count == 0
+        assert beat.loop_status == "unknown"
+        assert beat.active_dispatches == 0
+        assert beat.in_flight_kimi == 0
+        assert beat.in_flight_deepseek == 0
+        assert beat.phase_statuses == {}
+        assert beat.last_escalation_id is None
+
+    # format_for_human stale semantics
+
+    def test_format_stale_after_zero_always_stale(self) -> None:
+        now = datetime.now(timezone.utc)
+        beat = Heartbeat(
+            pulsed_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            tick_count=1,
+            loop_status="armed",
+            active_dispatches=0,
+            in_flight_kimi=0,
+            in_flight_deepseek=0,
+        )
+        s = format_for_human(beat, now=now, stale_after_seconds=0)
+        assert "STALE" in s
+
+    def test_format_exact_boundary_not_stale(self) -> None:
+        now = datetime(2026, 5, 21, 12, 0, 0, tzinfo=timezone.utc)
+        beat = Heartbeat(
+            pulsed_at="2026-05-21T11:59:00Z",
+            tick_count=1,
+            loop_status="armed",
+            active_dispatches=0,
+            in_flight_kimi=0,
+            in_flight_deepseek=0,
+        )
+        s = format_for_human(beat, now=now, stale_after_seconds=60)
+        assert "STALE" not in s
+
+
 class TestCLI:
     def test_heartbeat_help(self) -> None:
         from harness.cli import cli

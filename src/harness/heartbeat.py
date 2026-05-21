@@ -61,7 +61,9 @@ def _safe_int(value: Any) -> int:
 
 def _engine_inflight(state: dict[str, Any], engine: str) -> int:
     slots = state.get("engine_slots") or {}
-    block = slots.get(engine) or {}
+    block = slots.get(engine)
+    if not isinstance(block, dict):
+        block = {}
     in_flight = block.get("in_flight") or []
     return len(in_flight) if isinstance(in_flight, list) else 0
 
