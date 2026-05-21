@@ -75,7 +75,11 @@ class TestCheck:
         assert not HANDOFF_CRITICAL.exists()
         assert not HANDOFF_RECOMMENDED.exists()
 
-    def test_soft_writes_recommended(self) -> None:
+    def test_soft_does_not_write_handoff(self) -> None:
+        """Per operator directive 2026-05-21: SOFT is informational only.
+
+        Only STRONGLY ("Heavy") and CRITICAL produce a handoff_*.md file.
+        """
         with patch("harness.session.monitor.collect_signals") as m_sig:
             m_sig.return_value = Signals(
                 session_age_hours=5.0,
@@ -88,9 +92,32 @@ class TestCheck:
                 cpu_pct=0.0,
                 disk_pct_free=100.0,
                 jsonl_log_mb=0.0,
+                claude_session_jsonl_mb=0.0,
             )
             report = check()
         assert report.recommendation == Recommendation.SOFT
+        assert report.handoff_file_written is False
+        assert not HANDOFF_RECOMMENDED.exists()
+        assert not HANDOFF_CRITICAL.exists()
+
+    def test_strongly_writes_recommended(self) -> None:
+        """STRONGLY ("Heavy") fires handoff_recommended.md."""
+        with patch("harness.session.monitor.collect_signals") as m_sig:
+            m_sig.return_value = Signals(
+                session_age_hours=1.0,
+                tick_count=0,
+                active_dispatch_count=0,
+                commits_since_session=0,
+                status_csv_row_count=0,
+                mem_pct=0.0,
+                claude_rss_mb=0,
+                cpu_pct=0.0,
+                disk_pct_free=100.0,
+                jsonl_log_mb=0.0,
+                claude_session_jsonl_mb=20.0,  # >= 18MB heavy threshold
+            )
+            report = check()
+        assert report.recommendation == Recommendation.STRONGLY
         assert report.handoff_file_written is True
         assert HANDOFF_RECOMMENDED.exists()
         assert not HANDOFF_CRITICAL.exists()

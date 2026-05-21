@@ -21,15 +21,18 @@ The operator has granted full dev authority (`feedback_xaxiu_harness_full_dev_au
 
 0.5. **Session-health check (after observer flag check, before state read).**
    - Run `harness session check --quiet` and capture the recommendation.
-   - `none` → continue tick normally.
-   - `soft` → append a one-line note at the END of the tick reply:
-     `note: session-handoff SOFT — consider `harness session bootstrap` when convenient`.
-   - `strongly` → open the tick reply with a banner at the TOP:
-     `🟡 session-handoff STRONGLY recommended — see coord/dev_loop/handoff_recommended.md`.
+   - `none` or `soft` → continue tick normally. Session is healthy; SOFT is
+     informational only (logged in coord/dev_loop/log.jsonl). **Do NOT suggest
+     handoff at SOFT** (operator directive 2026-05-21).
+   - `strongly` ("Heavy") → open the tick reply with a banner at the TOP:
+     `🟡 session-handoff STRONGLY recommended (Heavy) — see coord/dev_loop/handoff_recommended.md`.
      Continue tick work but flag every subsequent reply until operator acks via `harness session ack`.
    - `critical` → REPLACE the tick reply with the crash warning + auto-write
      `coord/dev_loop/handoff_CRITICAL.md` + halt all further dispatches until the
      operator acks. This is an L5-equivalent for the session layer.
+   - Calibrated thresholds for the primary signal `claude_session_jsonl_mb`
+     (Claude Code per-session transcript): SOFT ≥ 8MB · STRONGLY ≥ 18MB ·
+     CRITICAL ≥ 35MB. (Operator's historic crash size: 52MB.)
 
 1. **Read `coord/dev_loop/state.json`.**
 2. **Check `loop_status`.** If anything other than `"armed"`, append a "skipped" entry to `coord/dev_loop/log.jsonl` and exit. Do not act.

@@ -53,16 +53,22 @@ def _write_handoff_file(path: Path, rec: Recommendation, reasons: list[str], sig
 
 
 def check() -> CheckReport:
-    """Run one health check, write flag files if warranted, and return the report."""
+    """Run one health check, write flag files if warranted, and return the report.
+
+    Per operator directive 2026-05-21: ONLY STRONGLY ("Heavy") and CRITICAL
+    produce handoff_*.md files. SOFT is informational only — session is
+    still healthy at SOFT, no handoff suggested.
+    """
     signals = collect_signals()
     rec, reasons = recommend(signals)
     handoff_written = False
     if rec == Recommendation.CRITICAL:
         _write_handoff_file(HANDOFF_CRITICAL, rec, reasons, signals)
         handoff_written = True
-    elif rec in (Recommendation.STRONGLY, Recommendation.SOFT):
+    elif rec == Recommendation.STRONGLY:
         _write_handoff_file(HANDOFF_RECOMMENDED, rec, reasons, signals)
         handoff_written = True
+    # SOFT explicitly skipped — no handoff file (operator directive 2026-05-21)
     return CheckReport(
         timestamp=datetime.now(timezone.utc).isoformat(),
         signals=signals,
