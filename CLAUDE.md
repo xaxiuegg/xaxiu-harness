@@ -19,9 +19,13 @@ You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM
 | Wave 4 — Windows installer | Done | [bin/install-harness.ps1](bin/install-harness.ps1) |
 | **STATUS tracker primitive (#19, Wave 5.5)** | **Done** — `harness status` group, atomic writes, dispatcher hooks | [src/harness/status/](src/harness/status/), [spec/status-tracker.md](spec/status-tracker.md) |
 | **Observer primitive (#20, Wave 5.6)** | **In flight** — bq1ydqn3l (2026-05-21T00:52Z) | [spec/observer.md](spec/observer.md) |
-| Wave 5 — Templates + NL→YAML | Queued | [coord/packets/2026-05-20-wave5A-template-refresh/](coord/packets/2026-05-20-wave5A-template-refresh/), [coord/packets/2026-05-20-wave5B-nl-to-yaml/](coord/packets/2026-05-20-wave5B-nl-to-yaml/) |
-| Wave 3 — Dashboard | Planned | — |
-| Wave 6 — Productize autonomous loops | Planned | [coord/dev_loop/](coord/dev_loop/) prototype |
+| Wave 5/A — Templates with operator: section | Done | [adapters/templates/](adapters/templates/) (6 templates) |
+| Wave 5/B — NL→YAML translator + `harness adapter` group | Done | [src/harness/adapters/from_description.py](src/harness/adapters/from_description.py), [src/harness/adapters/templates/_nl_to_yaml_prompt.md](src/harness/adapters/templates/_nl_to_yaml_prompt.md) |
+| HEARTBEAT — passive liveness | Done | [src/harness/heartbeat.py](src/harness/heartbeat.py); `harness heartbeat pulse/show` |
+| STATE-INSPECT — operator-readable state printer | Done | [src/harness/state/inspect.py](src/harness/state/inspect.py); `harness state inspect --format pretty/json/compact` |
+| **Wave 3 — Dashboard (FastAPI + WebSocket)** | **Done** | [src/harness/dashboard/](src/harness/dashboard/); `harness dashboard-serve --port 7878` |
+| **Wave 6/A — Loops core (productize coord/dev_loop/)** | **Done** | [src/harness/loops/](src/harness/loops/): state.py + runner.py + supervisors.py |
+| **Wave 6/B — Loop CLI + Task Scheduler** | **Done** | `harness loop init/tick/start/stop/status`; [src/harness/loops/scheduler.py](src/harness/loops/scheduler.py) |
 
 Smoke test: `PYTHONPATH=src python -c "from harness import cli; print(sorted(cli.cli.commands.keys()))"` — should list 13 verbs; `cli.cli.commands['status'].commands` should list `add init list report summary update verify`.
 
