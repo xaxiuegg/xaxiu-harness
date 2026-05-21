@@ -134,6 +134,10 @@ def classify_response(
         An :class:`EngineResponse` with a more-specific ``error`` field
         when a known failure mode is detected.
     """
+    # Rule 0 — MockEngine is deterministic; never re-label.
+    if backend == "mock":
+        return response
+
     # Rule 1 — DeepSeek v4-flash packet trap
     if (
         backend == "deepseek"

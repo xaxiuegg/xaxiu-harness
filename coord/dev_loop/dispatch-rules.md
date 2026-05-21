@@ -23,13 +23,15 @@ Never:
 
 | Backend | Packet shape | Minimum `--timeout` | Retry on timeout |
 |---|---|---|---|
-| `swarm/kimi` | Single-file surgical (≤40 LOC delta) | 420 | Fall back to `swarm/deepseek` (revise to FIND/REPLACE); no `swarm/kimi` retry within 60min |
+| `swarm/kimi` | Single-file surgical (≤40 LOC delta) | 420 | Fall back to `swarm/kimi-api` or `swarm/deepseek` immediately (per `[[reference_xaxiu_swarm_concurrency_calibration]]`); same-engine retry blocked 60min via `state.json::engine_cooldowns[swarm/kimi]` |
 | `swarm/kimi` | Multi-file refactor / new module (≥200 LOC delta) | **1200** | Same fallback; partial files that landed BEFORE timeout per `[[feedback_kimi_cli_incremental_edits]]` are kept — re-dispatch only the unfinished portion |
 | `swarm/kimi-api` | Single-file (NON-agentic; produces FIND/REPLACE response) | 420 | Same fallback rule |
-| `swarm/deepseek` v4-flash | Single-file surgical | 600 | Fall back to v4-pro if recoverable, else `swarm/kimi` after cooldown |
+| `swarm/deepseek` v4-flash | Single-file surgical | 600 | Fall back to v4-pro if recoverable, else `swarm/kimi` immediately (cooldown gates only same engine) |
 | `swarm/deepseek` v4-pro | Complex / V-file / math | 1200 | Fall back to `swarm/kimi`; escalate L5 if both fail |
 
-**Key insight:** a swarm-reported "timeout" on `swarm/kimi` does NOT mean nothing landed. Always run `bin/parse-swarm-status.py <output> --expect-edits-in <paths>` (or check `git diff` directly) to see actual file state before deciding retry vs partial-success. See [[feedback_kimi_cli_incremental_edits]] in memory.
+**Fallback ≠ retry.** Cooldown blocks the SAME engine from being re-dispatched; switching to an alternate engine is immediate (no delay). Observed warehouse policy `engine_slots.*.fill_policy = immediate_fallback`. Re-dispatching the engine that just timed out without cooldown is the failure mode this rule prevents.
+
+**Key insight:** a swarm-reported "timeout" on `swarm/kimi` does NOT mean nothing landed. Empirically 9/29 = 31% of recent workers in this project (last 18 runs) tagged timeout while writes landed via incremental Edit/Write. Always run `bin/parse-swarm-status.py <output> --expect-edits-in <paths>` (or check `git diff` directly) to see actual file state before deciding retry vs partial-success. See [[feedback_kimi_cli_incremental_edits]] in memory.
 
 Cooldown state lives in `state.json::engine_cooldowns[<engine>]`:
 ```json
@@ -85,9 +87,11 @@ From warehouse `dev-panel-runs/.../observer/daily/`:
 
 | Engine | max_parallel | fill_policy | Why |
 |---|---|---|---|
-| `swarm/kimi` (xaxiu-swarm wrapping Kimi-Code CLI subprocess) | 3 | aggressive | Subscription-cost; cheap to keep busy |
-| `kimi-api` (REST) | 2 | aggressive_overflow | Same provider but different transport; use when CLI slots full and task is REST-friendly (no shell tool use needed) |
-| `deepseek` (v4-flash/pro) | 1 | on_demand | Per-API cost; only dispatch when task needs DeepSeek's strengths |
+| `swarm/kimi` (xaxiu-swarm wrapping Kimi-Code CLI subprocess) | 6 | aggressive | Subscription-cost; cheap to keep busy. Empirical ceiling from warehouse calibration 2026-05-20 (`reference_xaxiu_swarm_concurrency_calibration`). |
+| `swarm/kimi-api` (REST) | 6 (up to 18 with 3-key pool) | aggressive_overflow | Same provider, different transport; use when CLI slots full and task is REST-friendly. 3-key pool × 6 = 18 confirmed. |
+| `swarm/deepseek` (v4-flash/pro) | 1 | on_demand | Per-API cost; only dispatch when task needs DeepSeek's strengths. |
+
+Defaults live in `src/harness/operator/modes.py::DEFAULT_ENGINE_SLOTS` — adapter YAML overrides via `operator.engine_slots`.
 
 After supervisors return diffs in a tick, the manager runs slot-fill (see `coord/dev_loop/manager.md` slot-filling section):
 1. Count `engine_slots.kimi.in_flight`. If `< max_parallel`, find queued waves with deps met whose file scopes don't overlap any in-flight dispatch. Dispatch each via `xaxiu-swarm dispatch --backend kimi ...` (or `xaxiu-swarm swarm` for a batch).

@@ -50,13 +50,14 @@ operator:
     testing: swarm/kimi
     integrating: claude-in-session
   engine_slots:
-    swarm/kimi: 3
-    swarm/kimi-api: 2
+    swarm/kimi: 6                    # warehouse-calibrated ceiling (2026-05-20)
+    swarm/kimi-api: 6                # up to 18 with 3-key pool
     swarm/deepseek: 1
-  notifications:
-    method: file                     # file | windows_toast | email
-    target: coord/dev_loop/escalations.md
+  notification_method: file          # file | windows_toast | email
+  notification_target: coord/dev_loop/escalations.md
 ```
+
+> Schema note: notification fields are FLAT on `OperatorSection` (`notification_method` + `notification_target`), not nested under `notifications:`. Defaults baked into `src/harness/operator/modes.py::DEFAULT_ENGINE_SLOTS`.
 
 ## Module layout (`src/harness/operator/`)
 

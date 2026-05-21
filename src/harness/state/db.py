@@ -330,7 +330,7 @@ def query_recent_events(limit: int = 50) -> list[dict]:
     Each row carries a ``_table`` key so the caller can distinguish sources.
     """
     limit = _clamp_limit(limit)
-    sql = f"""
+    sql = """
     SELECT 'dispatch' AS _table, id AS event_id, created_at AS ts, project, backend, status
       FROM dispatches
      UNION ALL

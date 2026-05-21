@@ -348,8 +348,6 @@ read_secret = decrypt_secret
 
 
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) >= 3 and sys.argv[1] == "set":
         _cli_set(sys.argv[2])
         sys.exit(0)

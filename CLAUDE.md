@@ -32,9 +32,9 @@ You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM
 | v2/A — Stateful 4-key proxy + circuit breaker | [src/harness/proxy/](src/harness/proxy/) |
 | v2/B — Coord schemas (WavePlan/WorkerTask/...) + Planner | [src/harness/coord/schemas.py](src/harness/coord/schemas.py), [src/harness/coord/planner.py](src/harness/coord/planner.py) |
 | v2/C — Worker + worktree + checkpoint | [src/harness/coord/worker.py](src/harness/coord/worker.py), [src/harness/coord/worktree.py](src/harness/coord/worktree.py), [src/harness/coord/checkpoint.py](src/harness/coord/checkpoint.py) |
-| v2/D — Coordinator + Integrator + `harness coord` CLI | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py) |
+| v2/D — Coordinator + Integrator + `harness coord` CLI (6 subcommands: plan/run/work/integrate/status/cleanup) | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py) |
 
-Smoke test (22 verbs, 9 groups): `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
+Smoke test (22 verbs, 10 groups with subcommands): `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
 Tests: 711/712 green (1 known Windows-concurrency flake in test_state_files).
 
 ## Operator authority + escalation (load-bearing)

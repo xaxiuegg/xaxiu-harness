@@ -48,7 +48,7 @@ harness <verb> --help
 | `adapter` | `from-description`, `list`, `validate` | Create or check project adapters (YAML configs that tell harness how to talk to each project). |
 | `budget` | `show`, `summary`, `set-cap`, `reset` | Track spending per engine and set monthly spending limits. |
 | `burst` | — | Temporarily send all traffic to one engine for a set number of minutes. |
-| `coord` | `plan`, `run`, `work`, `integrate`, `status` | Run the multi-agent coordinator: plan a wave, run workers, merge results. |
+| `coord` | `plan`, `run`, `work`, `integrate`, `status`, `cleanup` | Run the multi-agent coordinator: plan a wave, run workers, merge results, GC stale worktrees. |
 | `dashboard-serve` | — | Launch the operator web dashboard (default port 7878). |
 | `dispatch` | — | Send a work packet to an engine; auto-routes if you do not pick one. |
 | `engines` | — | List engines or check which ones are healthy. |

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash D:/Projects/xaxiu-harness/.claude/hooks/check-csv-on-commit.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash D:/Projects/xaxiu-harness/.claude/hooks/check-csv-stale.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

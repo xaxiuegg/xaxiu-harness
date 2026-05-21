@@ -204,3 +204,36 @@ def test_atomic_append_opens_in_ab_mode(tmp_path):
         )
 
     assert "ab" in captured_modes
+
+
+# ---------------------------------------------------------------------------
+# 10. read_recent_entries — observability primitive for dashboard + supervisors
+# ---------------------------------------------------------------------------
+
+def test_read_recent_entries_newest_first_with_limit_and_skips_blanks(tmp_path):
+    """read_recent_entries must: return [] when file absent, skip blank/garbage
+    lines, return newest-first, and clamp limit. Used by dashboard + supervisors."""
+    # File absent -> []
+    assert jsonl_log.read_recent_entries() == []
+
+    # Write 3 valid entries (oldest -> newest) plus blanks and a garbage line.
+    log_file = tmp_path / jsonl_log.LOG_FILE_NAME
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps({"timestamp": "t1", "backend": "kimi", "outcome": "success"}),
+        "",  # blank — should be skipped
+        "not-json{",  # garbage — should be skipped
+        json.dumps({"timestamp": "t2", "backend": "deepseek", "outcome": "success"}),
+        json.dumps({"timestamp": "t3", "backend": "kimi", "outcome": "fail"}),
+    ]
+    log_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Default limit returns all 3 valid, newest-first.
+    out = jsonl_log.read_recent_entries()
+    assert [e["timestamp"] for e in out] == ["t3", "t2", "t1"]
+
+    # limit=1 returns only newest.
+    assert [e["timestamp"] for e in jsonl_log.read_recent_entries(limit=1)] == ["t3"]
+
+    # limit=0 clamps to >=1 (one entry, newest).
+    assert len(jsonl_log.read_recent_entries(limit=0)) == 1

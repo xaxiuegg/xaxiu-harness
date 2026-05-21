@@ -12,6 +12,8 @@ dist/
 
 /state/
 .harness/proxy_state.json
+.harness/worktrees/
+runs/
 *.db
 *.jsonl
 .env

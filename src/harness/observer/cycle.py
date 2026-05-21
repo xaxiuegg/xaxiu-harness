@@ -149,7 +149,7 @@ def run_cycle(
         flags.append(flag)
 
     # 5. Write HIGH / CRITICAL pending files
-    pending_written = write_pending_flags(flags, base)
+    write_pending_flags(flags, base)
 
     # 6. Write cycle report
     report_path = base / "cycles" / f"cycle_report_{cycle_id}.json"
