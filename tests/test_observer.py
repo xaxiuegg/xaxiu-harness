@@ -746,7 +746,7 @@ def test_register_tasks_mixed_success_retro_ok_cycle_fail() -> None:
         ]
         ok, msg = register_tasks()
     assert ok is False
-    assert "Retro task OK" in msg
+    assert "retro task OK" in msg
     assert "cycle task failed" in msg
 
 
@@ -760,8 +760,8 @@ def test_register_tasks_both_fail() -> None:
         ]
         ok, msg = register_tasks()
     assert ok is False
-    assert "Cycle: CYCLE_FAIL" in msg
-    assert "Retro: RETRO_FAIL" in msg
+    assert "cycle task failed: CYCLE_FAIL" in msg
+    assert "retro task failed: RETRO_FAIL" in msg
 
 
 def test_unregister_tasks_iterates_both() -> None:
@@ -771,6 +771,7 @@ def test_unregister_tasks_iterates_both() -> None:
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="OK removed cycle", stderr=""),
             MagicMock(returncode=0, stdout="SKIP retro not found", stderr=""),
+            MagicMock(returncode=0, stdout="SKIP chat not found", stderr=""),
         ]
         ok, msg = unregister_tasks()
     assert ok is True

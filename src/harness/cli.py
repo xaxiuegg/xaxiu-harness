@@ -1383,6 +1383,51 @@ def coord_work(run_id: str, worker_id: str, engine: str) -> None:
     sys.exit(0 if result["state"] == "completed" else 1)
 
 
+@coord_group.command(name="retry")
+@click.option("--run-id", required=True)
+@click.option("--worker-id", required=True)
+@click.option("--engine", default="swarm/kimi-api",
+              help="Engine to retry with; defaults to swarm/kimi-api.")
+def coord_retry(run_id: str, worker_id: str, engine: str) -> None:
+    """Re-dispatch a failed worker from its last checkpoint.
+
+    Loads the existing checkpoint at runs/<run_id>/checkpoints/<worker_id>.json,
+    resets state to 'in_progress', and calls run_worker with resume_from
+    pointing at that checkpoint so the worker picks up where it left off.
+    """
+    from harness.coord.worker import run_worker
+    from harness.coord.schemas import WavePlan
+    from harness.coord.checkpoint import read_checkpoint, write_checkpoint
+
+    run_dir = Path("runs") / run_id
+    plan_path = run_dir / "plan.json"
+    if not plan_path.exists():
+        click.echo(f"error: plan not found for run {run_id}", err=True)
+        sys.exit(1)
+    plan = WavePlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+    task = next((t for t in plan.tasks if t.worker_id == worker_id), None)
+    if task is None:
+        click.echo(f"error: worker {worker_id} not in plan", err=True)
+        sys.exit(1)
+
+    ckpt_path = run_dir / "checkpoints" / f"{worker_id}.json"
+    ckpt = read_checkpoint(ckpt_path)
+    if ckpt is None:
+        click.echo(f"error: no checkpoint at {ckpt_path}", err=True)
+        sys.exit(1)
+    if ckpt.state == "completed":
+        click.echo(f"worker {worker_id} already completed; nothing to retry")
+        sys.exit(0)
+
+    # Reset state so the run loop treats it as in-progress
+    reset = ckpt.model_copy(update={"state": "in_progress", "tests_passed": False})
+    write_checkpoint(ckpt_path, reset)
+
+    result = run_worker(task.model_dump(), run_dir, engine=engine, resume_from=ckpt_path)
+    click.echo(f"worker {worker_id}: {result['state']}")
+    sys.exit(0 if result["state"] == "completed" else 1)
+
+
 @coord_group.command(name="integrate")
 @click.option("--run-id", required=True)
 @click.option("--project-root", default=".", type=click.Path(path_type=Path))
