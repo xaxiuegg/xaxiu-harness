@@ -10,10 +10,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from harness.loops.state import LoopState
+from harness.engines.dispatcher import DispatchResult
 from harness.loops.supervisors import (
     BaseSupervisor,
     SupervisorResult,
     TestingSupervisor,
+    CreativitySupervisor,
     run_supervisor,
 )
 
@@ -198,3 +200,120 @@ def test_testing_supervisor_write_set_nonempty(tmp_path: Path) -> None:
             tests_dir=tests_dir,
         )
     assert result.write_set == ["phase_cursors.testing"]
+
+
+# ---------------------------------------------------------------------------
+# CreativitySupervisor
+# ---------------------------------------------------------------------------
+
+
+class TestCreativitySupervisor:
+    def test_claude_in_session_noop(self, tmp_path: Path) -> None:
+        state = LoopState()
+        cs = CreativitySupervisor(engine="claude-in-session")
+        now = datetime.now(timezone.utc)
+        result = cs.run(state, project=tmp_path, now=now)
+        assert result.phase == "creativity"
+        assert result.state_diff == {}
+        assert "claude-in-session" in result.log_summary or "external engine" in result.log_summary
+
+    def test_swarm_kimi_queues_top_idea(self, tmp_path: Path) -> None:
+        (tmp_path / "state").mkdir()
+        state = LoopState()
+        cs = CreativitySupervisor(engine="swarm/kimi")
+        now = datetime(2026, 5, 20, 12, 0, 0, tzinfo=timezone.utc)
+        ideas = [
+            {"id": "idea-20260520-a", "title": "A", "strategic_score": 70},
+            {"id": "idea-20260520-b", "title": "B", "strategic_score": 80},
+        ]
+        dispatch_result = DispatchResult(
+            success=True,
+            engine_used="swarm/kimi",
+            fallback_chain=["swarm/kimi"],
+            text=json.dumps(ideas),
+            error=None,
+            dispatch_id="uuid-1",
+        )
+        with patch("harness.engines.dispatcher.dispatch_packet", return_value=dispatch_result):
+            result = cs.run(state, project=tmp_path, now=now)
+        assert result.phase == "creativity"
+        assert result.escalation is None
+        queue = result.state_diff["phase_cursors.creativity.queue"]
+        assert len(queue) == 1
+        assert queue[0]["id"] == "idea-20260520-b"
+        assert result.write_set == ["phase_cursors.creativity"]
+
+    def test_swarm_kimi_below_threshold_no_queue(self, tmp_path: Path) -> None:
+        (tmp_path / "state").mkdir()
+        state = LoopState()
+        cs = CreativitySupervisor(engine="swarm/kimi")
+        now = datetime.now(timezone.utc)
+        ideas = [{"id": "idea-20260520-c", "title": "C", "strategic_score": 40}]
+        dispatch_result = DispatchResult(
+            success=True,
+            engine_used="swarm/kimi",
+            fallback_chain=["swarm/kimi"],
+            text=json.dumps(ideas),
+            error=None,
+            dispatch_id="uuid-2",
+        )
+        with patch("harness.engines.dispatcher.dispatch_packet", return_value=dispatch_result):
+            result = cs.run(state, project=tmp_path, now=now)
+        assert result.state_diff == {}
+        assert "below threshold 60" in result.log_summary
+
+    def test_swarm_kimi_dispatch_failure_escalation(self, tmp_path: Path) -> None:
+        (tmp_path / "state").mkdir()
+        state = LoopState()
+        cs = CreativitySupervisor(engine="swarm/kimi")
+        now = datetime.now(timezone.utc)
+        dispatch_result = DispatchResult(
+            success=False,
+            engine_used="swarm/kimi",
+            fallback_chain=["swarm/kimi"],
+            text="",
+            error="connection timeout",
+            dispatch_id="uuid-3",
+        )
+        with patch("harness.engines.dispatcher.dispatch_packet", return_value=dispatch_result):
+            result = cs.run(state, project=tmp_path, now=now)
+        assert result.escalation is not None
+        assert result.escalation["level"] == "L3"
+        assert "E_ENGINE_FAILURE" in result.escalation["tag"]
+        assert result.state_diff == {}
+
+    def test_swarm_kimi_malformed_json_graceful(self, tmp_path: Path) -> None:
+        (tmp_path / "state").mkdir()
+        state = LoopState()
+        cs = CreativitySupervisor(engine="swarm/kimi")
+        now = datetime.now(timezone.utc)
+        dispatch_result = DispatchResult(
+            success=True,
+            engine_used="swarm/kimi",
+            fallback_chain=["swarm/kimi"],
+            text="not json at all",
+            error=None,
+            dispatch_id="uuid-4",
+        )
+        with patch("harness.engines.dispatcher.dispatch_packet", return_value=dispatch_result):
+            result = cs.run(state, project=tmp_path, now=now)
+        assert result.state_diff == {}
+        assert "no valid ideas parsed" in result.log_summary
+
+    def test_write_set_contains_phase_cursors_creativity(self, tmp_path: Path) -> None:
+        (tmp_path / "state").mkdir()
+        state = LoopState()
+        cs = CreativitySupervisor(engine="swarm/kimi")
+        now = datetime.now(timezone.utc)
+        ideas = [{"id": "idea-20260520-d", "title": "D", "strategic_score": 90}]
+        dispatch_result = DispatchResult(
+            success=True,
+            engine_used="swarm/kimi",
+            fallback_chain=["swarm/kimi"],
+            text=json.dumps(ideas),
+            error=None,
+            dispatch_id="uuid-5",
+        )
+        with patch("harness.engines.dispatcher.dispatch_packet", return_value=dispatch_result):
+            result = cs.run(state, project=tmp_path, now=now)
+        assert "phase_cursors.creativity" in result.write_set
