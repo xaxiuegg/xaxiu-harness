@@ -512,12 +512,14 @@ def adapter_validate(project: str) -> None:
     sys.exit(0)
 
 
-@cli.command()
+@cli.command(name="dashboard-serve")
 @click.option("--port", default=7878, type=int, help="Dashboard server port.")
-def dashboard_serve(port: int) -> None:
-    """Start FastAPI dashboard server."""
-    click.echo("dashboard-serve: pending Wave 3 (FastAPI + WebSocket)")
-    sys.exit(1)
+@click.option("--host", default="127.0.0.1", help="Dashboard server bind address.")
+def dashboard_serve(port: int, host: str) -> None:
+    """Run the operator-facing dashboard."""
+    from harness.dashboard.server import serve
+
+    serve(host=host, port=port)
 
 
 @cli.command()

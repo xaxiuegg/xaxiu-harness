@@ -326,9 +326,10 @@ def test_install_stub(runner: CliRunner) -> None:
 
 
 def test_dashboard_serve_stub(runner: CliRunner) -> None:
-    result = runner.invoke(cli, ["dashboard-serve"])
-    assert result.exit_code == 1
-    assert "pending Wave 3" in result.output
+    with patch("harness.dashboard.server.serve") as mock_serve:
+        result = runner.invoke(cli, ["dashboard-serve"])
+        assert result.exit_code == 0
+        mock_serve.assert_called_once_with(host="127.0.0.1", port=7878)
 
 
 def test_loops_stub(runner: CliRunner) -> None:
