@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,102 @@ def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> d
     }
 
 
+def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
+    """Build a dispatch packet prompt for a single step."""
+    lines = [
+        f"# Worker Task: {task_obj.worker_id}",
+        f"## Step: {step.step_id} ({step.kind})",
+        f"\n{step.instruction}\n",
+        "## Context Files",
+    ]
+    for path, content in read_set_contents.items():
+        lines.append(f"\n### {path}\n```\n{content}\n```\n")
+    lines.append("\n## Instructions")
+    lines.append("Apply changes using FILE/REPLACE blocks:")
+    lines.append("```")
+    lines.append("FILE: relative/path/to/file.py")
+    lines.append("<<<<<<< SEARCH")
+    lines.append("old text")
+    lines.append("=======")
+    lines.append("new text")
+    lines.append(">>>>>>> REPLACE")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _parse_file_edits(text: str) -> list[tuple[str, str, str]]:
+    """Parse FILE/REPLACE blocks from engine response.
+
+    Returns list of (relative_path, search_text, replace_text).
+    """
+    edits: list[tuple[str, str, str]] = []
+    # Match FILE: path followed by SEARCH/REPLACE block
+    pattern = re.compile(
+        r"FILE:\s*(.+?)\n"
+        r"<<<<<<<\s*SEARCH\n"
+        r"(.*?)"
+        r"=======\n"
+        r"(.*?)"
+        r">>>>>>>\s*REPLACE",
+        re.DOTALL,
+    )
+    for m in pattern.finditer(text):
+        path = m.group(1).strip()
+        search = m.group(2)
+        replace = m.group(3)
+        # Strip exactly one trailing newline from search/replace to normalize
+        if search.endswith("\n"):
+            search = search[:-1]
+        if replace.endswith("\n"):
+            replace = replace[:-1]
+        edits.append((path, search, replace))
+    return edits
+
+
+def _apply_file_edits(edits: list[tuple[str, str, str]], base_path: Path) -> list[str]:
+    """Apply parsed edits under *base_path*; return list of modified files."""
+    modified: list[str] = []
+    for rel_path, search, replace in edits:
+        file_path = base_path / rel_path
+        if not file_path.exists():
+            # Create parent dirs if needed
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(replace, encoding="utf-8")
+            modified.append(rel_path)
+            continue
+        content = file_path.read_text(encoding="utf-8")
+        if search not in content:
+            continue
+        new_content = content.replace(search, replace, 1)
+        file_path.write_text(new_content, encoding="utf-8")
+        modified.append(rel_path)
+    return modified
+
+
+def _git_commit(wt_path: Path, message: str) -> str | None:
+    """Stage all changes in *wt_path* and commit; return commit SHA or None."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(wt_path), "add", "-A"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(wt_path), "commit", "-m", message, "--no-verify"],
+            check=True,
+            capture_output=True,
+        )
+        proc = subprocess.run(
+            ["git", "-C", str(wt_path), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return proc.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 def run_worker(
     task: dict[str, Any],
     run_dir: Path,
@@ -52,6 +149,7 @@ def run_worker(
 ) -> dict[str, Any]:
     """Execute a worker task and produce checkpoint + deliverable."""
     from harness.coord.schemas import WorkerTask
+    from harness.engines.dispatcher import dispatch_packet
 
     task_obj = WorkerTask.model_validate(task) if isinstance(task, dict) else task
     repo = project_root or Path.cwd()
@@ -68,15 +166,57 @@ def run_worker(
 
     started_at = now_iso()
     files_modified: list[str] = list(ckpt.files_modified or [])
+    commit_sha = ckpt.commit_sha
+
+    # Pre-load read_set contents for prompt building
+    read_set_contents: dict[str, str] = {}
+    for rel_path in task_obj.read_set or []:
+        src_file = repo / rel_path
+        if src_file.exists():
+            read_set_contents[rel_path] = src_file.read_text(encoding="utf-8")
 
     start_idx = ckpt.last_completed_step_index + 1
     idx = start_idx - 1
     for idx in range(start_idx, len(task_obj.steps)):
         step = task_obj.steps[idx]
+
+        # Build and dispatch prompt packet for edit steps
+        if step.kind == "edit" and step.target_files:
+            prompt = _build_prompt(task_obj, step, read_set_contents)
+            packet_path = repo / "state" / f".tmp_worker_{task_obj.worker_id}_{step.step_id}_{uuid.uuid4().hex}.md"
+            packet_path.parent.mkdir(parents=True, exist_ok=True)
+            packet_path.write_text(prompt, encoding="utf-8")
+            try:
+                result = dispatch_packet(
+                    project="harness-worker",
+                    packet_path=str(packet_path),
+                    force_engine=engine,
+                )
+            finally:
+                packet_path.unlink(missing_ok=True)
+
+            if result.success and result.text.strip():
+                edits = _parse_file_edits(result.text)
+                if edits:
+                    modified = _apply_file_edits(edits, wt_path)
+                    files_modified = list(set(files_modified + modified))
+                    # Update read_set contents with modified files
+                    for rel_path in modified:
+                        mod_file = wt_path / rel_path
+                        if mod_file.exists():
+                            read_set_contents[rel_path] = mod_file.read_text(encoding="utf-8")
+
+            # Commit step changes
+            sha = _git_commit(wt_path, f"[{step.step_id}] {task_obj.title}")
+            if sha:
+                commit_sha = sha
+
+        # Update checkpoint after each step
         ckpt = ckpt.model_copy(update={
             "last_completed_step_id": step.step_id,
             "last_completed_step_index": idx,
             "files_modified": list(set(files_modified + step.target_files)),
+            "commit_sha": commit_sha,
         })
         write_checkpoint(checkpoint_path, ckpt)
         files_modified = list(ckpt.files_modified)
@@ -87,6 +227,7 @@ def run_worker(
         "state": final_state,
         "tests_passed": tests["failed"] == 0,
         "tests_summary": f"{tests['passed']}p/{tests['failed']}f/{tests['skipped']}s",
+        "commit_sha": commit_sha,
     })
     write_checkpoint(checkpoint_path, ckpt)
 
@@ -101,7 +242,7 @@ def run_worker(
         "steps_completed": steps_completed,
         "files_modified": files_modified,
         "test_summary": tests,
-        "commit_sha": None,
+        "commit_sha": commit_sha,
         "error_tag": None if final_state == "completed" else "L3.worker.E_TEST_FAILED",
         "diagnostic": "",
         "tokens_used": 0,

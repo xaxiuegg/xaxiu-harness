@@ -29,6 +29,7 @@ class Checkpoint(BaseModel):
     tests_passed: bool = False
     tests_summary: str = ""
     elapsed_seconds: int = Field(ge=0, default=0)
+    commit_sha: str | None = None
     state: Literal["pending", "in_progress", "completed", "failed"] = "in_progress"
     updated_at: str = ""
 

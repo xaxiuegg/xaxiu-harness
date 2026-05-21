@@ -21,7 +21,6 @@ import yaml
 
 from harness.adapters.from_description import generate_adapter_from_nl
 from harness.adapters.loader import _repo_root, load_project_adapter, load_template
-from harness.adapters.schema import AdapterConfig
 from harness.cli_helpers import probe_all_engines
 from harness.engines.dispatcher import dispatch_packet
 from harness.operator import OperatorMode, resolve_operator_config
@@ -32,22 +31,17 @@ from harness.state.files import read_engine_health, update_engine_health
 from harness.budget import (
     DEFAULT_CAP_PATH,
     DEFAULT_LEDGER_PATH,
-    check_cap,
     read_ledger,
-    record_dispatch,
     summary as budget_summary,
-    total_spent,
 )
 
 # Observer primitive (roster #20)
-from harness.observer.cycle import run_cycle, CycleReport
+from harness.observer.cycle import run_cycle
 from harness.observer.flags import (
-    Flag,
     FlagSeverity,
     ensure_flag_dirs,
     list_pending_flags,
     ack_flag,
-    move_pending_to_handled,
 )
 from harness.observer.state import read_state, write_state, ObserverState
 from harness.observer.scheduler import register_tasks, unregister_tasks
@@ -193,7 +187,6 @@ _STATUS_HEADER = ["ID", "Category", "Title", "Status", "Owner", "Effort", "Updat
 @click.option("--force", is_flag=True, help="Overwrite an existing STATUS.csv.")
 def status_init(force: bool) -> None:
     """Create coord/STATUS.csv with header row."""
-    import csv as csv_mod
     from harness.status.store import write_status
 
     p = _status_csv_path()
@@ -1294,9 +1287,27 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None) -
 @coord_group.command(name="work")
 @click.option("--run-id", required=True)
 @click.option("--worker-id", required=True)
-def coord_work(run_id: str, worker_id: str) -> None:
-    """Worker entry-point (stub)."""
-    click.echo(f"worker {worker_id} for run {run_id} — pending v2/C implementation")
+@click.option("--engine", default="swarm/kimi-api")
+def coord_work(run_id: str, worker_id: str, engine: str) -> None:
+    """Worker entry-point — load plan, find task, run worker."""
+    from harness.coord.worker import run_worker
+    from harness.coord.schemas import WavePlan
+
+    run_dir = Path("runs") / run_id
+    plan_path = run_dir / "plan.json"
+    if not plan_path.exists():
+        click.echo(f"error: plan not found for run {run_id}", err=True)
+        sys.exit(1)
+
+    plan = WavePlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+    task = next((t for t in plan.tasks if t.worker_id == worker_id), None)
+    if task is None:
+        click.echo(f"error: worker {worker_id} not in plan", err=True)
+        sys.exit(1)
+
+    result = run_worker(task.model_dump(), run_dir, engine=engine)
+    click.echo(f"worker {worker_id}: {result['state']}")
+    sys.exit(0 if result["state"] == "completed" else 1)
 
 
 @coord_group.command(name="integrate")

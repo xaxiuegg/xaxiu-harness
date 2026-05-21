@@ -132,3 +132,61 @@ def test_coord_integrate_success(mock_integrate, runner: CliRunner, tmp_path: Pa
         result = runner.invoke(cli, ["coord", "integrate", "--run-id", "20260520T220000-ab12"])
     assert result.exit_code == 0
     assert "success=True" in result.output
+
+
+# ---------------------------------------------------------------------------
+# coord work
+# ---------------------------------------------------------------------------
+
+@patch("harness.coord.cli.run_worker") if False else patch("harness.cli.coord_work")  # placeholder
+@patch("harness.coord.worker.run_worker")
+def test_coord_work_success(mock_run, mock_cli_work, runner: CliRunner, tmp_path: Path) -> None:
+    from harness.coord.schemas import WavePlan, WorkerTask
+    plan = WavePlan(
+        run_id="20260520T220000-ab12",
+        spec_path="spec.md",
+        created_at="2026-05-20T22:00:00Z",
+        planner_engine="kimi",
+        tasks=[WorkerTask(worker_id="worker-1", title="t", description="d")],
+    )
+    mock_run.return_value = {"state": "completed"}
+
+    # Set up plan INSIDE the isolated cwd so the CLI's relative `runs/<id>/plan.json` resolves.
+    with runner.isolated_filesystem(temp_dir=tmp_path) as iso:
+        iso_path = Path(iso)
+        run_dir = iso_path / "runs" / "20260520T220000-ab12"
+        run_dir.mkdir(parents=True)
+        (run_dir / "plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
+        result = runner.invoke(cli, ["coord", "work", "--run-id", "20260520T220000-ab12", "--worker-id", "worker-1"])
+    assert result.exit_code == 0, result.output
+    assert "worker-1: completed" in result.output
+    mock_run.assert_called_once()
+
+
+@patch("harness.coord.worker.run_worker")
+def test_coord_work_missing_worker_id(mock_run, runner: CliRunner, tmp_path: Path) -> None:
+    from harness.coord.schemas import WavePlan, WorkerTask
+    plan = WavePlan(
+        run_id="20260520T220000-ab12",
+        spec_path="spec.md",
+        created_at="2026-05-20T22:00:00Z",
+        planner_engine="kimi",
+        tasks=[WorkerTask(worker_id="worker-1", title="t", description="d")],
+    )
+
+    with runner.isolated_filesystem(temp_dir=tmp_path) as iso:
+        iso_path = Path(iso)
+        run_dir = iso_path / "runs" / "20260520T220000-ab12"
+        run_dir.mkdir(parents=True)
+        (run_dir / "plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
+        result = runner.invoke(cli, ["coord", "work", "--run-id", "20260520T220000-ab12", "--worker-id", "worker-99"])
+    assert result.exit_code == 1
+    assert "worker-99 not in plan" in result.output
+    mock_run.assert_not_called()
+
+
+def test_coord_work_missing_plan(runner: CliRunner, tmp_path: Path) -> None:
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["coord", "work", "--run-id", "20260520T220000-ab12", "--worker-id", "worker-1"])
+    assert result.exit_code == 1
+    assert "plan not found" in result.output

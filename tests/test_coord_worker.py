@@ -421,3 +421,151 @@ def test_run_worker_propagates_file_not_found_for_missing_worktree(tmp_path: Pat
     ):
         with pytest.raises(FileNotFoundError):
             run_worker(task, run_dir, project_root=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Engine dispatch + edit application
+# ---------------------------------------------------------------------------
+
+def test_run_worker_calls_dispatch_packet_for_edit_step(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "20260520T220000-ab12"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+    # Create source file for read_set
+    src_file = tmp_path / "src" / "foo.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text("old content\n", encoding="utf-8")
+    # Create worktree dir
+    wt = tmp_path / ".harness" / "worktrees" / run_dir.name / "worker-1"
+    wt.mkdir(parents=True)
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.text = ""
+
+    with patch("harness.engines.dispatcher.dispatch_packet", return_value=mock_result) as mock_dispatch:
+        with patch("harness.coord.worker._run_pytest", return_value={
+            "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
+        }):
+            run_worker(task, run_dir, project_root=tmp_path)
+
+    mock_dispatch.assert_called_once()
+    call_kwargs = mock_dispatch.call_args.kwargs
+    assert call_kwargs["project"] == "harness-worker"
+    assert call_kwargs["force_engine"] == "swarm/kimi"
+
+
+def test_run_worker_applies_file_edits_from_dispatch_response(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "20260520T220000-ab12"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+    src_file = tmp_path / "src" / "foo.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text("old content\n", encoding="utf-8")
+    wt = tmp_path / ".harness" / "worktrees" / run_dir.name / "worker-1"
+    wt.mkdir(parents=True)
+    # Place file in worktree so edit can apply
+    wt_src = wt / "src" / "foo.py"
+    wt_src.parent.mkdir(parents=True)
+    wt_src.write_text("old content\n", encoding="utf-8")
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.text = (
+        "FILE: src/foo.py\n"
+        "<<<<<<< SEARCH\n"
+        "old content\n"
+        "=======\n"
+        "new content\n"
+        ">>>>>>> REPLACE\n"
+    )
+
+    with patch("harness.engines.dispatcher.dispatch_packet", return_value=mock_result):
+        with patch("harness.coord.worker._run_pytest", return_value={
+            "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
+        }):
+            result = run_worker(task, run_dir, project_root=tmp_path)
+
+    assert wt_src.read_text(encoding="utf-8") == "new content\n"
+    assert "src/foo.py" in result["files_modified"]
+
+
+def test_run_worker_captures_commit_sha_after_git_commit(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "20260520T220000-ab12"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+    wt = tmp_path / ".harness" / "worktrees" / run_dir.name / "worker-1"
+    wt.mkdir(parents=True)
+
+    with patch("harness.engines.dispatcher.dispatch_packet", return_value=MagicMock(success=True, text="")):
+        with patch("harness.coord.worker._git_commit", return_value="abc1234def5678"):
+            with patch("harness.coord.worker._run_pytest", return_value={
+                "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
+            }):
+                result = run_worker(task, run_dir, project_root=tmp_path)
+
+    assert result["commit_sha"] == "abc1234def5678"
+    ckpt = read_checkpoint(run_dir / "checkpoints" / "worker-1.json")
+    assert ckpt is not None
+    assert ckpt.commit_sha == "abc1234def5678"
+
+
+# ---------------------------------------------------------------------------
+# FILE/REPLACE parser
+# ---------------------------------------------------------------------------
+
+def test_parse_file_edits_extracts_single_block() -> None:
+    text = (
+        "FILE: src/foo.py\n"
+        "<<<<<<< SEARCH\n"
+        "old\n"
+        "=======\n"
+        "new\n"
+        ">>>>>>> REPLACE\n"
+    )
+    edits = __import__("harness.coord.worker", fromlist=["_parse_file_edits"])._parse_file_edits(text)
+    from harness.coord.worker import _parse_file_edits
+    edits = _parse_file_edits(text)
+    assert len(edits) == 1
+    assert edits[0] == ("src/foo.py", "old", "new")
+
+
+def test_parse_file_edits_extracts_multiple_blocks() -> None:
+    text = (
+        "FILE: a.py\n"
+        "<<<<<<< SEARCH\n"
+        "x\n"
+        "=======\n"
+        "y\n"
+        ">>>>>>> REPLACE\n"
+        "\n"
+        "FILE: b.py\n"
+        "<<<<<<< SEARCH\n"
+        "1\n"
+        "=======\n"
+        "2\n"
+        ">>>>>>> REPLACE\n"
+    )
+    from harness.coord.worker import _parse_file_edits
+    edits = _parse_file_edits(text)
+    assert len(edits) == 2
+    assert edits[0] == ("a.py", "x", "y")
+    assert edits[1] == ("b.py", "1", "2")
+
+
+def test_apply_file_edits_creates_missing_file(tmp_path: Path) -> None:
+    from harness.coord.worker import _apply_file_edits
+    edits = [("new_dir/new_file.py", "", "hello")]
+    modified = _apply_file_edits(edits, tmp_path)
+    assert modified == ["new_dir/new_file.py"]
+    assert (tmp_path / "new_dir" / "new_file.py").read_text(encoding="utf-8") == "hello"
+
+
+def test_apply_file_edits_skips_when_search_not_found(tmp_path: Path) -> None:
+    from harness.coord.worker import _apply_file_edits
+    f = tmp_path / "a.py"
+    f.write_text("content\n", encoding="utf-8")
+    edits = [("a.py", "nonexistent", "replacement")]
+    modified = _apply_file_edits(edits, tmp_path)
+    assert modified == []
+    assert f.read_text(encoding="utf-8") == "content\n"

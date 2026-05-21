@@ -156,9 +156,11 @@ def test_tick_running_to_integrating_when_all_done(tmp_path: Path) -> None:
     write_run_state(c.state_path, state)
 
     # Write completed checkpoints for both workers
+    checkpoints_dir = tmp_path / "checkpoints"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
     for wid in ("worker-1", "worker-2"):
         write_checkpoint(
-            tmp_path / f"{wid}.json",
+            checkpoints_dir / f"{wid}.json",
             Checkpoint(worker_id=wid, run_id=c.run_id, state="completed"),
         )
 
@@ -182,6 +184,21 @@ def test_launch_workers_respects_in_flight_limit(tmp_path: Path) -> None:
     assert "worker-1" in result["launched"] or "worker-1" in result["skipped"]
 
 
+def test_launch_workers_creates_worktree_before_spawn(tmp_path: Path) -> None:
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+
+    with patch("harness.coord.coordinator.create_worktree") as mock_wt:
+        with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock(pid=1234, poll=MagicMock(return_value=None))
+            c.launch_workers(plan)
+
+    mock_wt.assert_called_once_with(
+        "20260520T220000-ab12", "worker-1", base_branch="master", repo_root=c.project_root
+    )
+    mock_popen.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # poll_workers
 # ---------------------------------------------------------------------------
@@ -189,8 +206,10 @@ def test_launch_workers_respects_in_flight_limit(tmp_path: Path) -> None:
 def test_poll_workers_reads_checkpoints(tmp_path: Path) -> None:
     c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
     from harness.coord.checkpoint import write_checkpoint, Checkpoint
+    checkpoints_dir = tmp_path / "checkpoints"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
     write_checkpoint(
-        tmp_path / "worker-1.json",
+        checkpoints_dir / "worker-1.json",
         Checkpoint(worker_id="worker-1", run_id=c.run_id, state="in_progress", updated_at="2026-05-20T22:00:00Z"),
     )
     statuses = c.poll_workers()

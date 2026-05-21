@@ -23,6 +23,7 @@ from harness.coord.schemas import (
     WorkerStateLiteral,
     WorkerStatus,
 )
+from harness.coord.worktree import create_worktree
 
 
 @dataclass
@@ -37,10 +38,11 @@ class CoordinationReport:
 class Coordinator:
     """Orchestrates a single run from spec → plan → workers → integration."""
 
-    def __init__(self, *, run_id: str, run_dir: str | Path) -> None:
+    def __init__(self, *, run_id: str, run_dir: str | Path, project_root: Path | None = None) -> None:
         self.run_id: str = run_id
         self.run_dir: Path = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.project_root: Path = project_root or Path.cwd()
         self._procs: dict[str, subprocess.Popen] = {}
 
     @property
@@ -99,9 +101,10 @@ class Coordinator:
         )
 
         # Gather completed workers from checkpoints
+        checkpoints_dir = self.run_dir / "checkpoints"
         completed: set[str] = set()
         for task in plan.tasks:
-            ckpt = read_checkpoint(self.run_dir / f"{task.worker_id}.json")
+            ckpt = read_checkpoint(checkpoints_dir / f"{task.worker_id}.json")
             if ckpt and ckpt.state in ("completed", "failed"):
                 completed.add(task.worker_id)
 
@@ -111,7 +114,7 @@ class Coordinator:
                 continue
             if task.worker_id in self._procs and self._procs[task.worker_id].poll() is None:
                 continue  # already running
-            ckpt = read_checkpoint(self.run_dir / f"{task.worker_id}.json")
+            ckpt = read_checkpoint(checkpoints_dir / f"{task.worker_id}.json")
             if ckpt and ckpt.state in ("completed", "failed"):
                 continue  # already finished
 
@@ -120,6 +123,14 @@ class Coordinator:
             if not deps_met:
                 skipped.append(task.worker_id)
                 continue
+
+            # Create worktree before spawning worker
+            create_worktree(
+                self.run_id,
+                task.worker_id,
+                base_branch="master",
+                repo_root=self.project_root,
+            )
 
             proc = subprocess.Popen(
                 [
@@ -145,13 +156,10 @@ class Coordinator:
     def poll_workers(self) -> dict[str, WorkerStatus]:
         """Read every worker checkpoint and return status map."""
         statuses: dict[str, WorkerStatus] = {}
-        if not self.run_dir.exists():
+        checkpoints_dir = self.run_dir / "checkpoints"
+        if not checkpoints_dir.exists():
             return statuses
-        for ckpt_path in self.run_dir.glob("*.json"):
-            if ckpt_path.name == "plan.json":
-                continue
-            if ckpt_path.name == "run_state.json":
-                continue
+        for ckpt_path in checkpoints_dir.glob("*.json"):
             ckpt = read_checkpoint(ckpt_path)
             if ckpt is None:
                 continue
