@@ -110,3 +110,137 @@ def test_integrate_pytest_failure(mock_run, tmp_path: Path) -> None:
     assert report.test_summary is not None
     assert report.test_summary["failed"] == 2
     assert report.success is False
+
+
+# ---------------------------------------------------------------------------
+# integrate — worker-branch merge (INTEGRATOR-GIT-MERGE)
+# ---------------------------------------------------------------------------
+
+import subprocess
+
+
+def _git(args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=True)
+
+
+def test_integrate_merges_completed_worker_branches(tmp_path: Path, monkeypatch) -> None:
+    """Real git: completed worker's branch is merged into master via squash strategy."""
+    from harness.coord.checkpoint import Checkpoint, write_checkpoint
+    from harness.coord.schemas import WavePlan, WorkerTask, WorkerStep
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(["init", "-b", "master"], repo)
+    _git(["config", "user.email", "i@test.local"], repo)
+    _git(["config", "user.name", "I"], repo)
+    (repo / "README.md").write_text("# base\n", encoding="utf-8")
+    _git(["add", "README.md"], repo)
+    _git(["commit", "-m", "base"], repo)
+
+    # Create worker branch with one new file
+    run_id = "20260521T010101-aabb"
+    branch = f"wt/{run_id}/worker-1"
+    _git(["checkout", "-b", branch], repo)
+    (repo / "worker-out.txt").write_text("hello from worker-1\n", encoding="utf-8")
+    _git(["add", "worker-out.txt"], repo)
+    _git(["commit", "-m", "[s1] worker-1"], repo)
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _git(["checkout", "master"], repo)
+
+    # Write plan + checkpoint + run_state
+    run_dir = repo / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    plan = WavePlan(
+        run_id=run_id,
+        spec_path="spec.md",
+        created_at="2026-05-21T01:01:01+00:00",
+        planner_engine="mock",
+        tasks=[WorkerTask(
+            worker_id="worker-1", title="t", description="d",
+            steps=[WorkerStep(step_id="s1", kind="edit", instruction="x",
+                              target_files=["worker-out.txt"], expected_diff_lines=1)],
+        )],
+        integration_strategy="squash",
+    )
+    (run_dir / "plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
+    (run_dir / "checkpoints").mkdir()
+    write_checkpoint(
+        run_dir / "checkpoints" / "worker-1.json",
+        Checkpoint(worker_id="worker-1", run_id=run_id, state="completed", commit_sha=sha),
+    )
+    _make_run_state(run_dir, run_id=run_id)
+
+    # Stub pytest only — let real subprocess.run handle the git commands.
+    real_run = subprocess.run
+
+    def smart(cmd, **kwargs):
+        if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "python" and cmd[1] == "-m":
+            return MagicMock(stdout="1 passed in 0.01s", returncode=0)
+        return real_run(cmd, **kwargs)
+
+    with patch("harness.coord.integrator.subprocess.run", side_effect=smart):
+        report = integrate(run_dir, project_root=repo)
+
+    assert report.workers_merged == ["worker-1"], (
+        f"merged={report.workers_merged} skipped={report.workers_skipped} "
+        f"conflicted={report.workers_conflicted} diag={report.diagnostic!r}"
+    )
+    assert report.workers_conflicted == []
+    # File should now be staged on master (squash strategy stages but does not commit)
+    rc = real_run(
+        ["git", "diff", "--cached", "--name-only"], cwd=repo, capture_output=True, text=True,
+    )
+    assert "worker-out.txt" in rc.stdout
+
+
+def test_integrate_skips_uncompleted_workers(tmp_path: Path) -> None:
+    """Workers without a completed checkpoint are silently skipped."""
+    from harness.coord.checkpoint import Checkpoint, write_checkpoint
+    from harness.coord.schemas import WavePlan, WorkerTask, WorkerStep
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(["init", "-b", "master"], repo)
+    _git(["config", "user.email", "i@test.local"], repo)
+    _git(["config", "user.name", "I"], repo)
+    (repo / "README.md").write_text("# base\n", encoding="utf-8")
+    _git(["add", "README.md"], repo)
+    _git(["commit", "-m", "base"], repo)
+
+    run_id = "20260521T020202-ccdd"
+    run_dir = repo / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    plan = WavePlan(
+        run_id=run_id,
+        spec_path="spec.md",
+        created_at="2026-05-21T02:02:02+00:00",
+        planner_engine="mock",
+        tasks=[WorkerTask(
+            worker_id="worker-1", title="t", description="d",
+            steps=[WorkerStep(step_id="s1", kind="edit", instruction="x",
+                              target_files=["x.txt"], expected_diff_lines=1)],
+        )],
+    )
+    (run_dir / "plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
+    (run_dir / "checkpoints").mkdir()
+    write_checkpoint(
+        run_dir / "checkpoints" / "worker-1.json",
+        Checkpoint(worker_id="worker-1", run_id=run_id, state="in_progress"),
+    )
+    _make_run_state(run_dir, run_id=run_id)
+
+    real_run = subprocess.run
+
+    def smart(cmd, **kwargs):
+        if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "python" and cmd[1] == "-m":
+            return MagicMock(stdout="1 passed in 0.01s", returncode=0)
+        return real_run(cmd, **kwargs)
+
+    with patch("harness.coord.integrator.subprocess.run", side_effect=smart):
+        report = integrate(run_dir, project_root=repo)
+
+    assert report.workers_merged == []
+    assert report.workers_skipped == ["worker-1"]
+    assert report.workers_conflicted == []
