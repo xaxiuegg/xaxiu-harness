@@ -55,9 +55,35 @@ operator:
     swarm/deepseek: 1
   notification_method: file          # file | windows_toast | email
   notification_target: coord/dev_loop/escalations.md
+
+  # --- Session-derived directives, promoted to YAML 2026-05-21 ----------
+  session_handoff:
+    soft_mb: 8                       # SOFT recommendation; informational only
+    strongly_mb: 18                  # writes handoff prompt to disk
+    critical_mb: 35                  # immediate handoff + shutdown
+  kill_conditions:
+    max_cost_usd: null               # null disables; e.g. 5.00 stops loop at $5
+    max_rows_dispatched: null        # null disables; e.g. 100 stops at 100 dispatches
+    max_wallclock_minutes: null      # null disables; e.g. 180 stops after 3h
+  production_hygiene_balance:
+    production_percent: 90           # creativity supervisor fires when balance drifts
+    hygiene_percent: 10              # must sum to 100
 ```
 
 > Schema note: notification fields are FLAT on `OperatorSection` (`notification_method` + `notification_target`), not nested under `notifications:`. Defaults baked into `src/harness/operator/modes.py::DEFAULT_ENGINE_SLOTS`.
+>
+> `session_handoff` thresholds drive `harness session check` recommendations
+> (see `spec/session-handoff-monitor.md`).  Defaults 8/18/35 MB come from the
+> operator's empirical 52 MB crash 2026-05-20 with safety margin.
+>
+> `kill_conditions` are read by the loop runner before each tick — any limit
+> exceeded triggers a graceful loop stop with an L4 escalation.  Wired in
+> `KILL-CONDITION-WIRING` (separate row).
+>
+> `production_hygiene_balance` is consumed by the creativity supervisor:
+> when STATUS.csv production-tagged rows fall below `production_percent`,
+> creativity fires to repopulate the backlog.  See
+> `[[feedback_status_csv_never_empty]]`.
 
 ## Module layout (`src/harness/operator/`)
 

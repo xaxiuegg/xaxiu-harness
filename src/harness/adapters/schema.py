@@ -92,6 +92,70 @@ class ObserverConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class SessionHandoffThresholds(BaseModel):
+    """Calibrated MB thresholds for the session-handoff monitor.
+
+    Derived from operator's empirical 52 MB crash 2026-05-20 — see
+    ``spec/session-handoff-monitor.md``.  ``soft_mb`` triggers a SOFT
+    suggestion; ``strongly_mb`` writes the handoff prompt to disk;
+    ``critical_mb`` triggers an immediate handoff with shutdown.
+    """
+
+    soft_mb: int = Field(default=8, ge=1, le=200)
+    strongly_mb: int = Field(default=18, ge=1, le=200)
+    critical_mb: int = Field(default=35, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def _check_ordering(self) -> "SessionHandoffThresholds":
+        if not (self.soft_mb < self.strongly_mb < self.critical_mb):
+            raise ValueError(
+                "session_handoff thresholds must satisfy "
+                "soft_mb < strongly_mb < critical_mb"
+            )
+        return self
+
+    model_config = {"extra": "forbid"}
+
+
+class KillConditions(BaseModel):
+    """Hard-stop limits applied by the autonomous loop runner.
+
+    Promoted to first-class config 2026-05-21 from the session directive
+    ``[[feedback_status_csv_never_empty]]`` corollary — operator wants
+    explicit budget kill-switches before any unattended autonomy.  A value
+    of ``None`` disables that particular gate.
+    """
+
+    max_cost_usd: float | None = Field(default=None, ge=0.0, le=10000.0)
+    max_rows_dispatched: int | None = Field(default=None, ge=0, le=100_000)
+    max_wallclock_minutes: int | None = Field(default=None, ge=1, le=10_080)
+
+    model_config = {"extra": "forbid"}
+
+
+class ProductionHygieneBalance(BaseModel):
+    """Operator's 90/10 production-vs-hygiene ratio target for the dev loop.
+
+    See ``[[feedback_status_csv_never_empty]]`` — when STATUS.csv backlog
+    drains, the manager fires creativity supervisors to repopulate
+    production rows so the loop stays in the 90 zone instead of drifting
+    into all-hygiene work.  Numbers are PERCENTAGES; they must sum to 100.
+    """
+
+    production_percent: int = Field(default=90, ge=0, le=100)
+    hygiene_percent: int = Field(default=10, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _check_sum(self) -> "ProductionHygieneBalance":
+        if self.production_percent + self.hygiene_percent != 100:
+            raise ValueError(
+                "production_percent + hygiene_percent must equal 100"
+            )
+        return self
+
+    model_config = {"extra": "forbid"}
+
+
 class OperatorSection(BaseModel):
     """Adapter YAML mirror of harness.operator.modes.OperatorConfig.
 
@@ -115,6 +179,15 @@ class OperatorSection(BaseModel):
     engine_slots: dict[str, int] = Field(default_factory=dict)
     notification_method: Literal["file", "windows_toast", "email"] = "file"
     notification_target: str = "coord/dev_loop/escalations.md"
+
+    # --- Session-derived directives, promoted to YAML 2026-05-21 ----------
+    session_handoff: SessionHandoffThresholds = Field(
+        default_factory=SessionHandoffThresholds,
+    )
+    kill_conditions: KillConditions = Field(default_factory=KillConditions)
+    production_hygiene_balance: ProductionHygieneBalance = Field(
+        default_factory=ProductionHygieneBalance,
+    )
 
 
 _CRON_REGEX = re.compile(r"^(\S+\s+){4}\S+$")

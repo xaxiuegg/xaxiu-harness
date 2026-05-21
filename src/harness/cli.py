@@ -1255,33 +1255,56 @@ def coord_plan(spec: Path, run_id: str | None, engine: str, model: str | None, p
 @click.option("--run-id", default=None, help="Run ID (defaults to auto-generated).")
 @click.option("--resume", is_flag=True, help="Resume the latest run.")
 @click.option("--limit", default=None, type=int, help="In-flight worker limit.")
-def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None) -> None:
+@click.option("--proxy", type=click.Choice(["auto", "off", "external"]),
+              default="auto",
+              help="Auto-start the v2 proxy ('auto'), use a running one ('external'), or skip ('off').")
+def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None, proxy: str) -> None:
     """Execute a coordination run (single tick)."""
     from harness.coord.coordinator import Coordinator
     from harness.coord.planner import _new_run_id
     from harness.coord.run_state import read_run_state
-    if resume:
-        runs_dir = Path("runs")
-        if not runs_dir.exists():
-            click.echo("error: no runs directory")
-            raise SystemExit(1)
-        states = sorted(runs_dir.glob("*/run_state.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not states:
-            click.echo("error: no runs to resume")
-            raise SystemExit(1)
-        run_dir = states[0].parent
-        rid = read_run_state(states[0]).run_id if read_run_state(states[0]) else run_dir.name
-    else:
-        rid = run_id or _new_run_id()
-    run_dir = Path("runs") / rid
-    run_dir.mkdir(parents=True, exist_ok=True)
-    coord = Coordinator(run_id=rid, run_dir=run_dir)
-    report = coord.tick(spec, in_flight_limit=limit)
-    click.echo(f"run {report.run_id}: {report.state.value}")
-    if report.worker_summary:
-        for wid, st in report.worker_summary.items():
-            click.echo(f"  {wid}: {st}")
-    sys.exit(0 if report.state.value in ("completed", "running") else 1)
+    from harness.proxy import lifecycle as proxy_lifecycle
+
+    proxy_proc = None
+    if proxy == "auto":
+        proxy_proc = proxy_lifecycle.start_proxy()
+        if proxy_proc is not None:
+            click.echo(f"proxy: started (pid={proxy_proc.pid})")
+        elif proxy_lifecycle.is_proxy_listening():
+            click.echo("proxy: already running")
+        else:
+            click.echo("proxy: WARNING — failed to start; continuing", err=True)
+    elif proxy == "external":
+        if not proxy_lifecycle.is_proxy_listening():
+            click.echo("proxy: --proxy=external but no proxy listening on 7879", err=True)
+            sys.exit(1)
+
+    try:
+        if resume:
+            runs_dir = Path("runs")
+            if not runs_dir.exists():
+                click.echo("error: no runs directory")
+                raise SystemExit(1)
+            states = sorted(runs_dir.glob("*/run_state.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not states:
+                click.echo("error: no runs to resume")
+                raise SystemExit(1)
+            run_dir = states[0].parent
+            rid = read_run_state(states[0]).run_id if read_run_state(states[0]) else run_dir.name
+        else:
+            rid = run_id or _new_run_id()
+        run_dir = Path("runs") / rid
+        run_dir.mkdir(parents=True, exist_ok=True)
+        coord = Coordinator(run_id=rid, run_dir=run_dir)
+        report = coord.tick(spec, in_flight_limit=limit)
+        click.echo(f"run {report.run_id}: {report.state.value}")
+        if report.worker_summary:
+            for wid, st in report.worker_summary.items():
+                click.echo(f"  {wid}: {st}")
+        sys.exit(0 if report.state.value in ("completed", "running") else 1)
+    finally:
+        if proxy_proc is not None:
+            proxy_lifecycle.stop_proxy(proxy_proc)
 
 
 @coord_group.command(name="work")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 from harness.session.signals import Signals
@@ -14,6 +15,24 @@ class Recommendation(StrEnum):
     CRITICAL = "critical"
 
 
+@dataclass(frozen=True)
+class HandoffThresholds:
+    """MB thresholds for the session-handoff recommender.
+
+    Defaults match the operator's empirical calibration 2026-05-20
+    (52MB historic crash → 8 / 18 / 35 with safety margin).  Override via
+    adapter YAML `operator.session_handoff` (see
+    ``SessionHandoffThresholds`` in ``harness.adapters.schema``).
+    """
+
+    soft_mb: int = 8
+    strongly_mb: int = 18
+    critical_mb: int = 35
+
+
+DEFAULT_THRESHOLDS = HandoffThresholds()
+
+
 SOFT_SIGNALS = [
     "session_age_soft",
     "tick_count_soft",
@@ -24,7 +43,7 @@ SOFT_SIGNALS = [
 ]
 
 
-def _to_recommend_dict(signals: Signals) -> dict[str, object]:
+def _to_recommend_dict(signals: Signals, thresholds: HandoffThresholds) -> dict[str, object]:
     return {
         "session_age_h": signals.session_age_hours,
         "session_age_soft": signals.session_age_hours > 4,
@@ -39,17 +58,21 @@ def _to_recommend_dict(signals: Signals) -> dict[str, object]:
         # PRIMARY crash-risk signal (patch 2026-05-21): Claude Code's per-session
         # transcript jsonl size.  Calibrated from operator's historic data —
         # 52MB session crashed; thresholds 8/18/35 give SOFT/STRONGLY/CRITICAL.
+        # Operators can override via adapter YAML operator.session_handoff.
         "claude_session_jsonl_mb": signals.claude_session_jsonl_mb,
-        "claude_session_jsonl_mb_soft": signals.claude_session_jsonl_mb >= 8,
-        "claude_session_jsonl_mb_strongly": signals.claude_session_jsonl_mb >= 18,
-        "claude_session_jsonl_mb_critical": signals.claude_session_jsonl_mb >= 35,
+        "claude_session_jsonl_mb_soft": signals.claude_session_jsonl_mb >= thresholds.soft_mb,
+        "claude_session_jsonl_mb_strongly": signals.claude_session_jsonl_mb >= thresholds.strongly_mb,
+        "claude_session_jsonl_mb_critical": signals.claude_session_jsonl_mb >= thresholds.critical_mb,
         "mem_pct": signals.mem_pct,
         "claude_rss_mb": signals.claude_rss_mb,
         "disk_pct_free": signals.disk_pct_free,
     }
 
 
-def recommend(signals: Signals) -> tuple[Recommendation, list[str]]:
+def recommend(
+    signals: Signals,
+    thresholds: HandoffThresholds = DEFAULT_THRESHOLDS,
+) -> tuple[Recommendation, list[str]]:
     """Decide whether to alert the operator and how strongly.
 
     Returns ``(Recommendation, reasons)``.
@@ -58,14 +81,14 @@ def recommend(signals: Signals) -> tuple[Recommendation, list[str]]:
     The session-transcript jsonl size is the primary crash-risk signal
     (52MB historic crash; thresholds set with safety margin).
     """
-    d = _to_recommend_dict(signals)
+    d = _to_recommend_dict(signals, thresholds)
     reasons: list[str] = []
 
     # ---- CRITICAL — imminent crash ----
     if d["claude_session_jsonl_mb_critical"]:
         reasons.append(
-            f"Session transcript {d['claude_session_jsonl_mb']:.1f}MB >= 35MB "
-            f"(approaching 52MB historic-crash territory)"
+            f"Session transcript {d['claude_session_jsonl_mb']:.1f}MB >= "
+            f"{thresholds.critical_mb}MB (approaching 52MB historic-crash territory)"
         )
     if d["mem_pct"] >= 95:
         reasons.append(f"Memory usage {d['mem_pct']}% >= 95%")
@@ -81,8 +104,8 @@ def recommend(signals: Signals) -> tuple[Recommendation, list[str]]:
     # ---- STRONGLY ("Heavy") — rotate on next checkpoint ----
     if d["claude_session_jsonl_mb_strongly"]:
         reasons.append(
-            f"Session transcript {d['claude_session_jsonl_mb']:.1f}MB >= 18MB "
-            f"(Heavy / rotate-on-checkpoint threshold)"
+            f"Session transcript {d['claude_session_jsonl_mb']:.1f}MB >= "
+            f"{thresholds.strongly_mb}MB (Heavy / rotate-on-checkpoint threshold)"
         )
     if d["mem_pct"] >= 85:
         reasons.append(f"Memory usage {d['mem_pct']}% >= 85%")
@@ -104,8 +127,8 @@ def recommend(signals: Signals) -> tuple[Recommendation, list[str]]:
         reasons.append(f"Session age {d['session_age_h']:.1f}h > 4h")
     if d["claude_session_jsonl_mb_soft"]:
         reasons.append(
-            f"Session transcript {d['claude_session_jsonl_mb']:.1f}MB >= 8MB "
-            f"(soft baseline crossed; informational only)"
+            f"Session transcript {d['claude_session_jsonl_mb']:.1f}MB >= "
+            f"{thresholds.soft_mb}MB (soft baseline crossed; informational only)"
         )
     if (
         soft_count >= 3
