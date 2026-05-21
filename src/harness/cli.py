@@ -86,12 +86,22 @@ def dispatch(
     sys.exit(1)
 
 
-@cli.command()
+@cli.group(name="status")
+def status() -> None:
+    """Canonical STATUS.csv task tracker (harness primitive #19).
+
+    The legacy project-scoped status reporter lives under
+    ``status report``; the new repo-canonical commands manage
+    ``coord/STATUS.csv`` directly.
+    """
+
+
+@status.command(name="report")
 @click.option("--project", "-p", help="Project name.")
-@click.option("--report", is_flag=True, help="Report to configured backend.")
+@click.option("--report", "as_report", is_flag=True, help="Report to configured backend.")
 @click.option("--format", "fmt", type=click.Choice(["csv", "json"]), help="Output format.")
-def status(project: Optional[str], report: bool, fmt: Optional[str]) -> None:
-    """Print current status (or report to configured backend)."""
+def status_report(project: Optional[str], as_report: bool, fmt: Optional[str]) -> None:
+    """Print project-scoped status (or report to configured backend)."""
     if not project:
         click.echo("error: --project is required", err=True)
         sys.exit(2)
@@ -102,7 +112,7 @@ def status(project: Optional[str], report: bool, fmt: Optional[str]) -> None:
         click.echo(f"error: {exc}", err=True)
         sys.exit(1)
 
-    if report:
+    if as_report:
         click.echo("status: report backend not yet implemented")
         sys.exit(1)
 
@@ -137,6 +147,183 @@ def status(project: Optional[str], report: bool, fmt: Optional[str]) -> None:
     else:
         click.echo(csv_path.read_text(encoding="utf-8"))
     sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Canonical STATUS.csv tracker (roster #19)
+# ---------------------------------------------------------------------------
+
+
+def _status_csv_path() -> Path:
+    """Resolve coord/STATUS.csv relative to the current working directory."""
+    return Path("coord") / "STATUS.csv"
+
+
+_STATUS_HEADER = ["ID", "Category", "Title", "Status", "Owner", "Effort", "Updated", "Notes"]
+
+
+@status.command(name="init")
+@click.option("--force", is_flag=True, help="Overwrite an existing STATUS.csv.")
+def status_init(force: bool) -> None:
+    """Create coord/STATUS.csv with header row."""
+    import csv as csv_mod
+    from harness.status.store import write_status
+
+    p = _status_csv_path()
+    if p.exists() and not force:
+        click.echo(f"error: {p} already exists (use --force to overwrite)", err=True)
+        sys.exit(1)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    write_status(p, [])
+    click.echo(f"created {p}")
+
+
+@status.command(name="add")
+@click.argument("id_")
+@click.argument("category")
+@click.argument("title")
+@click.option("--status", "status_value", default="todo")
+@click.option("--owner", default="Claude")
+@click.option("--effort", default="-")
+@click.option("--notes", default="")
+def status_add(
+    id_: str,
+    category: str,
+    title: str,
+    status_value: str,
+    owner: str,
+    effort: str,
+    notes: str,
+) -> None:
+    """Add a new row."""
+    from harness.status import StatusRow, add_row, Status
+    from datetime import datetime, timezone
+
+    p = _status_csv_path()
+    try:
+        row = StatusRow(
+            id=id_,
+            category=category,
+            title=title,
+            status=Status(status_value),
+            owner=owner,
+            effort=effort,
+            updated=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            notes=notes,
+        )
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    try:
+        add_row(p, row)
+    except ValueError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"added {id_}")
+
+
+@status.command(name="update")
+@click.argument("id_")
+@click.option("--status", "status_value", default=None)
+@click.option("--owner", default=None)
+@click.option("--effort", default=None)
+@click.option("--notes", default=None)
+@click.option("--title", default=None)
+def status_update(
+    id_: str,
+    status_value: Optional[str],
+    owner: Optional[str],
+    effort: Optional[str],
+    notes: Optional[str],
+    title: Optional[str],
+) -> None:
+    """Update fields on an existing row."""
+    from harness.status import update_row
+
+    fields: dict[str, str] = {}
+    if status_value is not None:
+        fields["status"] = status_value
+    if owner is not None:
+        fields["owner"] = owner
+    if effort is not None:
+        fields["effort"] = effort
+    if notes is not None:
+        fields["notes"] = notes
+    if title is not None:
+        fields["title"] = title
+    if not fields:
+        click.echo("error: at least one field must be provided", err=True)
+        sys.exit(2)
+    try:
+        update_row(_status_csv_path(), id_, **fields)
+    except KeyError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"updated {id_}")
+
+
+@status.command(name="list")
+@click.option("--filter", "filter_status", default=None, help="Filter by status value.")
+@click.option("--category", default=None, help="Filter by category.")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json", "csv"]), default="pretty")
+def status_list(filter_status: Optional[str], category: Optional[str], fmt: str) -> None:
+    """List rows (with optional filters)."""
+    from harness.status import read_status
+
+    rows = read_status(_status_csv_path())
+    if filter_status:
+        rows = [r for r in rows if r.status.value == filter_status]
+    if category:
+        rows = [r for r in rows if r.category == category]
+    if fmt == "json":
+        click.echo(json.dumps([r.model_dump(mode="json") for r in rows], indent=2))
+        return
+    if fmt == "csv":
+        import csv as csv_mod
+        import io
+
+        buf = io.StringIO()
+        writer = csv_mod.writer(buf)
+        writer.writerow(_STATUS_HEADER)
+        for r in rows:
+            writer.writerow([
+                r.id, r.category, r.title, r.status.value, r.owner,
+                r.effort, r.updated, r.notes,
+            ])
+        click.echo(buf.getvalue().rstrip("\n"))
+        return
+    for r in rows:
+        click.echo(f"{r.id:24}  {r.status.value:12}  {r.title}")
+
+
+@status.command(name="summary")
+def status_summary() -> None:
+    """Print counts by status."""
+    from harness.status import summary as status_summary_fn
+
+    counts = status_summary_fn(_status_csv_path())
+    nonzero = {s.value: n for s, n in counts.items() if n > 0}
+    parts = [f"{n} {label}" for label, n in nonzero.items()]
+    click.echo(", ".join(parts) if parts else "(empty)")
+
+
+@status.command(name="verify")
+@click.option("--cadence-minutes", type=int, default=None,
+              help="Expected cadence for mtime canary check.")
+def status_verify(cadence_minutes: Optional[int]) -> None:
+    """Validate the STATUS.csv schema + canary checks."""
+    from harness.status import verify
+
+    issues = verify(_status_csv_path(), expected_cadence_minutes=cadence_minutes)
+    if not issues:
+        click.echo("ok: no issues found")
+        sys.exit(0)
+    for i in issues:
+        click.echo(i, err=True)
+    sys.exit(1)
 
 
 @cli.command()

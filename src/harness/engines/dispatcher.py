@@ -286,6 +286,7 @@ def dispatch_packet(
     packet_path: str,
     force_engine: str | None = None,
     force_model: str | None = None,
+    wave_id: str | None = None,
 ) -> DispatchResult:
     """Route *packet_path* to an engine, with automatic fallback on failure.
 
@@ -295,6 +296,12 @@ def dispatch_packet(
         force_engine: Bypass routing rules and use this engine (must be in
             ``SUPPORTED_BACKENDS``).  LOCK refusal is still respected.
         force_model: Override the model selected by routing rules.
+        wave_id: Optional STATUS.csv row id; when supplied, the dispatcher
+            invokes ``harness.status.hooks.on_dispatch_start`` before the
+            engine call and ``on_dispatch_complete`` after it.  When
+            ``None``, STATUS tracking is skipped entirely (keeps the file
+            curated for operator-defined waves only).  Hook failures never
+            propagate — STATUS bookkeeping must not break dispatch.
 
     Returns:
         A ``DispatchResult`` describing the outcome.  This function never
@@ -414,6 +421,18 @@ def dispatch_packet(
     except Exception:
         pass  # Best-effort; do not block dispatch on state-file write failure.
 
+    # ---- 8b. STATUS tracker hook (opt-in via wave_id) ---------------------
+    if wave_id is not None:
+        try:
+            from harness.status import hooks as _status_hooks
+            _status_hooks.on_dispatch_start(
+                task_id=dispatch_id,
+                wave_id=wave_id,
+                engine=initial_engine,
+            )
+        except Exception:
+            pass  # STATUS bookkeeping must never break dispatch.
+
     # ---- 9. Dispatch loop --------------------------------------------------
     engine_cache: dict[str, Any] = {}
     tried: list[str] = []
@@ -479,6 +498,17 @@ def dispatch_packet(
             except Exception:
                 pass
 
+            if wave_id is not None:
+                try:
+                    from harness.status import hooks as _status_hooks
+                    _status_hooks.on_dispatch_complete(
+                        task_id=dispatch_id,
+                        wave_id=wave_id,
+                        outcome="success",
+                    )
+                except Exception:
+                    pass
+
             return DispatchResult(
                 success=True,
                 engine_used=current_engine,
@@ -542,6 +572,18 @@ def dispatch_packet(
                 except Exception:
                     pass
 
+                if wave_id is not None:
+                    try:
+                        from harness.status import hooks as _status_hooks
+                        _status_hooks.on_dispatch_complete(
+                            task_id=dispatch_id,
+                            wave_id=wave_id,
+                            outcome="failure",
+                            notes=f"locked_engine_failed: {response.error}",
+                        )
+                    except Exception:
+                        pass
+
                 return DispatchResult(
                     success=False,
                     engine_used=current_engine,
@@ -577,6 +619,18 @@ def dispatch_packet(
                 )
             except Exception:
                 pass
+
+            if wave_id is not None:
+                try:
+                    from harness.status import hooks as _status_hooks
+                    _status_hooks.on_dispatch_complete(
+                        task_id=dispatch_id,
+                        wave_id=wave_id,
+                        outcome="failure",
+                        notes=f"all_fallbacks_exhausted: {response.error}",
+                    )
+                except Exception:
+                    pass
 
             return DispatchResult(
                 success=False,

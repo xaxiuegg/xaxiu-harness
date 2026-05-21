@@ -223,21 +223,9 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [
-    {
-      "task_id": "dispatch-2026-05-21T00-02-status-tracker",
-      "packet": "coord/packets/2026-05-20-status-tracker-harness-feature/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-21T00:02:35Z",
-      "phase": "developing",
-      "wave_id": "wave-5.5",
-      "timeout_seconds": 1200,
-      "bg_handle": "bcsacjnox",
-      "note": "Round 1 of 5 in new session; recovery-layer primitive; cli.py-touching so #20 must wait"
-    }
-  ],
-  "reconciled_at": "2026-05-21T00:02:35Z",
-  "reconcile_note": "Cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b); marked wave-B2 done; cleared engine_slots.kimi.in_flight",
+  "active_dispatches": [],
+  "reconciled_at": "2026-05-21T00:50:00Z",
+  "reconcile_note": "Round 1 (status-tracker #19) completed hybrid mode at 2026-05-21T00:50Z; cleared from active_dispatches. Earlier reconcile at 2026-05-21T00:02:35Z cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b).",
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -380,7 +368,7 @@
     {
       "id": "wave-5.5",
       "name": "canonical status tracker as harness primitive (roster #19)",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "wave-A",
         "wave-B"
@@ -388,9 +376,12 @@
       "spec_ready": "spec/status-tracker.md",
       "packet_ready": "coord/packets/2026-05-20-status-tracker-harness-feature/packet.md",
       "dispatched_at": "2026-05-21T00:02:35Z",
+      "completed_at": "2026-05-21T00:50:00Z",
       "current_dispatch": "bcsacjnox",
       "blocks": ["wave-5.6", "wave-5", "wave-3"],
-      "note": "Recovery layer for autonomous loops. Required before #20 because both touch cli.py."
+      "note": "Recovery layer for autonomous loops. Required before #20 because both touch cli.py.",
+      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
+      "completion_note": "Kimi-CLI dispatch timed out at 1200s but landed 4/5 files incrementally per [[feedback_kimi_cli_incremental_edits]] (schema.py, store.py, hooks.py, __init__.py). Claude inline authored tests/test_status.py (42 tests), promoted cli.py status command to group with 7 subcommands (preserving legacy as 'status report'), wired dispatcher.py hooks (wave_id-gated, opt-in), fixed 3 bugs Kimi introduced (key-inversion in write_status, tempfile leak on os.replace failure, unable to read rows with unquoted commas), and fixed the existing STATUS.csv row 3 (WA-1) unquoted-comma data bug. Final: 305/305 tests pass (was 263; +42 new); 90% coverage on harness.status. Test 305 exceeds packet's >=285 acceptance criterion."
     },
     {
       "id": "wave-5.6",
@@ -411,10 +402,10 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 6,
-      "in_flight": [
-        "dispatch-2026-05-21T00-02-status-tracker"
-      ],
-      "fill_policy": "aggressive"
+      "in_flight": [],
+      "fill_policy": "aggressive",
+      "cooldown_until_iso": "2026-05-21T01:50:00Z",
+      "cooldown_reason": "1200s timeout on bcsacjnox dispatch (status-tracker packet); 60min cooldown per dispatch-rules.md."
     },
     "kimi-api": {
       "max_parallel": 6,

@@ -145,23 +145,23 @@ def test_init_template_not_found(mock_load_template, runner: CliRunner) -> None:
 
 
 @patch("harness.cli.load_project_adapter")
-def test_status_missing_project(mock_load_project_adapter, runner: CliRunner) -> None:
-    result = runner.invoke(cli, ["status"])
+def test_status_report_missing_project(mock_load_project_adapter, runner: CliRunner) -> None:
+    result = runner.invoke(cli, ["status", "report"])
     assert result.exit_code == 2
     assert "error: --project is required" in result.output
     mock_load_project_adapter.assert_not_called()
 
 
 @patch("harness.cli.load_project_adapter")
-def test_status_adapter_not_found(mock_load_project_adapter, runner: CliRunner) -> None:
+def test_status_report_adapter_not_found(mock_load_project_adapter, runner: CliRunner) -> None:
     mock_load_project_adapter.side_effect = FileNotFoundError("adapter missing")
-    result = runner.invoke(cli, ["status", "-p", "badproj"])
+    result = runner.invoke(cli, ["status", "report", "-p", "badproj"])
     assert result.exit_code == 1
     assert "error:" in result.output
 
 
 @patch("harness.cli.load_project_adapter")
-def test_status_csv_success(mock_load_project_adapter, runner: CliRunner, tmp_path: Path) -> None:
+def test_status_report_csv_success(mock_load_project_adapter, runner: CliRunner, tmp_path: Path) -> None:
     from harness.adapters.schema import AdapterConfig, StatusTrackingConfig, ObserverConfig
 
     csv_file = tmp_path / "STATUS.csv"
@@ -175,13 +175,13 @@ def test_status_csv_success(mock_load_project_adapter, runner: CliRunner, tmp_pa
     )
     mock_load_project_adapter.return_value = cfg
 
-    result = runner.invoke(cli, ["status", "-p", "myproj"])
+    result = runner.invoke(cli, ["status", "report", "-p", "myproj"])
     assert result.exit_code == 0
     assert "task,status" in result.output
 
 
 @patch("harness.cli.load_project_adapter")
-def test_status_json_success(mock_load_project_adapter, runner: CliRunner, tmp_path: Path) -> None:
+def test_status_report_json_success(mock_load_project_adapter, runner: CliRunner, tmp_path: Path) -> None:
     from harness.adapters.schema import AdapterConfig, StatusTrackingConfig, ObserverConfig
 
     csv_file = tmp_path / "STATUS.csv"
@@ -195,7 +195,7 @@ def test_status_json_success(mock_load_project_adapter, runner: CliRunner, tmp_p
     )
     mock_load_project_adapter.return_value = cfg
 
-    result = runner.invoke(cli, ["status", "-p", "myproj", "--format", "json"])
+    result = runner.invoke(cli, ["status", "report", "-p", "myproj", "--format", "json"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["project"] == "myproj"
