@@ -132,6 +132,7 @@ def test_eligible_engines_sorts_by_priority() -> None:
         "kimi": EngineHealth(priority="HIGH"),
         "anthropic": EngineHealth(priority="AVOID"),
     }
+    # "mock" is unconditionally excluded by _eligible_engines (test-only backend)
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
     assert names == ["kimi", "deepseek", "gemini", "anthropic"]
@@ -152,6 +153,14 @@ def test_eligible_engines_defaults_to_normal() -> None:
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
     assert names == ["deepseek", "kimi", "anthropic", "gemini"]
+
+
+def test_eligible_engines_excludes_mock_unconditionally() -> None:
+    """Mock is a test-only backend — never in the auto-fallback chain."""
+    health: dict[str, EngineHealth] = {}
+    result = _eligible_engines(health, exclude=set())
+    names = [n for n, _ in result]
+    assert "mock" not in names
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,12 @@ _ENGINE_URLS: dict[str, str] = {
     "gemini": "https://generativelanguage.googleapis.com",
 }
 
+# Backends that have a real network endpoint to probe.  The "mock" backend
+# is local-only — it has no upstream URL and is always reachable, so it is
+# excluded from health probes.  Kept module-private so other modules use
+# ``SUPPORTED_BACKENDS`` (the full universe) explicitly.
+_PROBEABLE_BACKENDS: list[str] = [b for b in SUPPORTED_BACKENDS if b in _ENGINE_URLS]
+
 
 def probe_engine(name: str) -> tuple[str, str | None]:
     """Return (status, error_or_none) for a single engine.
@@ -47,5 +53,9 @@ def probe_engine(name: str) -> tuple[str, str | None]:
 
 
 def probe_all_engines() -> dict[str, tuple[str, str | None]]:
-    """Probe every supported backend and return a mapping."""
-    return {name: probe_engine(name) for name in SUPPORTED_BACKENDS}
+    """Probe every network-backed backend and return a status mapping.
+
+    The "mock" backend has no network endpoint and is intentionally omitted
+    from the result — it is always available locally.
+    """
+    return {name: probe_engine(name) for name in _PROBEABLE_BACKENDS}

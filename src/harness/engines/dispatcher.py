@@ -41,6 +41,16 @@ MAX_PACKET_BYTES: int = 10 * 1024 * 1024
 
 _PRIORITY_ORDER: dict[str, int] = {"HIGH": 0, "NORMAL": 1, "AVOID": 2}
 
+# "mock" is reachable via ``force_engine="mock"`` but is excluded from the
+# auto-fallback chain, LOCK/BURST resolution, and the "no engines remaining"
+# exhaustion check.  Centralizing the filter here prevents drift across
+# the four loops below that all walk SUPPORTED_BACKENDS.
+_NON_PRODUCTION_BACKENDS: frozenset[str] = frozenset({"mock"})
+
+
+def _production_backends() -> list[str]:
+    return [b for b in SUPPORTED_BACKENDS if b not in _NON_PRODUCTION_BACKENDS]
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -88,9 +98,14 @@ def _eligible_engines(
     health: dict[str, state_files.EngineHealth],
     exclude: set[str],
 ) -> list[tuple[str, str]]:
-    """Return ``(name, priority)`` tuples sorted by priority (HIGH first)."""
+    """Return ``(name, priority)`` tuples sorted by priority (HIGH first).
+
+    Non-production backends (see ``_NON_PRODUCTION_BACKENDS``) are
+    unconditionally filtered out — they are reachable only via
+    ``force_engine``.
+    """
     eligible: list[tuple[str, str]] = []
-    for name in SUPPORTED_BACKENDS:
+    for name in _production_backends():
         if name in exclude:
             continue
         h = health.get(name)
@@ -105,7 +120,7 @@ def _resolve_locked_engine(
 ) -> str | None:
     """Return the highest-priority locked engine, or ``None``."""
     locked: list[tuple[str, str]] = []
-    for name in SUPPORTED_BACKENDS:
+    for name in _production_backends():
         h = health.get(name)
         if h and h.locked:
             locked.append((name, h.priority))
@@ -121,7 +136,7 @@ def _resolve_burst_engine(
     """Return the highest-priority engine with an active burst, or ``None``."""
     now = _now_iso()
     bursting: list[tuple[str, str]] = []
-    for name in SUPPORTED_BACKENDS:
+    for name in _production_backends():
         h = health.get(name)
         if h and h.burst_until and h.burst_until > now:
             bursting.append((name, h.priority))
@@ -235,7 +250,7 @@ def _pick_initial_engine(
         )
         return eligible[0][0], None, {}
 
-    return SUPPORTED_BACKENDS[0], None, {}
+    return _production_backends()[0], None, {}
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +609,7 @@ def dispatch_packet(
                 )
 
         # --- 9d. Choose next engine -----------------------------------------
-        remaining = [n for n in SUPPORTED_BACKENDS if n not in tried]
+        remaining = [n for n in _production_backends() if n not in tried]
         if not remaining:
             try:
                 state_db.update_dispatch_status(

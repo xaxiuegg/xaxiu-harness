@@ -14,6 +14,7 @@ import pytest
 
 from harness.cli_helpers import (
     _ENGINE_URLS,
+    _PROBEABLE_BACKENDS,
     probe_all_engines,
     probe_engine,
 )
@@ -142,7 +143,7 @@ def test_probe_all_engines_success(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     result = probe_all_engines()
-    assert set(result.keys()) == set(SUPPORTED_BACKENDS)
+    assert set(result.keys()) == set(_PROBEABLE_BACKENDS)
     for status, error in result.values():
         assert status == "up"
         assert error is None
@@ -165,7 +166,7 @@ def test_probe_all_engines_partial_failure(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_probe_all_engines_all_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     transport = _conditional_transport(
-        failing=set(SUPPORTED_BACKENDS),
+        failing=set(_PROBEABLE_BACKENDS),
         exc=httpx.ConnectError("refused"),
     )
     monkeypatch.setattr(
@@ -215,6 +216,6 @@ def test_probe_all_engines_latency(monkeypatch: pytest.MonkeyPatch) -> None:
     result = probe_all_engines()
     t1 = time.monotonic()
 
-    assert len(result) == len(SUPPORTED_BACKENDS)
+    assert len(result) == len(_PROBEABLE_BACKENDS)
     elapsed = t1 - t0
-    assert elapsed >= delay * len(SUPPORTED_BACKENDS)
+    assert elapsed >= delay * len(_PROBEABLE_BACKENDS)

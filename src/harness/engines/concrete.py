@@ -26,6 +26,7 @@ from harness import __version__
 from harness._constants import API_KEY_ENV_VARS
 from harness.engines.base import Engine, EngineResponse
 from harness.engines.gemini import GeminiConcrete
+from harness.engines.mock import MockEngine
 from harness.secrets import dpapi
 
 
@@ -379,6 +380,9 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
         RuntimeError: If the engine name is unknown or no API key is available.
     """
     name_lower = name.lower().strip()
+
+    if name_lower == "mock":
+        return MockEngine()
 
     if name_lower not in _ENV_VAR_MAP:
         raise RuntimeError(

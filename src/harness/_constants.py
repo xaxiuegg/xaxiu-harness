@@ -7,7 +7,7 @@ Prevents the duplicate-source-of-truth drift flagged in the v1.2 security audit
 from pathlib import Path
 from typing import Final
 
-SUPPORTED_BACKENDS: Final = ["deepseek", "kimi", "anthropic", "gemini"]
+SUPPORTED_BACKENDS: Final = ["deepseek", "kimi", "anthropic", "gemini", "mock"]
 
 API_KEY_ENV_VARS: Final = {
     "deepseek": "DEEPSEEK_API_KEY",
