@@ -12,6 +12,7 @@ These rules are extracted from the operator's warehouse project retrospective (2
 | Novel-feature drafting | DeepSeek | `deepseek-v4-flash` | Kimi consistently times out on novelty |
 | Schema/math/logic verification | DeepSeek | `deepseek-v4-pro` | Reserve v4-pro for ship-blocking work; v4-flash for routine |
 | Cross-engine ship audit | DeepSeek (vs prior Kimi work) or Kimi (vs prior DeepSeek work) | as above | Never the SAME engine that produced the artifact |
+| Cross-engine ship audit (triangulation) | Gemini-2.5-pro | reserved for triangulation only | Use when both Kimi + DeepSeek already used; 2M-token window |
 
 Never:
 - Dispatch to Claude as a swarm worker (`--backend claude`). Use in-session Claude for judgment.

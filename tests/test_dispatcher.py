@@ -130,7 +130,7 @@ def test_eligible_engines_sorts_by_priority() -> None:
     }
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
-    assert names == ["kimi", "deepseek", "anthropic", "gemini"]
+    assert names == ["kimi", "deepseek", "gemini", "anthropic"]
 
 
 def test_eligible_engines_excludes_tried() -> None:

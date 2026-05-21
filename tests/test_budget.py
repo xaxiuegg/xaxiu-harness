@@ -245,14 +245,18 @@ def test_budget_help_lists_four_subcommands(runner: CliRunner) -> None:
 
 
 def test_budget_summary_empty_ledger(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", tmp_path / "empty.jsonl")
+    empty_ledger = tmp_path / "empty.jsonl"
+    monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", empty_ledger)
+    monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", empty_ledger)
     result = runner.invoke(cli, ["budget", "summary"])
     assert result.exit_code == 0
     assert "(no dispatches)" in result.output
 
 
 def test_budget_show_empty_ledger(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", tmp_path / "empty.jsonl")
+    empty_ledger = tmp_path / "empty.jsonl"
+    monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", empty_ledger)
+    monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", empty_ledger)
     result = runner.invoke(cli, ["budget", "show"])
     assert result.exit_code == 0
 
