@@ -131,6 +131,22 @@ def integrate(
             merge_diag = f"merge step failed: {exc}"
 
     if conflicted:
+        # Best-effort post-integrate notify (COORD-NOTIFY-ON-INTEGRATE)
+        try:
+            from harness.coord.notify import notify as _notify
+            webhook = os.environ.get("HARNESS_INTEGRATOR_WEBHOOK_URL", "")
+            _notify(run_dir, {
+                "run_id": state.run_id,
+                "success": False,
+                "commit_sha": None,
+                "pushed": False,
+                "test_summary": None,
+                "workers_merged": merged,
+                "workers_skipped": skipped,
+                "diagnostic": "merge_conflict",
+            }, webhook_url=webhook)
+        except Exception:
+            pass
         return IntegrationReport(
             success=False,
             workers_merged=merged,
@@ -213,6 +229,21 @@ def integrate(
             commit_sha=sha,
         )
         write_run_state(run_dir / "run_state.json", state)
+        # Best-effort post-integrate notify (COORD-NOTIFY-ON-INTEGRATE)
+        try:
+            from harness.coord.notify import notify as _notify
+            webhook = os.environ.get("HARNESS_INTEGRATOR_WEBHOOK_URL", "")
+            _notify(run_dir, {
+                "run_id": state.run_id,
+                "success": True,
+                "commit_sha": sha,
+                "pushed": pushed,
+                "test_summary": test_summary,
+                "workers_merged": merged,
+                "workers_skipped": skipped,
+            }, webhook_url=webhook)
+        except Exception:
+            pass
         return IntegrationReport(
             success=True,
             commit_sha=sha,
@@ -230,6 +261,21 @@ def integrate(
         last_action="dry_run",
     )
     write_run_state(run_dir / "run_state.json", state)
+    # Best-effort post-integrate notify (COORD-NOTIFY-ON-INTEGRATE)
+    try:
+        from harness.coord.notify import notify as _notify
+        webhook = os.environ.get("HARNESS_INTEGRATOR_WEBHOOK_URL", "")
+        _notify(run_dir, {
+            "run_id": state.run_id,
+            "success": True,
+            "commit_sha": None,
+            "pushed": False,
+            "test_summary": test_summary,
+            "workers_merged": merged,
+            "workers_skipped": skipped,
+        }, webhook_url=webhook)
+    except Exception:
+        pass
     return IntegrationReport(
         success=test_summary.get("failed", 0) == 0 and test_summary.get("errors", 0) == 0,
         test_summary=test_summary,

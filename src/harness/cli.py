@@ -594,6 +594,27 @@ def engines(list_: bool, health: bool) -> None:
     sys.exit(0)
 
 
+@cli.command(name="engines-cooldowns")
+def engines_cooldowns() -> None:
+    """Show active engine cooldowns."""
+    from harness.loops.state import read_state
+    state_path = Path("coord") / "dev_loop" / "state.json"
+    state = read_state(state_path)
+    cd = getattr(state, "engine_cooldowns", {}) or {}
+    if not cd:
+        click.echo("no active cooldowns")
+        return
+    click.echo(f"{'ENGINE':<24} {'UNTIL':<28}  REASON")
+    for engine, info in sorted(cd.items()):
+        if isinstance(info, dict):
+            until = info.get("until", "-")
+            reason = info.get("reason", "-")
+        else:
+            until = str(info)
+            reason = "-"
+        click.echo(f"{engine:<24} {until:<28}  {reason}")
+
+
 @cli.command()
 @click.argument("engine")
 @click.argument("level", type=click.Choice(["HIGH", "NORMAL", "AVOID"]))
@@ -822,9 +843,11 @@ def observer_daily_retro() -> None:
 @observer.command(name="install-scheduler")
 @click.option("--cadence-minutes", type=int, default=60)
 @click.option("--daily-time", default="23:00")
-def observer_install_scheduler(cadence_minutes: int, daily_time: str) -> None:
+@click.option("--include-chat", is_flag=True,
+              help="Also register the chat-observer audit task (CHAT-OBSERVER).")
+def observer_install_scheduler(cadence_minutes: int, daily_time: str, include_chat: bool) -> None:
     """Register Windows Task Scheduler entries for the observer."""
-    ok, msg = register_tasks(cadence_minutes=cadence_minutes, daily_time=daily_time)
+    ok, msg = register_tasks(cadence_minutes=cadence_minutes, daily_time=daily_time, include_chat=include_chat)
     click.echo(msg)
     sys.exit(0 if ok else 1)
 

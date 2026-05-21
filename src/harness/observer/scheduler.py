@@ -12,6 +12,8 @@ from pathlib import Path
 
 from harness._constants import _REPO_ROOT
 
+TASK_NAME_PREFIX = "XaxiuHarness"
+
 
 def _pwsh() -> str | None:
     """Return the path to PowerShell (pwsh or powershell)."""
@@ -44,6 +46,15 @@ def _daily_retro_cmd() -> str:
     else:
         py = "python"
     return f'{py} -m harness observer daily-retro'
+
+
+def _chat_audit_cmd() -> str:
+    venv_python = _REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        py = str(venv_python)
+    else:
+        py = "python"
+    return f'{py} -m harness observer audit-chat'
 
 
 def _build_ps_script(
@@ -82,9 +93,39 @@ try {{
 """
 
 
+def register_chat_audit_task(
+    cadence_minutes: int = 60,
+    task_prefix: str = TASK_NAME_PREFIX,
+) -> bool:
+    """Register the chat-observer audit task in Windows Task Scheduler."""
+    ps = _pwsh()
+    if ps is None:
+        return False
+
+    trigger = (
+        f"New-ScheduledTaskTrigger -Once -At (Get-Date) "
+        f"-RepetitionInterval (New-TimeSpan -Minutes {cadence_minutes}) "
+        f"-RepetitionDuration (New-TimeSpan -Days 3650)"
+    )
+    script = _build_ps_script(
+        task_name=f"{task_prefix}ObserverChatAudit",
+        trigger_ps=trigger,
+        action_cmd=_chat_audit_cmd(),
+        description=f"Xaxiu Harness chat-observer audit (every {cadence_minutes} min)",
+    )
+
+    result = subprocess.run(
+        [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and "OK" in result.stdout
+
+
 def register_tasks(
     cadence_minutes: int = 60,
     daily_time: str = "23:00",
+    include_chat: bool = False,
 ) -> tuple[bool, str]:
     """Register the two observer scheduled tasks.
 
@@ -139,16 +180,29 @@ def register_tasks(
     )
     ok_retro = result_retro.returncode == 0 and "OK" in result_retro.stdout
 
-    if ok_cycle and ok_retro:
-        return True, f"Tasks registered (cycle every {cadence_minutes} min, retro at {daily_time})"
+    ok_chat = True
+    chat_msg = ""
+    if include_chat:
+        ok_chat = register_chat_audit_task(cadence_minutes=cadence_minutes)
+        chat_msg = "chat audit registered" if ok_chat else "chat audit failed"
+
+    if ok_cycle and ok_retro and ok_chat:
+        msg = f"Tasks registered (cycle every {cadence_minutes} min, retro at {daily_time})"
+        if include_chat:
+            msg += f", {chat_msg}"
+        return True, msg
+    parts: list[str] = []
     if ok_cycle:
-        return False, f"Cycle task OK; retro task failed: {result_retro.stderr.strip() or result_retro.stdout.strip()}"
+        parts.append("Cycle task OK")
+    else:
+        parts.append(f"cycle task failed: {result_cycle.stderr.strip() or result_cycle.stdout.strip()}")
     if ok_retro:
-        return False, f"Retro task OK; cycle task failed: {result_cycle.stderr.strip() or result_cycle.stdout.strip()}"
-    return False, (
-        f"Cycle: {result_cycle.stderr.strip() or result_cycle.stdout.strip()}; "
-        f"Retro: {result_retro.stderr.strip() or result_retro.stdout.strip()}"
-    )
+        parts.append("retro task OK")
+    else:
+        parts.append(f"retro task failed: {result_retro.stderr.strip() or result_retro.stdout.strip()}")
+    if include_chat:
+        parts.append(chat_msg)
+    return False, "; ".join(parts)
 
 
 def unregister_tasks() -> tuple[bool, str]:
@@ -163,7 +217,7 @@ def unregister_tasks() -> tuple[bool, str]:
         return False, "PowerShell not found — cannot unregister scheduled tasks"
 
     results: list[str] = []
-    for name in ("XaxiuHarnessObserverCycle", "XaxiuHarnessObserverDailyRetro"):
+    for name in ("XaxiuHarnessObserverCycle", "XaxiuHarnessObserverDailyRetro", "XaxiuHarnessObserverChatAudit"):
         script = f"""
 $TaskName = '{name}'
 $Existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

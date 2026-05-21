@@ -48,7 +48,7 @@ harness <verb> --help
 | `adapter` | `from-description`, `list`, `validate` | Create or check project adapters (YAML configs that tell harness how to talk to each project). |
 | `budget` | `show`, `summary`, `set-cap`, `reset` | Track spending per engine and set monthly spending limits. |
 | `burst` | — | Temporarily send all traffic to one engine for a set number of minutes. |
-| `coord` | `plan`, `run`, `work`, `integrate`, `status`, `cleanup` | Run the multi-agent coordinator: plan a wave, run workers, merge results, GC stale worktrees. |
+| `coord` | `plan`, `run`, `work`, `integrate`, `status`, `watch`, `list`, `cleanup` | Run the multi-agent coordinator: plan a wave, run workers, merge results, live-tail events, list runs, GC stale worktrees. |
 | `dashboard-serve` | — | Launch the operator web dashboard (default port 7878). |
 | `dispatch` | — | Send a work packet to an engine; auto-routes if you do not pick one. |
 | `engines` | — | List engines or check which ones are healthy. |
@@ -59,7 +59,7 @@ harness <verb> --help
 | `lock` | — | Lock an engine so the router cannot use it until you release it. |
 | `loop` | `init`, `tick`, `start`, `stop`, `status` | Manage the autonomous dev loop that runs ticks on a schedule. |
 | `loops` | — | Manage user-defined scheduled loops (advanced). |
-| `observer` | `init`, `arm`, `disarm`, `pause`, `resume`, `status`, `flags`, `ack`, `cycle-now`, `daily-retro`, `install-scheduler`, `uninstall-scheduler` | Independent audit and flagging system that watches for problems. |
+| `observer` | `init`, `arm`, `disarm`, `pause`, `resume`, `status`, `flags`, `ack`, `cycle-now`, `daily-retro`, `audit-chat`, `install-scheduler`, `uninstall-scheduler` | Independent audit and flagging system that watches for problems (now includes chat-transcript drift detection). |
 | `priority` | — | Set how strongly the router prefers one engine over others. |
 | `proxy` | `start`, `stop`, `status`, `reset-circuit`, `quarantine` | Start the stateful API proxy that balances 4 Kimi keys with circuit breaking. |
 | `replay` | — | Reconstruct what happened during a past dispatch for debugging. |
