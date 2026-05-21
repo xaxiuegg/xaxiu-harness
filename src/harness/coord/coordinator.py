@@ -39,11 +39,13 @@ class CoordinationReport:
 class Coordinator:
     """Orchestrates a single run from spec → plan → workers → integration."""
 
-    def __init__(self, *, run_id: str, run_dir: str | Path, project_root: Path | None = None) -> None:
+    def __init__(self, *, run_id: str, run_dir: str | Path, project_root: Path | None = None,
+                 label: str | None = None) -> None:
         self.run_id: str = run_id
         self.run_dir: Path = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.project_root: Path = project_root or Path.cwd()
+        self.label: str | None = label
         self._procs: dict[str, subprocess.Popen] = {}
 
     @property
@@ -200,7 +202,11 @@ class Coordinator:
             workers={},
             integrator_status=IntegratorStatus(state="pending"),
             escalations=[],
+            label=self.label,
         )
+        # If the run was resumed and the operator passed a new label, update it
+        if self.label and state.label != self.label:
+            state.label = self.label
 
         # PLANNING -> RUNNING
         if state.state == RunStateLiteral.PLANNING:

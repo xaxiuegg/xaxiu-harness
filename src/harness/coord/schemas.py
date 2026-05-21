@@ -137,3 +137,6 @@ class RunState(BaseModel):
     workers: dict[str, WorkerStatus] = Field(default_factory=dict)
     integrator_status: IntegratorStatus | None = None
     escalations: list[Escalation] = Field(default_factory=list)
+    # RUN-TAG-LABEL (2026-05-21): optional operator-supplied label so the
+    # operator can group / filter runs without remembering opaque run_ids.
+    label: str | None = Field(default=None, max_length=64)

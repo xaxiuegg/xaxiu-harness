@@ -1438,12 +1438,39 @@ def coord_rerun_failed(run_id: str, engine: str, worker_engine: str,
 @click.option("--proxy", type=click.Choice(["auto", "off", "external"]),
               default="auto",
               help="Auto-start the v2 proxy ('auto'), use a running one ('external'), or skip ('off').")
-def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None, proxy: str) -> None:
+@click.option("--label", default=None,
+              help="Optional label tag to stamp on the run for grouping/filtering.")
+@click.option("--dry-run", is_flag=True,
+              help="Print plan + worker assignments without dispatching engines or creating worktrees.")
+def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
+              proxy: str, label: str | None, dry_run: bool) -> None:
     """Execute a coordination run (single tick)."""
     from harness.coord.coordinator import Coordinator
-    from harness.coord.planner import _new_run_id
+    from harness.coord.planner import _new_run_id, plan as run_planner
     from harness.coord.run_state import read_run_state
     from harness.proxy import lifecycle as proxy_lifecycle
+
+    # --- Dry-run short-circuit (COORD-RUN-DRY-RUN) -------------------------
+    if dry_run:
+        # Compute a plan without spawning workers / creating worktrees
+        rid = run_id or _new_run_id()
+        try:
+            waveplan = run_planner(spec, run_id=rid, engine="claude")
+        except Exception as exc:
+            click.echo(f"dry-run: planner failed — {exc}", err=True)
+            sys.exit(1)
+        click.echo(f"dry-run: would create run {rid}")
+        if label:
+            click.echo(f"  label: {label}")
+        click.echo(f"  spec:  {spec}")
+        click.echo(f"  tasks: {len(waveplan.tasks)}")
+        for task in waveplan.tasks:
+            wt = f".harness/worktrees/{rid}/{task.worker_id}"
+            click.echo(f"  - {task.worker_id}: {task.title!r}  worktree={wt}")
+            files = task.write_set or []
+            click.echo(f"      write_set: {', '.join(files) if files else '(none)'}")
+        click.echo("dry-run: no engines dispatched, no worktrees created")
+        sys.exit(0)
 
     proxy_proc = None
     if proxy == "auto":
@@ -1475,7 +1502,7 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None, p
             rid = run_id or _new_run_id()
         run_dir = Path("runs") / rid
         run_dir.mkdir(parents=True, exist_ok=True)
-        coord = Coordinator(run_id=rid, run_dir=run_dir)
+        coord = Coordinator(run_id=rid, run_dir=run_dir, label=label)
         report = coord.tick(spec, in_flight_limit=limit)
         click.echo(f"run {report.run_id}: {report.state.value}")
         if report.worker_summary:
@@ -1578,10 +1605,12 @@ def coord_integrate(run_id: str, project_root: Path, commit: bool, push: bool) -
 
 @coord_group.command(name="list")
 @click.option("--limit", default=20, type=int, help="Max number of runs to print (newest first).")
-def coord_list(limit: int) -> None:
-    """List runs/ with state + age + worker count (CLI parity for /v2/runs)."""
+@click.option("--label", default=None,
+              help="Filter runs by label (RUN-TAG-LABEL).")
+def coord_list(limit: int, label: str | None) -> None:
+    """List runs/ with state + age + worker count + label (CLI parity for /v2/runs)."""
     from harness.dashboard.v2_routes import list_runs
-    runs = list_runs()
+    runs = list_runs(label=label)
     if not runs:
         click.echo("no runs")
         return
@@ -1589,11 +1618,12 @@ def coord_list(limit: int) -> None:
     def _key(r: dict) -> str:
         return r.get("last_tick_at") or r.get("started_at") or r.get("run_id", "")
     runs_sorted = sorted(runs, key=_key, reverse=True)[:limit]
-    click.echo(f"{'RUN_ID':<28} {'STATE':<14} {'TASKS':>5}  STARTED_AT")
+    click.echo(f"{'RUN_ID':<28} {'STATE':<14} {'TASKS':>5}  {'LABEL':<16}  STARTED_AT")
     for r in runs_sorted:
         click.echo(
             f"{r['run_id']:<28} {str(r.get('state') or '-'):<14} "
-            f"{r.get('tasks', 0):>5}  {r.get('started_at') or '-'}"
+            f"{r.get('tasks', 0):>5}  {str(r.get('label') or '-'):<16}  "
+            f"{r.get('started_at') or '-'}"
         )
 
 

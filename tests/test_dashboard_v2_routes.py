@@ -28,12 +28,14 @@ def test_list_runs_summarises_each_run(monkeypatch, tmp_path):
     _write(tmp_path / "runs" / "r1" / "plan.json",
            {"tasks": [{"worker_id": "worker-1"}, {"worker_id": "worker-2"}]})
     runs = list_runs()
+    # RUN-TAG-LABEL (2026-05-21) added a 'label' field to the summary.
     assert runs == [{
         "run_id": "r1",
         "state": "running",
         "tasks": 2,
         "started_at": "2026-05-21T01:00:00Z",
         "last_tick_at": None,
+        "label": None,
     }]
 
 

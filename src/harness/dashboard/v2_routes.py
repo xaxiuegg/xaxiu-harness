@@ -27,8 +27,12 @@ def _read_json(p: Path) -> dict[str, Any] | None:
         return None
 
 
-def list_runs() -> list[dict[str, Any]]:
-    """Return summaries for every run under ./runs."""
+def list_runs(label: str | None = None) -> list[dict[str, Any]]:
+    """Return summaries for every run under ./runs.
+
+    Optional *label* filter (RUN-TAG-LABEL, 2026-05-21): when set, only
+    runs whose RunState.label matches are returned.
+    """
     runs: list[dict[str, Any]] = []
     base = _runs_dir()
     if not base.exists():
@@ -38,12 +42,16 @@ def list_runs() -> list[dict[str, Any]]:
             continue
         state = _read_json(run_dir / "run_state.json")
         plan = _read_json(run_dir / "plan.json")
+        run_label = (state or {}).get("label")
+        if label is not None and run_label != label:
+            continue
         runs.append({
             "run_id": run_dir.name,
             "state": (state or {}).get("state"),
             "tasks": len((plan or {}).get("tasks") or []),
             "started_at": (state or {}).get("started_at"),
             "last_tick_at": (state or {}).get("last_tick_at"),
+            "label": run_label,
         })
     return runs
 
@@ -128,8 +136,8 @@ def make_router() -> APIRouter:
     router = APIRouter(prefix="/v2")
 
     @router.get("/runs")
-    def _runs() -> list[dict[str, Any]]:
-        return list_runs()
+    def _runs(label: str | None = None) -> list[dict[str, Any]]:
+        return list_runs(label=label)
 
     @router.get("/runs/{run_id}/workers")
     def _workers(run_id: str) -> list[dict[str, Any]]:
