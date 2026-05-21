@@ -801,3 +801,63 @@ def observer_uninstall_scheduler() -> None:
     ok, msg = unregister_tasks()
     click.echo(msg)
     sys.exit(0 if ok else 1)
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat (HEARTBEAT — roster row #17)
+# ---------------------------------------------------------------------------
+
+
+@cli.group(name="heartbeat")
+def heartbeat() -> None:
+    """Passive dev-manager liveness signal for the operator."""
+
+
+@heartbeat.command(name="pulse")
+def heartbeat_pulse() -> None:
+    """Emit one heartbeat now (dev-loop manager calls this each tick)."""
+    from harness.heartbeat import pulse as _pulse
+
+    try:
+        beat = _pulse()
+    except FileNotFoundError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"pulsed at {beat.pulsed_at} (tick #{beat.tick_count})")
+
+
+@heartbeat.command(name="show")
+def heartbeat_show() -> None:
+    """Print the last heartbeat in operator-readable form."""
+    from harness.heartbeat import format_for_human, read_heartbeat
+
+    click.echo(format_for_human(read_heartbeat()))
+
+
+# ---------------------------------------------------------------------------
+# State inspector (STATE-INSPECT — roster row #18 companion)
+# ---------------------------------------------------------------------------
+
+
+@cli.group(name="state")
+def state() -> None:
+    """Inspect dev-loop runtime state."""
+
+
+@state.command(name="inspect")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json", "compact"]), default="pretty")
+@click.option("--path", type=click.Path(path_type=Path),
+              default=Path("coord/dev_loop/state.json"))
+def state_inspect(fmt: str, path: Path) -> None:
+    """Pretty-print coord/dev_loop/state.json for the operator."""
+    from harness.errors import ConfigCorruption
+    from harness.state.inspect import render_state_json
+
+    try:
+        click.echo(render_state_json(path=path, fmt=fmt))
+    except FileNotFoundError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    except ConfigCorruption as exc:
+        click.echo(f"error: {exc.tag()}: {exc.message}", err=True)
+        sys.exit(exc.exit_code())

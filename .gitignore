@@ -42,3 +42,6 @@ audit/
 # Observer runtime artifacts (#20): created by `harness observer init`,
 # updated by cycles, ack'd by operator.  Per-machine state, not committed.
 coord/observer/
+
+# Heartbeat (HEARTBEAT): runtime pulse, per-machine, not committed.
+coord/dev_loop/heartbeat.json
