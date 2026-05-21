@@ -223,7 +223,28 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [],
+  "active_dispatches": [
+    {
+      "task_id": "dispatch-2026-05-21T02-35-wave3-dashboard",
+      "packet": "coord/packets/2026-05-21-wave3-dashboard/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-21T02:35:32Z",
+      "phase": "developing",
+      "wave_id": "wave-3",
+      "timeout_seconds": 1200,
+      "bg_handle": "biatdaadg"
+    },
+    {
+      "task_id": "dispatch-2026-05-21T02-40-wave6A-loops",
+      "packet": "coord/packets/2026-05-21-wave6A-loops-core/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-21T02:40:00Z",
+      "phase": "developing",
+      "wave_id": "wave-6/A",
+      "timeout_seconds": 1200,
+      "note": "Parallel with Wave 3; disjoint file sets (dashboard/ vs loops/)"
+    }
+  ],
   "reconciled_at": "2026-05-21T00:50:00Z",
   "reconcile_note": "Round 1 (status-tracker #19) completed hybrid mode at 2026-05-21T00:50Z; cleared from active_dispatches. Earlier reconcile at 2026-05-21T00:02:35Z cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b).",
   "wave_plan": [
