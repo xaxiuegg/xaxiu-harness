@@ -953,7 +953,7 @@ def loop_stop_cmd() -> None:
 @click.option("--state-path", type=click.Path(path_type=Path),
               default=Path("coord/dev_loop/state.json"))
 def loop_status_cmd(state_path: Path) -> None:
-    """Print loop_status + tick_count + last_tick_at."""
+    """Print loop_status + tick_count + last_tick_at + observer + session flags."""
     from harness.loops.scheduler import is_registered
     from harness.loops.state import read_state
 
@@ -964,6 +964,24 @@ def loop_status_cmd(state_path: Path) -> None:
         f"last={state.last_tick_at or '-'} | active={len(state.active_dispatches)} | "
         f"scheduled={scheduled}"
     )
+    # Observer flag surface — read-only check; never modify
+    obs_high = Path("coord/observer/HIGH_FLAG_PENDING.md")
+    obs_crit = Path("coord/observer/CRITICAL_FLAG_PENDING.md")
+    if obs_crit.exists():
+        click.echo(f"observer: 🔴 CRITICAL FLAG PENDING — see {obs_crit}")
+    elif obs_high.exists():
+        click.echo(f"observer: 🟡 HIGH flag pending — see {obs_high}")
+    else:
+        click.echo("observer: clean")
+    # Session-handoff state
+    hf_crit = Path("coord/dev_loop/handoff_CRITICAL.md")
+    hf_rec = Path("coord/dev_loop/handoff_recommended.md")
+    if hf_crit.exists():
+        click.echo(f"session: 🔴 CRITICAL handoff written — see {hf_crit}")
+    elif hf_rec.exists():
+        click.echo(f"session: 🟡 Heavy handoff recommended — see {hf_rec}")
+    else:
+        click.echo("session: healthy (no handoff flagged)")
 
 
 # ---------------------------------------------------------------------------
