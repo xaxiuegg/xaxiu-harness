@@ -23,6 +23,7 @@ from harness.heartbeat import HEARTBEAT_PATH, read_heartbeat
 from harness.observer.flags import list_pending_flags
 from harness.state.inspect import DEFAULT_STATE_PATH
 from harness.status.store import DEFAULT_STATUS_PATH, read_status, summary as status_summary
+from harness.dashboard.v2_routes import make_router as _v2_make_router
 
 _STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 
@@ -72,6 +73,7 @@ def _snapshot() -> dict[str, Any]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="xaxiu-harness dashboard")
+    app.include_router(_v2_make_router())
 
     # Static assets
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

@@ -93,6 +93,33 @@ From warehouse `dev-panel-runs/.../observer/daily/`:
 
 Defaults live in `src/harness/operator/modes.py::DEFAULT_ENGINE_SLOTS` — adapter YAML overrides via `operator.engine_slots`.
 
+## Auto-fanout — split before dispatch (2026-05-21)
+
+A packet is a single Kimi worker's contract. When the contract is too
+broad, the worker times out, returns truncated edits, or silently drops
+symbols. Empirical rate from 2026-05-21 telemetry: supervisors-coverage
+needed 3 retries (761df48 / 5a77137 / 3b4ab7b); V2-FIRST-RUN caught 4
+production gaps that should have been separate scoped waves.
+
+**Hard rule** — split the packet into N siblings dispatched via
+`xaxiu-swarm swarm --max-concurrent N` when ANY of the following is true:
+
+| Signal | Threshold |
+|---|---|
+| Expected edited LOC (counting new files) | > 500 |
+| Distinct top-level symbols (`def` / `class` count) | > 2 |
+| Distinct top-level files touched (excluding tests) | > 3 |
+| Test files added | > 1 |
+
+**Soft rule** — consider splitting also when:
+- The packet spans more than one module directory.
+- The packet asks for both a schema change AND a wiring change.
+- The packet would touch `src/harness/cli.py` (conflict hotspot — see
+  `CLI-DECOMPOSE` row in STATUS.csv).
+
+Splitting beats retrying. 3 narrow packets in parallel beat 1 wide
+packet that times out at 420s.
+
 After supervisors return diffs in a tick, the manager runs slot-fill (see `coord/dev_loop/manager.md` slot-filling section):
 1. Count `engine_slots.kimi.in_flight`. If `< max_parallel`, find queued waves with deps met whose file scopes don't overlap any in-flight dispatch. Dispatch each via `xaxiu-swarm dispatch --backend kimi ...` (or `xaxiu-swarm swarm` for a batch).
 2. If `kimi` slots are full and more eligible work exists, dispatch overflow to `kimi-api`.
