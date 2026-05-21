@@ -433,6 +433,29 @@ def dispatch_packet(
                 dispatch_id="",
             )
 
+    # ---- 4.6 WIRE-PROVENANCE-VERIFY (2026-05-21) --------------------------
+    # If the packet has been registered in coord/spec_provenance.jsonl,
+    # require the on-disk SHA to match the registered SHA.  When no
+    # registration exists, dispatch proceeds (provenance is opt-in).
+    try:
+        from harness.coord.provenance import verify as _verify_provenance
+        prov_log = Path("coord") / "spec_provenance.jsonl"
+        if prov_log.exists():
+            matches, msg = _verify_provenance(Path(packet_path))
+            # Only fail when a registration exists AND the SHA disagrees.
+            # "no registration for ..." is OK — provenance is opt-in.
+            if not matches and "no registration" not in msg:
+                return DispatchResult(
+                    success=False,
+                    engine_used="",
+                    fallback_chain=[],
+                    text="",
+                    error=f"packet_provenance_mismatch: {msg}",
+                    dispatch_id="",
+                )
+    except Exception:
+        pass  # provenance is best-effort; never block on its own errors
+
     # ---- 5. Read engine health (once per dispatch) -------------------------
     try:
         health = state_files.read_engine_health()

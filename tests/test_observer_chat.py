@@ -75,3 +75,41 @@ def test_dot_reply_regex_matches_whitespace_only_dot() -> None:
     assert _DOT_REPLY_RE.match("  .  ")
     assert not _DOT_REPLY_RE.match("..")
     assert not _DOT_REPLY_RE.match(". foo")
+
+
+def test_audit_flags_premature_stop_when_gate_says_no(tmp_path: Path) -> None:
+    """Recent stopping language + ok_to_stop()=False ⇒ HIGH premature_stop flag."""
+    from unittest.mock import patch
+    p = tmp_path / "session.jsonl"
+    _write_transcript(p, [
+        "Did a thing",
+        "Session at natural saturation — final state",
+    ])
+    with patch("harness.session.stop_check.ok_to_stop",
+               return_value=(False, "2 queued production rows still pending")):
+        report = audit(transcript_path=p)
+    tags = {f.pattern for f in report.flags}
+    assert "premature_stop" in tags
+    flag = next(f for f in report.flags if f.pattern == "premature_stop")
+    assert flag.severity == "HIGH"
+
+
+def test_audit_does_not_flag_premature_stop_when_gate_says_yes(tmp_path: Path) -> None:
+    """Stopping language is fine when ok_to_stop() returns True."""
+    from unittest.mock import patch
+    p = tmp_path / "session.jsonl"
+    _write_transcript(p, ["session complete", "wrapping up here"])
+    with patch("harness.session.stop_check.ok_to_stop",
+               return_value=(True, "STRONGLY")):
+        report = audit(transcript_path=p)
+    assert "premature_stop" not in {f.pattern for f in report.flags}
+
+
+def test_audit_does_not_flag_premature_stop_without_language(tmp_path: Path) -> None:
+    from unittest.mock import patch
+    p = tmp_path / "session.jsonl"
+    _write_transcript(p, ["just doing work", "more work"])
+    with patch("harness.session.stop_check.ok_to_stop",
+               return_value=(False, "lots queued")):
+        report = audit(transcript_path=p)
+    assert "premature_stop" not in {f.pattern for f in report.flags}

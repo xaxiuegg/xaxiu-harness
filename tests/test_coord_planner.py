@@ -114,7 +114,7 @@ def test_plan_happy_path_with_code_fence(tmp_path: Path) -> None:
         "harness.engines.dispatcher.dispatch_packet",
         return_value=_make_dispatch_result(fenced),
     ) as mock_dispatch:
-        result = plan(spec, run_id=run_id, project_root=tmp_path)
+        result = plan(spec, run_id=run_id, project_root=tmp_path, skip_lint=True)
 
     assert isinstance(result, WavePlan)
     assert result.run_id == run_id
@@ -132,7 +132,7 @@ def test_plan_json_without_code_fence(tmp_path: Path) -> None:
         "harness.engines.dispatcher.dispatch_packet",
         return_value=_make_dispatch_result(json_text),
     ) as mock_dispatch:
-        result = plan(spec, run_id=run_id, project_root=tmp_path)
+        result = plan(spec, run_id=run_id, project_root=tmp_path, skip_lint=True)
 
     assert isinstance(result, WavePlan)
     assert result.run_id == run_id
@@ -159,7 +159,7 @@ def test_plan_retry_succeeds_on_second_attempt(tmp_path: Path) -> None:
         "harness.engines.dispatcher.dispatch_packet",
         side_effect=responses,
     ) as mock_dispatch:
-        result = plan(spec, run_id=run_id, project_root=tmp_path, max_retries=1)
+        result = plan(spec, run_id=run_id, project_root=tmp_path, max_retries=1, skip_lint=True)
 
     assert isinstance(result, WavePlan)
     assert result.run_id == run_id
@@ -177,7 +177,7 @@ def test_plan_raises_validation_error_after_exhausting_retries(tmp_path: Path) -
         return_value=_make_dispatch_result(json.dumps(bad_data)),
     ) as mock_dispatch:
         with pytest.raises(ValidationError):
-            plan(spec, run_id=run_id, project_root=tmp_path, max_retries=1)
+            plan(spec, run_id=run_id, project_root=tmp_path, max_retries=1, skip_lint=True)
 
     assert mock_dispatch.call_count == 2
 
@@ -192,7 +192,7 @@ def test_plan_auto_generates_run_id(tmp_path: Path) -> None:
         "harness.engines.dispatcher.dispatch_packet",
         return_value=_make_dispatch_result(json.dumps(plan_data)),
     ):
-        result = plan(spec, project_root=tmp_path)
+        result = plan(spec, project_root=tmp_path, skip_lint=True)
 
     assert isinstance(result, WavePlan)
     assert re.fullmatch(r"\d{8}T\d{6}-[a-z0-9]{4}", result.run_id)

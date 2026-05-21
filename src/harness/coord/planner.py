@@ -67,12 +67,32 @@ def plan(
     model: str | None = None,
     project_root: Path | None = None,
     max_retries: int = 1,
+    skip_lint: bool = False,
 ) -> WavePlan:
     """Decompose the markdown spec at *spec_path* into a WavePlan.
 
-    Raises ValidationError if every retry fails the schema check.
+    WIRE-AUTOLINT (2026-05-21): unless ``skip_lint=True``, the spec is
+    passed through ``harness.lint.lint_spec`` first.  If any finding has
+    severity 'error', planning is refused (raising ValueError with the
+    finding messages) so the operator never burns engine tokens on a
+    spec that wasn't ready.
+
+    Raises ValidationError if every retry fails the schema check, or
+    ValueError if the spec fails its preflight lint.
     """
     run_id = run_id or _new_run_id()
+    if not skip_lint:
+        try:
+            from harness.lint import lint_spec, is_plan_ready
+        except ImportError:
+            pass  # lint module missing — defer to old behaviour
+        else:
+            findings = lint_spec(Path(spec_path))
+            if not is_plan_ready(findings):
+                errs = "; ".join(
+                    f"{f.code}: {f.message}" for f in findings if f.severity == "error"
+                )
+                raise ValueError(f"spec lint failed: {errs}")
     spec_text = Path(spec_path).read_text(encoding="utf-8")
     root = project_root or Path.cwd()
     repo_tree = _read_repo_tree(root)

@@ -34,6 +34,21 @@ The operator has granted full dev authority (`feedback_xaxiu_harness_full_dev_au
      (Claude Code per-session transcript): SOFT ≥ 8MB · STRONGLY ≥ 18MB ·
      CRITICAL ≥ 35MB. (Operator's historic crash size: 52MB.)
 
+0.6. **Premature-stop gate (BEFORE any reply that uses stopping language).**
+   - If the reply you're about to send contains "session complete",
+     "saturated", "natural pause", "natural stopping point", "stopping
+     here", "wrap up here", "call it a checkpoint / session", or
+     "final state": you MUST first run `harness session ok-to-stop`.
+   - If the verb exits 1 (NOT-YET), DROP the stopping language and
+     keep working — typically by dispatching from the queued STATUS rows
+     or firing a creativity supervisor if the backlog is empty.
+   - The verb encodes the rule deterministically: stop is OK only when
+     session-handoff is STRONGLY/CRITICAL OR `coord/session_stop_approved`
+     exists OR backlog drained AND creativity fired recently.
+   - This rule exists because of the 2026-05-21 incident where the AI
+     stopped at 10MB transcript (vs 18MB STRONGLY).  See
+     `[[feedback_no_premature_stop]]` in memory.
+
 1. **Read `coord/dev_loop/state.json`.**
 2. **Check `loop_status`.** If anything other than `"armed"`, append a "skipped" entry to `coord/dev_loop/log.jsonl` and exit. Do not act.
 3. **Check active dispatches.** For each entry in `active_dispatches`:

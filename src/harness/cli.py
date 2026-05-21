@@ -1385,6 +1385,26 @@ def session_arm_crisis_check(cadence: int) -> None:
     sys.exit(0 if ok else 1)
 
 
+@session_group.command(name="ok-to-stop")
+def session_ok_to_stop() -> None:
+    """Deterministic gate — exit 0 only if the session may legitimately stop now.
+
+    The autonomous-loop directive
+    (`feedback_full_automation_until_wave_plan_empty`) says: do NOT stop
+    until session-handoff is STRONGLY/CRITICAL or operator explicitly
+    redirects.  This verb encodes that rule programmatically so the
+    agent (or a wrapper script) can check before any 'stopping' reply.
+
+    Exit codes:
+      0 — stopping is appropriate (reason printed)
+      1 — stopping is premature; keep working (reason printed)
+    """
+    from harness.session.stop_check import ok_to_stop
+    ok, reason = ok_to_stop()
+    click.echo(("ok-to-stop: " if ok else "NOT-YET: ") + reason)
+    sys.exit(0 if ok else 1)
+
+
 # ---------------------------------------------------------------------------
 # coord (v2/D)
 # ---------------------------------------------------------------------------

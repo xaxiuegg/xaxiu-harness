@@ -152,4 +152,31 @@ def audit(
                 detail="completion/ship language detected without a STATUS.csv update mention",
             ))
 
+    # Pattern 4: premature-stop — agent declares "saturated/done" while the
+    # programmatic stop-check says otherwise.  Cross-references
+    # `harness session ok-to-stop`: if recent assistant turns use stopping
+    # language AND ok_to_stop() returns False, flag HIGH.
+    stop_language_re = re.compile(
+        r"\b(saturat(?:ed|ion)|natural\s+stopping\s+point|stopping\s+here|"
+        r"session\s+complete|natural\s+pause|wrap[- ]?up\s+here|"
+        r"call\s+it\s+a\s+(?:checkpoint|session)|final\s+state)\b",
+        re.IGNORECASE,
+    )
+    has_stop_language = any(stop_language_re.search(t) for t in assistant_turns[-5:])
+    if has_stop_language:
+        try:
+            from harness.session.stop_check import ok_to_stop
+            ok, reason = ok_to_stop()
+        except Exception:
+            ok, reason = True, "stop_check unavailable"
+        if not ok:
+            report.flags.append(ChatFlag(
+                severity="HIGH",
+                pattern="premature_stop",
+                detail=(
+                    f"recent assistant turn contains stopping language but "
+                    f"`harness session ok-to-stop` says: {reason}"
+                ),
+            ))
+
     return report

@@ -228,6 +228,28 @@ class Coordinator:
             state.workers = statuses
             state.last_tick_at = now
 
+            # WIRE-STALL-DETECT (2026-05-21): surface stalled workers as L4
+            # escalations.  detect_stalled_workers reads the heartbeat
+            # sentinel files maintained by worker._heartbeat_touch.
+            from harness.coord.schemas import Escalation
+            try:
+                stalled = detect_stalled_workers(self.run_dir)
+            except Exception:
+                stalled = []
+            for wid in stalled:
+                already = any(e.tag == "stall" and wid in e.affected_workers
+                              for e in state.escalations)
+                if already:
+                    continue
+                state.escalations.append(Escalation(
+                    id=f"stall-{wid}-{now}",
+                    level="L4",
+                    tag="stall",
+                    raised_at=now,
+                    diagnostic=f"worker {wid} heartbeat older than threshold",
+                    affected_workers=[wid],
+                ))
+
             # Check if all workers completed or failed
             all_done = all(
                 st.state in (WorkerStateLiteral.COMPLETED, WorkerStateLiteral.FAILED)

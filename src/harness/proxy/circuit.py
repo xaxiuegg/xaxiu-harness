@@ -115,8 +115,43 @@ def transition(state: KeyState, outcome: str, *, now: datetime) -> KeyState:
             state.auto_quarantined_at = _now_str(now)
             # Clear cooldown — permanent quarantine doesn't recover on time
             state.cooldown_until = None
+            # WIRE-FLAP-ESCALATION (2026-05-21): write an L4 escalation
+            # file so the operator sees the auto-quarantine event in
+            # `harness loop status` / dashboard.  Best-effort I/O.
+            _write_flap_escalation(state.key_alias, now)
 
     return state
+
+
+def _write_flap_escalation(key_alias: str, now: datetime) -> None:
+    """Append an L4 escalation record to coord/observer/escalations/.
+
+    Best-effort — never raises.  The file format mirrors what
+    `harness loop status` reads, so flap events surface in the same
+    panel as observer + session-handoff flags.
+    """
+    try:
+        from pathlib import Path
+        import json
+        esc_dir = Path("coord") / "observer" / "escalations"
+        esc_dir.mkdir(parents=True, exist_ok=True)
+        ts = now.strftime("%Y%m%dT%H%M%S")
+        record = {
+            "level": "L4",
+            "tag": "proxy_flap_quarantine",
+            "code": "E_PROXY_AUTO_QUARANTINE",
+            "key_alias": key_alias,
+            "at": _now_str(now),
+            "diagnostic": (
+                f"Proxy key '{key_alias}' tripped circuit ≥3 times within "
+                f"{FLAP_WINDOW_MINUTES}min — auto-quarantined.  "
+                f"Investigate root cause, then `harness proxy reset-circuit {key_alias}`."
+            ),
+        }
+        path = esc_dir / f"flap_{key_alias}_{ts}.json"
+        path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def is_routable(state: KeyState, *, now: datetime) -> bool:
