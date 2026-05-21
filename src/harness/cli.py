@@ -422,15 +422,43 @@ def init(project: str, template: str, force: bool) -> None:
 @cli.command()
 @click.option("--show-set", is_flag=True, help="Show which API keys are set.")
 def env(show_set: bool) -> None:
-    """Check which API keys are set (echo SET only)."""
+    """Check which API keys are set (reports per-key + per-alias, never values).
+
+    Patch 2026-05-21: extended to surface the v2 proxy's per-key indexed
+    aliases (KIMI_API_KEY_1..4 → k1..k4) so the operator can see the real
+    state of the 4-key pool. The legacy singular ``KIMI_API_KEY`` is still
+    reported (and serves as a fallback for k1 per ``resolve_keys``).
+    """
     from harness.secrets.dpapi import has_secret
 
-    keys = ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
-    for key_name in keys:
+    # Legacy single-key surface (used by v1 dispatchers + as k1 fallback)
+    legacy_keys = ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
+    for key_name in legacy_keys:
         if os.environ.get(key_name) or has_secret(key_name):
             click.echo(f"{key_name}: SET")
         else:
             click.echo(f"{key_name}: MISSING")
+
+    # v2 proxy per-alias pool (KIMI_API_KEY_1..4 → k1..k4)
+    click.echo("")
+    click.echo("v2 proxy pool (Kimi-API per-alias):")
+    try:
+        from harness.proxy.app import resolve_keys
+        resolved = resolve_keys()
+    except Exception as exc:
+        resolved = {}
+        click.echo(f"  (resolve_keys failed: {exc})")
+    for n in range(1, 5):
+        alias = f"k{n}"
+        env_var = f"KIMI_API_KEY_{n}"
+        env_present = bool(os.environ.get(env_var))
+        dpapi_present = has_secret(env_var)
+        if alias in resolved:
+            source = "env" if env_present else ("DPAPI" if dpapi_present else "legacy")
+            click.echo(f"  {alias} ({env_var}): SET (source={source})")
+        else:
+            click.echo(f"  {alias} ({env_var}): MISSING")
+    click.echo(f"v2 pool size: {len(resolved)}/4 (6 slots/key -> {len(resolved) * 6}/24 concurrent capacity)")
     sys.exit(0)
 
 

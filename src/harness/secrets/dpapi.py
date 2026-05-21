@@ -236,13 +236,20 @@ def encrypt_secret(name: str, value: str) -> None:
 
 
 def decrypt_secret(name: str) -> Optional[str]:
-    """Return the decrypted value for *name*, or ``None`` if absent.
+    """Return the decrypted value for *name*, or ``None`` if absent OR empty.
+
+    Patch 2026-05-21: an EMPTY stored secret (b64 of empty plaintext) is now
+    treated as missing — returns ``None`` instead of ``""``.  This closes
+    the bug where ``has_secret`` reported True for stub entries while
+    consumer code's ``if value:`` truthy-check correctly dropped the empty
+    string, producing a confusing "SET but empty" state.
 
     Args:
         name: The secret identifier.
 
     Returns:
-        The plaintext secret, or ``None`` if no such secret exists.
+        The plaintext secret, or ``None`` if no such secret exists or it
+        decrypts to an empty string.
 
     Raises:
         NotImplementedError: On non-Windows platforms.
@@ -255,7 +262,10 @@ def decrypt_secret(name: str) -> Optional[str]:
         return None
     blob = base64.b64decode(b64)
     plaintext = _dpapi_decrypt(blob)
-    return plaintext.decode("utf-8")
+    decoded = plaintext.decode("utf-8")
+    if not decoded:  # treat empty-string secrets as missing
+        return None
+    return decoded
 
 
 def delete_secret(name: str) -> None:
@@ -291,22 +301,30 @@ def list_secrets() -> list[str]:
 
 
 def has_secret(name: str) -> bool:
-    """Return ``True`` if a secret with *name* exists in the store.
+    """Return ``True`` if a secret with *name* exists AND is non-empty.
 
-    This function does not decrypt or expose the secret value.
+    Patch 2026-05-21: an empty stored secret is treated as missing so
+    that ``has_secret`` and ``decrypt_secret`` agree.  Operator tools
+    (e.g. ``harness env --show-set``) should report ``SET`` only when
+    a real value is present.
 
     Args:
         name: The secret identifier.
 
     Returns:
-        Boolean indicating presence.
+        Boolean indicating real presence (not just a stub entry).
 
     Raises:
         NotImplementedError: On non-Windows platforms.
     """
     _require_windows()
-    data = _load_data()
-    return name in data
+    if name not in _load_data():
+        return False
+    # Verify the secret decrypts to a non-empty value (empty-stub guard).
+    try:
+        return decrypt_secret(name) is not None
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
