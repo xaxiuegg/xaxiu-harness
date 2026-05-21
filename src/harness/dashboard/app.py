@@ -24,6 +24,7 @@ from harness.observer.flags import list_pending_flags
 from harness.state.inspect import DEFAULT_STATE_PATH
 from harness.status.store import DEFAULT_STATUS_PATH, read_status, summary as status_summary
 from harness.dashboard.v2_routes import make_router as _v2_make_router
+from harness.dashboard.v2_routes import list_runs as _list_runs
 
 _STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 
@@ -59,7 +60,18 @@ def _snapshot() -> dict[str, Any]:
 
     active_dispatches = state.get("active_dispatches") or []
 
-    return {
+    runs = _list_runs()
+    top_run_workers: list[dict] = []
+    if runs:
+        from harness.dashboard.v2_routes import list_workers as _list_workers
+        top_run_id = max(
+            (r for r in runs if r.get("last_tick_at")),
+            key=lambda r: r["last_tick_at"],
+            default=runs[0],
+        )["run_id"]
+        top_run_workers = _list_workers(top_run_id)
+
+    snapshot: dict[str, Any] = {
         "type": "snapshot",
         "ts": _now_iso(),
         "state": state,
@@ -69,6 +81,11 @@ def _snapshot() -> dict[str, Any]:
         "flags": flags,
         "active_dispatches": active_dispatches,
     }
+    snapshot["v2"] = {
+        "runs": runs,
+        "top_run_workers": top_run_workers,
+    }
+    return snapshot
 
 
 def create_app() -> FastAPI:

@@ -34,6 +34,9 @@ class EngineResponse:
     text: str
     latency_ms: int
     error: Optional[str] = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
 
 
 class Engine(ABC):

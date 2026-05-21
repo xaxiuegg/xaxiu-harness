@@ -94,6 +94,7 @@ class WorkerResult(BaseModel):
     error_tag: str | None = Field(default=None, max_length=64)
     diagnostic: str = Field(default="", max_length=4000)
     tokens_used: int = Field(ge=0, default=0)
+    cost_usd: float = Field(ge=0.0, default=0.0)
     elapsed_seconds: int = Field(ge=0, default=0)
 
 

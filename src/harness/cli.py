@@ -1189,6 +1189,14 @@ def proxy_quarantine(alias: str) -> None:
     quarantine(alias)
 
 
+@proxy_group.command(name="disable-key")
+@click.argument("alias")
+def proxy_disable_key(alias: str) -> None:
+    """Manually disable a key so the proxy won't route to it."""
+    from harness.proxy.cli import disable_key
+    disable_key(alias)
+
+
 # ── Session ──────────────────────────────────────────────────────────────
 
 @cli.group(name="session")
@@ -1368,6 +1376,27 @@ def coord_integrate(run_id: str, project_root: Path, commit: bool, push: bool) -
     if report.test_summary:
         click.echo(f"  tests: {report.test_summary}")
     sys.exit(0 if report.success else 1)
+
+
+@coord_group.command(name="list")
+@click.option("--limit", default=20, type=int, help="Max number of runs to print (newest first).")
+def coord_list(limit: int) -> None:
+    """List runs/ with state + age + worker count (CLI parity for /v2/runs)."""
+    from harness.dashboard.v2_routes import list_runs
+    runs = list_runs()
+    if not runs:
+        click.echo("no runs")
+        return
+    # Sort newest first by last_tick_at, falling back to started_at, then run_id
+    def _key(r: dict) -> str:
+        return r.get("last_tick_at") or r.get("started_at") or r.get("run_id", "")
+    runs_sorted = sorted(runs, key=_key, reverse=True)[:limit]
+    click.echo(f"{'RUN_ID':<28} {'STATE':<14} {'TASKS':>5}  STARTED_AT")
+    for r in runs_sorted:
+        click.echo(
+            f"{r['run_id']:<28} {str(r.get('state') or '-'):<14} "
+            f"{r.get('tasks', 0):>5}  {r.get('started_at') or '-'}"
+        )
 
 
 @coord_group.command(name="status")

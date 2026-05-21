@@ -66,6 +66,8 @@ class DispatchResult:
     text: str                  # engine response text (empty on total failure)
     error: str | None
     dispatch_id: str           # UUID written to history.db
+    tokens_used: int = 0
+    cost_usd: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +533,8 @@ def dispatch_packet(
                 text=response.text,
                 error=None,
                 dispatch_id=dispatch_id,
+                tokens_used=response.tokens_in + response.tokens_out,
+                cost_usd=response.cost_usd,
             )
 
         # --- 9c. Failure path ------------------------------------------------

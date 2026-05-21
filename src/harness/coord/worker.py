@@ -167,6 +167,8 @@ def run_worker(
     started_at = now_iso()
     files_modified: list[str] = list(ckpt.files_modified or [])
     commit_sha = ckpt.commit_sha
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
 
     # Pre-load read_set contents for prompt building
     read_set_contents: dict[str, str] = {}
@@ -206,6 +208,10 @@ def run_worker(
                         if mod_file.exists():
                             read_set_contents[rel_path] = mod_file.read_text(encoding="utf-8")
 
+                # Accumulate token + cost telemetry for budget meter
+                total_tokens += int(getattr(result, "tokens_used", 0) or 0)
+                total_cost_usd += float(getattr(result, "cost_usd", 0.0) or 0.0)
+
             # Commit step changes
             sha = _git_commit(wt_path, f"[{step.step_id}] {task_obj.title}")
             if sha:
@@ -231,6 +237,18 @@ def run_worker(
     })
     write_checkpoint(checkpoint_path, ckpt)
 
+    # Record into per-engine budget ledger (best-effort, no fail-loud)
+    try:
+        from harness.budget import record_dispatch as _budget_record
+        _budget_record(
+            task_id=run_dir.name,
+            engine=engine,
+            input_tokens=0,
+            output_tokens=total_tokens,
+        )
+    except Exception:
+        pass  # ledger best-effort — never fail a worker for budget I/O
+
     steps_completed = [s.step_id for s in task_obj.steps[:idx + 1]] if task_obj.steps else []
     result: dict[str, Any] = {
         "schema_version": 1,
@@ -245,7 +263,8 @@ def run_worker(
         "commit_sha": commit_sha,
         "error_tag": None if final_state == "completed" else "L3.worker.E_TEST_FAILED",
         "diagnostic": "",
-        "tokens_used": 0,
+        "tokens_used": total_tokens,
+        "cost_usd": total_cost_usd,
         "elapsed_seconds": int((datetime.now(timezone.utc) -
                                 datetime.fromisoformat(started_at)).total_seconds()),
     }

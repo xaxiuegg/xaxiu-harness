@@ -150,3 +150,16 @@ def quarantine(alias: str) -> None:
     state.keys[alias].cooldown_until = None
     write_state(state, path)
     click.echo(f"Key '{alias}' quarantined (circuit permanently open).")
+
+
+def disable_key(alias: str) -> None:
+    path = _state_path()
+    state = read_state(path)
+    if alias not in state.keys:
+        click.echo(f"Unknown key alias: {alias}")
+        sys.exit(1)
+    state.keys[alias].circuit_state = CircuitState.OPEN
+    state.keys[alias].permanent = True
+    state.keys[alias].cooldown_until = None
+    write_state(state, path)
+    click.echo(f"Key '{alias}' disabled.")
