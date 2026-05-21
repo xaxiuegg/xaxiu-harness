@@ -218,7 +218,9 @@ def test_deepseek_malformed_json(
 # KimiConcrete
 # ---------------------------------------------------------------------------
 
-KIMI_URL = "https://api.moonshot.cn/v1/chat/completions"
+# Default Kimi endpoint updated 2026-05-21 (battle-test finding #7).
+# Operator uses Kimi Code (kimi.ai) — `api.moonshot.cn` was a wrong default.
+KIMI_URL = "https://api.kimi.com/coding/v1/chat/completions"
 KIMI_PROXY_URL = "http://127.0.0.1:7879/v1/chat/completions"
 KIMI_JSON_OK = {"choices": [{"message": {"content": "kimi-ok"}}]}
 
@@ -264,7 +266,9 @@ def test_kimi_success(
     assert resp.error is None
     assert captured["url"] == KIMI_URL
     assert captured["headers"]["authorization"] == "Bearer kimi-key"
-    assert captured["headers"]["user-agent"].startswith("xaxiu-harness/")
+    # Kimi Code API enforces a User-Agent allowlist (battle-test #7);
+    # default is `claude-code/0.1.0`, configurable via KIMI_USER_AGENT.
+    assert captured["headers"]["user-agent"] == "claude-code/0.1.0"
     assert captured["body"]["model"] == "kimi-model"
     assert captured["body"]["messages"] == [{"role": "user", "content": "hello"}]
 

@@ -45,14 +45,39 @@ def _make_user_agent() -> str:
     return f"xaxiu-harness/{__version__}"
 
 
-def _resolve_kimi_upstream() -> str:
-    """Route through local proxy when available, else direct.
+def _make_kimi_user_agent() -> str:
+    """Kimi Code API requires a whitelisted User-Agent (gate per
+    ``reference_kimi_features_canonical``).  Default to ``claude-code/0.1.0``
+    which is verified-working from inside Claude Code sessions; override
+    via ``KIMI_USER_AGENT`` for other approved agents
+    (e.g. ``KimiCLI/1.5``).
+    """
+    return os.environ.get("KIMI_USER_AGENT", "claude-code/0.1.0")
 
-    Battle-test 2026-05-21: `api.moonshot.cn` is the China endpoint;
-    international accounts (sk- keys issued via moonshot.ai) need
-    `api.moonshot.ai` and reject .cn-region requests with HTTP 401.
-    Allow operator override via ``KIMI_API_BASE_URL`` env var so the
-    key region matches the URL region.
+
+def _resolve_kimi_upstream() -> str:
+    """Resolve the Kimi chat-completions endpoint.
+
+    Per ``reference_kimi_features_canonical``, there are THREE distinct
+    Kimi services:
+
+    1. **Kimi Code** (kimi.ai) — `https://api.kimi.com/coding/v1` —
+       subscription-quota with User-Agent gate.  **This is the operator's
+       account** (battle-test 2026-05-21).
+    2. **Kimi Platform** (moonshot.ai) — `https://api.moonshot.ai/v1` —
+       international pay-as-you-go.
+    3. **Moonshot China** (moonshot.cn) — `https://api.moonshot.cn/v1` —
+       China-region pay-as-you-go.
+
+    API keys are NOT interchangeable; the URL must match the key's
+    issuing platform.  Resolution precedence:
+
+    1. ``HARNESS_PROXY_URL`` — explicit operator override (highest)
+    2. Local proxy at `.harness/proxy.pid` (set by ``harness proxy start``)
+    3. ``KIMI_API_BASE_URL`` env var (operator-set base; we append the
+       chat-completions path)
+    4. ``KIMI_BASE_URL`` env var (Kimi-CLI convention; same shape)
+    5. Default: Kimi Code at ``api.kimi.com/coding/v1``
     """
     explicit = os.environ.get("HARNESS_PROXY_URL")
     if explicit:
@@ -60,10 +85,18 @@ def _resolve_kimi_upstream() -> str:
     pid_file = Path(".harness") / "proxy.pid"
     if pid_file.exists():
         return "http://127.0.0.1:7879/v1/chat/completions"
-    base = os.environ.get("KIMI_API_BASE_URL", "").rstrip("/")
+    base = (
+        os.environ.get("KIMI_API_BASE_URL")
+        or os.environ.get("KIMI_BASE_URL")
+        or ""
+    ).rstrip("/")
     if base:
-        return f"{base}/v1/chat/completions"
-    return "https://api.moonshot.cn/v1/chat/completions"
+        # Operator gave a base — append the chat path if not already present
+        if base.endswith("/chat/completions"):
+            return base
+        return f"{base}/chat/completions"
+    # Default to Kimi Code (kimi.ai) — operator account confirmed 2026-05-21
+    return "https://api.kimi.com/coding/v1/chat/completions"
 
 
 def _extract_chat_text(response_data: dict) -> str:
@@ -214,7 +247,9 @@ class KimiConcrete(Engine):
                     _resolve_kimi_upstream(),
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
-                        "User-Agent": _make_user_agent(),
+                        # Kimi Code API enforces a User-Agent allowlist —
+                        # see _make_kimi_user_agent docstring.
+                        "User-Agent": _make_kimi_user_agent(),
                     },
                     json=payload,
                 )

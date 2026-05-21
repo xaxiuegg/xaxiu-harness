@@ -14,6 +14,52 @@ from pydantic import ValidationError
 
 from harness.coord.schemas import WavePlan
 
+_PLANNER_SCHEMA_EXAMPLE = """\
+{
+  "schema_version": 1,
+  "run_id": "<provided>",
+  "spec_path": "<provided>",
+  "created_at": "<iso8601 UTC>",
+  "planner_engine": "kimi",
+  "tasks": [
+    {
+      "worker_id": "worker-1",
+      "title": "Short imperative title",
+      "description": "What this worker accomplishes",
+      "steps": [
+        {
+          "step_id": "s1",
+          "kind": "edit",
+          "instruction": "What the worker does in this step",
+          "target_files": ["relative/path"],
+          "expected_diff_lines": 10,
+          "required_tests": []
+        }
+      ],
+      "write_set": ["relative/path"],
+      "read_set": ["relative/path"],
+      "test_set": [],
+      "depends_on": [],
+      "estimated_kimi_minutes": 10,
+      "max_context_tokens": 30000
+    }
+  ],
+  "integration_strategy": "squash",
+  "notes": ""
+}
+
+Field rules:
+- `tasks` must be 1-24 items. Each `worker_id` matches `^worker-\\d+$`.
+- Each task's `steps` must be 1-15 items. `step_id` is short (max 64).
+- `kind` is one of: edit, create, delete, test, shell.
+- `write_set` lists files this worker mutates (DISJOINT across tasks).
+- `read_set` lists files this worker reads.
+- `target_files` and `expected_diff_lines` are required per step.
+- `depends_on` is empty when the task can run in parallel.
+- `planner_engine` is one of: claude, kimi, kimi-api, deepseek, mock.
+- `integration_strategy` is one of: squash, merge, rebase.
+"""
+
 PLANNER_PROMPT_TEMPLATE = """\
 SYSTEM: You are the planner for a multi-agent dev harness. Given the
 spec below, decompose into 1-12 independent worker tasks. Each task
@@ -28,11 +74,12 @@ the JSON.
 # Repo inventory (top-level files, truncated)
 {repo_tree}
 
-# Schema (reference — match exactly)
+# Schema (compact example — match shape exactly, fill placeholders)
 {schema_excerpt}
 
 # Output
 Emit ONLY a valid WavePlan JSON object, with all required fields populated.
+Wrap in a ```json fenced block.
 """
 
 
@@ -96,10 +143,15 @@ def plan(
     spec_text = Path(spec_path).read_text(encoding="utf-8")
     root = project_root or Path.cwd()
     repo_tree = _read_repo_tree(root)
+    # Battle-test 2026-05-21: `WavePlan.model_json_schema()` produces a
+    # 4.8 KB nested JSON schema that overwhelmed Kimi Code (server
+    # disconnect mid-response).  A hand-rolled compact example with
+    # field rules gives the LLM the same structural guidance in ~1.5 KB
+    # and gets clean JSON back.
     prompt = PLANNER_PROMPT_TEMPLATE.format(
         spec_text=spec_text,
         repo_tree=repo_tree,
-        schema_excerpt=WavePlan.model_json_schema(),
+        schema_excerpt=_PLANNER_SCHEMA_EXAMPLE,
     )
 
     # Dispatch via harness.engines.dispatcher
