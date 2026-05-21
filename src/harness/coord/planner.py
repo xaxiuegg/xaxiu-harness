@@ -171,6 +171,81 @@ def plan_from_description(
         tmp_path.unlink(missing_ok=True)
 
 
+def replan_from_run(
+    failed_run_dir: Path,
+    *,
+    engine: str = "claude",
+    model: str | None = None,
+    project_root: Path | None = None,
+    new_run_id: str | None = None,
+) -> WavePlan:
+    """Re-run the planner with failed-worker feedback from a prior run.
+
+    Reads ``failed_run_dir/plan.json`` (for the original spec_path) plus all
+    checkpoint files under ``failed_run_dir/checkpoints/`` to build a
+    feedback section, then calls :func:`plan` with an augmented prompt
+    that includes the failed workers' diagnostics.
+
+    Returns a NEW :class:`WavePlan` with a fresh run_id.
+
+    Raises:
+        FileNotFoundError: If plan.json doesn't exist.
+        ValidationError: If the regenerated plan still fails schema check.
+    """
+    failed_run_dir = Path(failed_run_dir)
+    plan_path = failed_run_dir / "plan.json"
+    if not plan_path.exists():
+        raise FileNotFoundError(f"no plan.json at {plan_path}")
+
+    old_plan = WavePlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+    spec_path = Path(old_plan.spec_path)
+    if not spec_path.exists():
+        raise FileNotFoundError(f"original spec not found at {spec_path}")
+
+    # Gather failed-worker diagnostics
+    failures: list[str] = []
+    ckpt_dir = failed_run_dir / "checkpoints"
+    if ckpt_dir.exists():
+        for ckpt_path in sorted(ckpt_dir.glob("*.json")):
+            try:
+                data = json.loads(ckpt_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if data.get("state") == "failed":
+                wid = data.get("worker_id", "?")
+                diag = data.get("tests_summary") or data.get("diagnostic") or "unknown"
+                failures.append(f"- {wid}: {diag}")
+
+    # Build augmented spec text
+    augmented = spec_path.read_text(encoding="utf-8")
+    if failures:
+        augmented += (
+            "\n\n## Replan feedback (from prior failed run "
+            f"{old_plan.run_id})\n\n"
+            "The previous plan produced these worker failures — please "
+            "decompose differently to avoid them:\n\n"
+            + "\n".join(failures)
+            + "\n"
+        )
+
+    # Write augmented spec to a temp file so the planner picks it up
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(augmented)
+        tmp_path = Path(tmp.name)
+    try:
+        return plan(
+            tmp_path,
+            run_id=new_run_id,
+            engine=engine,
+            model=model,
+            project_root=project_root,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def write_plan(plan_obj: WavePlan, run_dir: Path) -> Path:
     """Write the plan to runs/<run_id>/plan.json atomically."""
     run_dir.mkdir(parents=True, exist_ok=True)

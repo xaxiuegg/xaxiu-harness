@@ -1315,6 +1315,30 @@ def coord_plan_from_description(description: str, engine: str, run_id: str | Non
     click.echo(f"  {len(waveplan.tasks)} task(s); planner_engine={waveplan.planner_engine}")
 
 
+@coord_group.command(name="replan")
+@click.option("--run-id", required=True, help="Run ID of the FAILED run whose feedback drives the replan.")
+@click.option("--engine", default="claude",
+              help="Planner engine for the replan.")
+@click.option("--new-run-id", default=None,
+              help="Explicit new run ID (defaults to auto-generated).")
+def coord_replan(run_id: str, engine: str, new_run_id: str | None) -> None:
+    """Re-run planner with failed-worker feedback from a prior run."""
+    from harness.coord.planner import replan_from_run, write_plan
+    failed_dir = Path("runs") / run_id
+    if not failed_dir.exists():
+        click.echo(f"error: no such run {run_id}", err=True)
+        sys.exit(1)
+    try:
+        waveplan = replan_from_run(failed_dir, engine=engine, new_run_id=new_run_id)
+    except FileNotFoundError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    new_dir = Path("runs") / waveplan.run_id
+    out = write_plan(waveplan, new_dir)
+    click.echo(f"replan: new plan.json at {out} (run_id={waveplan.run_id})")
+    click.echo(f"  {len(waveplan.tasks)} task(s); planner_engine={waveplan.planner_engine}")
+
+
 @coord_group.command(name="run")
 @click.option("--spec", required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--run-id", default=None, help="Run ID (defaults to auto-generated).")
