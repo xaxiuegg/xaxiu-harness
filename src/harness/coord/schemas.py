@@ -70,6 +70,7 @@ class WavePlan(BaseModel):
 
 
 class TestSummary(BaseModel):
+    __test__ = False  # silences PytestCollectionWarning (this is not a test class)
     model_config = ConfigDict(extra="forbid")
     ran: int = Field(ge=0)
     passed: int = Field(ge=0)

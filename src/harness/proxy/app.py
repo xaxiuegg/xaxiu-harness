@@ -60,27 +60,29 @@ def create_app(
     keys: dict[str, str] | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="xaxiu-harness proxy")
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app_: FastAPI):
+        # startup
+        path: Path = app_.state.state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            state = _init_state(app_.state.keys)
+            write_state(state, path)
+        if app_.state.http_client is None:
+            app_.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+        yield
+        # shutdown
+        if app_.state.http_client is not None:
+            await app_.state.http_client.aclose()
+
+    app = FastAPI(title="xaxiu-harness proxy", lifespan=lifespan)
     app.state.state_path = _state_path(state_path)
     app.state.upstream_url = upstream_url or DEFAULT_UPSTREAM
     app.state.keys = keys if keys is not None else resolve_keys()
     app.state.http_client = http_client
     app.state.lock = asyncio.Lock()
-
-    @app.on_event("startup")
-    async def _startup() -> None:
-        path: Path = app.state.state_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            state = _init_state(app.state.keys)
-            write_state(state, path)
-        if app.state.http_client is None:
-            app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        if app.state.http_client is not None:
-            await app.state.http_client.aclose()
 
     async def _load_or_init_state() -> ProxyState:
         path: Path = app.state.state_path
