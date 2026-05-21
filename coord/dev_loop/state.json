@@ -223,7 +223,18 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [],
+  "active_dispatches": [
+    {
+      "task_id": "dispatch-2026-05-21T00-52-observer",
+      "packet": "coord/packets/2026-05-20-observer-primitive/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-21T00:52:00Z",
+      "phase": "developing",
+      "wave_id": "wave-5.6",
+      "timeout_seconds": 1200,
+      "note": "Round 2 — observer primitive (#20). Re-trying Kimi after #19's 1200s timeout because #19 issue was the status/group naming collision, not a Kimi-wide problem; #20 has no such conflict."
+    }
+  ],
   "reconciled_at": "2026-05-21T00:50:00Z",
   "reconcile_note": "Round 1 (status-tracker #19) completed hybrid mode at 2026-05-21T00:50Z; cleared from active_dispatches. Earlier reconcile at 2026-05-21T00:02:35Z cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b).",
   "wave_plan": [
@@ -402,10 +413,12 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 6,
-      "in_flight": [],
+      "in_flight": [
+        "dispatch-2026-05-21T00-52-observer"
+      ],
       "fill_policy": "aggressive",
-      "cooldown_until_iso": "2026-05-21T01:50:00Z",
-      "cooldown_reason": "1200s timeout on bcsacjnox dispatch (status-tracker packet); 60min cooldown per dispatch-rules.md."
+      "cooldown_lifted_at_iso": "2026-05-21T00:52:00Z",
+      "cooldown_lifted_reason": "Cooldown was a heuristic; previous failure attributed to packet-specific cli.py collision rather than engine-wide capacity issue. Observer packet has no such collision; trying Kimi again."
     },
     "kimi-api": {
       "max_parallel": 6,

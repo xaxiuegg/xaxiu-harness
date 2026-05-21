@@ -1,5 +1,6 @@
 ID,Category,Title,Status,Owner,Effort,Updated,Notes
-W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),shipped,Kimi via swarm,~45 min,2026-05-21,Kimi-CLI landed schema/store/hooks/__init__ during 1200s timeout (per feedback_kimi_cli_incremental_edits); Claude added tests + cli.py status group + dispatcher hooks + fixed write_status key-inversion bug + atomic-write tempfile cleanup bug + WA-1 unquoted-comma bug. 305/305 tests pass; 90% coverage on harness.status
+W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),shipped,Kimi+Claude,~45 min,2026-05-21,"Commit 514945f; hybrid Kimi-CLI partial + Claude inline; 305/305 tests; 90% coverage"
+W20-OBSERVER,Wave 5.6,Independent observer primitive (the check on dev-manager authority),in_progress,Kimi via swarm,~60 min,2026-05-21,"Round 2 dispatch ongoing; see coord/packets/2026-05-20-observer-primitive/"
 WA-1,Wave A,Wire dispatch CLI verb to dispatch_packet,shipped,Claude,30 min,2026-05-20,"Commit 8b65dde; first wired verb, set pattern"
 WA-2,Wave A,Wire remaining 10 CLI verbs (init/status/engines/priority/burst/lock/observer-tick/retro/install/dashboard-serve/loops),shipped,Kimi via swarm,~30 min wall,2026-05-20,Commit d5def26; 24 new tests
 WA5,Wave A.5,HarnessError taxonomy module + spec + tests,shipped,Claude,~1 hr,2026-05-20,errors.py + spec/errors.md + 21 tests; 89/89 pass
