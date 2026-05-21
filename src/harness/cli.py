@@ -1,9 +1,10 @@
 """xaxiu-harness CLI.
 
 Cross-project multi-engine LLM dispatch + monitoring tool.
-Wave A: init, status, engines, priority, burst, lock are wired to internal
-backends.  observer-tick, retro, install, dashboard-serve, loops remain
-stubbed with pending-wave messages.
+13 top-level verbs (most wired; retro / dashboard-serve / loops remain
+pending-wave stubs).  ``status`` and ``observer`` are command groups with
+subcommands managed in this module; see ``spec/status-tracker.md`` and
+``spec/observer.md`` for the underlying primitives.
 """
 
 from __future__ import annotations
@@ -24,6 +25,19 @@ from harness.engines.dispatcher import dispatch_packet
 from harness.operator import OperatorMode, resolve_operator_config
 from harness.operator.flags import OPERATOR_FLAG_NAMES, apply_operator_flags
 from harness.state.files import read_engine_health, update_engine_health
+
+# Observer primitive (roster #20)
+from harness.observer.cycle import run_cycle, CycleReport
+from harness.observer.flags import (
+    Flag,
+    FlagSeverity,
+    ensure_flag_dirs,
+    list_pending_flags,
+    ack_flag,
+    move_pending_to_handled,
+)
+from harness.observer.state import read_state, write_state, ObserverState
+from harness.observer.scheduler import register_tasks, unregister_tasks
 
 
 @click.group()
@@ -328,14 +342,6 @@ def status_verify(cadence_minutes: Optional[int]) -> None:
 
 @cli.command()
 @click.option("--project", "-p", help="Project name.")
-def observer_tick(project: Optional[str]) -> None:
-    """Run one observer cycle: check status changes, flag patterns."""
-    click.echo("observer-tick: backend pending Wave A.2 (observer module not yet built)")
-    sys.exit(1)
-
-
-@cli.command()
-@click.option("--project", "-p", help="Project name.")
 @click.option("--date", help="Retro date (YYYY-MM-DD).")
 def retro(project: Optional[str], date: Optional[str]) -> None:
     """Generate daily retro summary from history."""
@@ -508,3 +514,198 @@ def lock(engine: str, release: bool) -> None:
     action = "released" if release else "locked"
     click.echo(f"lock: {engine} {action}")
     sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Observer primitive CLI (roster #20)
+# ---------------------------------------------------------------------------
+
+
+@cli.group(name="observer")
+def observer() -> None:
+    """Independent harness observer — authority audit, flagging, scheduling."""
+
+
+@observer.command(name="init")
+@click.option("--cadence-minutes", type=int, default=60, help="Cycle cadence in minutes.")
+@click.option("--daily-time", default="23:00", help="Daily retro time (HH:MM).")
+def observer_init(cadence_minutes: int, daily_time: str) -> None:
+    """Create observer directory tree and state file."""
+    from datetime import datetime, timezone
+
+    base = ensure_flag_dirs()
+    state = ObserverState(
+        armed=True,
+        paused=False,
+        cadence_minutes=cadence_minutes,
+        daily_retro_time=daily_time,
+        installed_at=datetime.now(timezone.utc).isoformat(),
+        status="initialized",
+    )
+    write_state(state)
+    click.echo(f"observer initialized at {base}")
+    click.echo(f"  cadence: {cadence_minutes} min  daily-retro: {daily_time}")
+    sys.exit(0)
+
+
+@observer.command(name="arm")
+def observer_arm() -> None:
+    """Arm the observer (enable automatic cycles)."""
+    state = read_state()
+    if state.status == "uninitialized":
+        click.echo("error: observer not initialized — run 'harness observer init' first", err=True)
+        sys.exit(1)
+    state.armed = True
+    state.paused = False
+    write_state(state)
+    click.echo("observer armed")
+    sys.exit(0)
+
+
+@observer.command(name="disarm")
+def observer_disarm() -> None:
+    """Disarm the observer (disable automatic cycles)."""
+    state = read_state()
+    if state.status == "uninitialized":
+        click.echo("error: observer not initialized", err=True)
+        sys.exit(1)
+    state.armed = False
+    write_state(state)
+    click.echo("observer disarmed")
+    sys.exit(0)
+
+
+@observer.command(name="pause")
+def observer_pause() -> None:
+    """Pause the observer (skip cycles but keep armed)."""
+    state = read_state()
+    if state.status == "uninitialized":
+        click.echo("error: observer not initialized", err=True)
+        sys.exit(1)
+    state.paused = True
+    write_state(state)
+    click.echo("observer paused")
+    sys.exit(0)
+
+
+@observer.command(name="resume")
+def observer_resume() -> None:
+    """Resume the observer from pause."""
+    state = read_state()
+    if state.status == "uninitialized":
+        click.echo("error: observer not initialized", err=True)
+        sys.exit(1)
+    state.paused = False
+    write_state(state)
+    click.echo("observer resumed")
+    sys.exit(0)
+
+
+@observer.command(name="status")
+def observer_status() -> None:
+    """Show observer state."""
+    state = read_state()
+    click.echo(f"status:       {state.status}")
+    click.echo(f"armed:        {state.armed}")
+    click.echo(f"paused:       {state.paused}")
+    click.echo(f"cadence:      {state.cadence_minutes} min")
+    click.echo(f"daily-retro:  {state.daily_retro_time}")
+    click.echo(f"last-cycle:   {state.last_cycle_at or '(never)'}")
+    click.echo(f"total-cycles: {state.total_cycles}")
+    click.echo(f"flags-raised: {state.flags_raised}  acked: {state.flags_acknowledged}")
+    sys.exit(0)
+
+
+@observer.command(name="flags")
+@click.option("--severity", type=click.Choice(["high", "critical", "all"]), default="all")
+def observer_flags(severity: str) -> None:
+    """List pending flags."""
+    pending = list_pending_flags()
+    severities = [FlagSeverity.HIGH, FlagSeverity.CRITICAL] if severity == "all" else [FlagSeverity(severity)]
+    total = 0
+    for sev in severities:
+        flags = pending.get(sev, [])
+        for f in flags:
+            if not f.acknowledged:
+                total += 1
+                click.echo(f"{f.id}  {f.severity.value.upper():8}  [{f.category}]  {f.summary}")
+    if total == 0:
+        click.echo("(no pending flags)")
+    sys.exit(0)
+
+
+@observer.command(name="ack")
+@click.argument("flag_id")
+def observer_ack(flag_id: str) -> None:
+    """Acknowledge a flag by ID (operator only)."""
+    updated = ack_flag(flag_id, acknowledged_by="operator")
+    if updated is None:
+        click.echo(f"error: flag '{flag_id}' not found", err=True)
+        sys.exit(1)
+    click.echo(f"acknowledged {flag_id}")
+    sys.exit(0)
+
+
+@observer.command(name="cycle-now")
+@click.option("--engine", default="swarm/deepseek", help="Audit engine override.")
+@click.option("--window", "audit_window", type=int, default=60, help="Minutes of history to audit.")
+@click.pass_context
+def observer_cycle_now(ctx: click.Context, engine: str, audit_window: int) -> None:
+    """Run one observer cycle immediately."""
+    state = read_state()
+    if state.status == "uninitialized":
+        click.echo("error: observer not initialized", err=True)
+        sys.exit(1)
+    if state.paused:
+        click.echo("observer paused — skipping cycle")
+        sys.exit(0)
+
+    op_cfg = (ctx.obj or {}).get("operator_config") if ctx.obj else None
+    if op_cfg is not None and op_cfg.mode == OperatorMode.DRY_RUN:
+        click.echo("dry-run: would run observer cycle")
+        sys.exit(0)
+
+    report = run_cycle(engine=engine, audit_window_minutes=audit_window)
+
+    # Update state
+    state.last_cycle_at = report.ended_at
+    state.last_cycle_id = report.cycle_id
+    state.total_cycles += 1
+    state.flags_raised += len(report.flags_raised)
+    write_state(state)
+
+    # Output
+    click.echo(f"cycle {report.cycle_id} complete")
+    click.echo(f"  engine: {report.engine_used}")
+    click.echo(f"  findings: {report.findings_count}")
+    click.echo(f"  flags: {len(report.flags_raised)}")
+    for f in report.flags_raised:
+        click.echo(f"    {f.id}  {f.severity.value.upper()}  [{f.category}]  {f.summary}")
+    if report.error:
+        click.echo(f"  dispatch-error: {report.error}")
+    sys.exit(0)
+
+
+@observer.command(name="daily-retro")
+def observer_daily_retro() -> None:
+    """Run the daily retro (placeholder until Wave A.3)."""
+    click.echo("daily-retro: pending Wave A.3")
+    sys.exit(0)
+
+
+@observer.command(name="install-scheduler")
+@click.option("--cadence-minutes", type=int, default=60)
+@click.option("--daily-time", default="23:00")
+def observer_install_scheduler(cadence_minutes: int, daily_time: str) -> None:
+    """Register Windows Task Scheduler entries for the observer."""
+    ok, msg = register_tasks(cadence_minutes=cadence_minutes, daily_time=daily_time)
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
+
+
+@observer.command(name="uninstall-scheduler")
+def observer_uninstall_scheduler() -> None:
+    """Remove observer Windows Task Scheduler entries."""
+    ok, msg = unregister_tasks()
+    click.echo(msg)
+    sys.exit(0 if ok else 1)

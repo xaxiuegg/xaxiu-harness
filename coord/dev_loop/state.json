@@ -223,18 +223,7 @@
     }
   },
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [
-    {
-      "task_id": "dispatch-2026-05-21T00-52-observer",
-      "packet": "coord/packets/2026-05-20-observer-primitive/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-21T00:52:00Z",
-      "phase": "developing",
-      "wave_id": "wave-5.6",
-      "timeout_seconds": 1200,
-      "note": "Round 2 — observer primitive (#20). Re-trying Kimi after #19's 1200s timeout because #19 issue was the status/group naming collision, not a Kimi-wide problem; #20 has no such conflict."
-    }
-  ],
+  "active_dispatches": [],
   "reconciled_at": "2026-05-21T00:50:00Z",
   "reconcile_note": "Round 1 (status-tracker #19) completed hybrid mode at 2026-05-21T00:50Z; cleared from active_dispatches. Earlier reconcile at 2026-05-21T00:02:35Z cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b).",
   "wave_plan": [
@@ -397,13 +386,18 @@
     {
       "id": "wave-5.6",
       "name": "independent observer (roster #20) — the check on dev-manager authority",
-      "status": "planned",
+      "status": "done",
       "depends_on": [
         "wave-5.5"
       ],
       "spec_ready": "spec/observer.md",
       "packet_ready": "coord/packets/2026-05-20-observer-primitive/packet.md",
-      "note": "Round 2 — sequential after #19 due to cli.py conflict."
+      "dispatched_at": "2026-05-21T00:52:00Z",
+      "completed_at": "2026-05-21T01:20:00Z",
+      "current_dispatch": "bq1ydqn3l",
+      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
+      "completion_note": "Kimi-CLI dispatch timed out at 1200s but landed massively: 6 module files (state.py 96%, audit_prompt.py 85%, cycle.py 89%, flags.py 83%, scheduler.py 32%, __init__.py 100%; total 79% coverage) + tests/test_observer.py (22KB, 41 tests) + cli.py observer group (12 subcommands) + manager.md Step 0 protocol. Claude only had to remove the obsolete observer_tick stub test (the stub was correctly replaced by the new observer group) + refresh cli.py docstring. 346/346 tests pass. Second hybrid wave in this session — Kimi-CLI's incremental edits are reliable even when swarm reports timeout.",
+      "note": "Round 2 — was sequential after #19 due to cli.py conflict."
     }
   ],
   "blockers": [],
@@ -413,12 +407,8 @@
     "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
     "kimi": {
       "max_parallel": 6,
-      "in_flight": [
-        "dispatch-2026-05-21T00-52-observer"
-      ],
-      "fill_policy": "aggressive",
-      "cooldown_lifted_at_iso": "2026-05-21T00:52:00Z",
-      "cooldown_lifted_reason": "Cooldown was a heuristic; previous failure attributed to packet-specific cli.py collision rather than engine-wide capacity issue. Observer packet has no such collision; trying Kimi again."
+      "in_flight": [],
+      "fill_policy": "aggressive"
     },
     "kimi-api": {
       "max_parallel": 6,

@@ -38,3 +38,7 @@ audit/
 # Local dev_loop runtime state (the seed state.json is tracked; ad-hoc runtime
 # overrides are not. Uncomment if you want to keep the seed only.)
 # coord/dev_loop/state.runtime.json
+
+# Observer runtime artifacts (#20): created by `harness observer init`,
+# updated by cycles, ack'd by operator.  Per-machine state, not committed.
+coord/observer/

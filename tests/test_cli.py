@@ -306,10 +306,11 @@ def test_lock_release(mock_update, runner: CliRunner) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_observer_tick_stub(runner: CliRunner) -> None:
-    result = runner.invoke(cli, ["observer-tick"])
-    assert result.exit_code == 1
-    assert "pending Wave A.2" in result.output
+def test_observer_group_exists(runner: CliRunner) -> None:
+    """The observer-tick stub was replaced by the observer group (#20)."""
+    result = runner.invoke(cli, ["observer", "--help"])
+    assert result.exit_code == 0
+    assert "observer" in result.output.lower()
 
 
 def test_retro_stub(runner: CliRunner) -> None:

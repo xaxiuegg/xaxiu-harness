@@ -8,6 +8,17 @@ The operator has granted full dev authority (`feedback_xaxiu_harness_full_dev_au
 
 ## Per-tick procedure
 
+0. **Read HIGH / CRITICAL observer flags (FIRST ACTION OF EVERY TICK).**
+   - Check `coord/observer/HIGH_FLAG_PENDING.md`. If it exists and is non-empty:
+     - Read its contents, surface the findings in the tick log.
+     - Do NOT proceed with any dispatch or integration that could exacerbate the flagged category until the flag is handled.
+     - Move the file to `coord/observer/cycles/handled/HIGH_FLAG_<timestamp>.md` after logging.
+   - Check `coord/observer/CRITICAL_FLAG_PENDING.md`. If it exists and is non-empty:
+     - This is an L5-equivalent escalation. Append to `escalations[]` with `level: "L5"`, `tag: "observer-critical"`, and pause ALL affected phases (treat as global pause for the category).
+     - Halt all autonomous work that touches the flagged scope until the operator acknowledges via `harness observer ack <flag-id>`.
+     - Do NOT move the CRITICAL file automatically — it stays until explicitly acked.
+   - If neither file exists, proceed normally.
+
 1. **Read `coord/dev_loop/state.json`.**
 2. **Check `loop_status`.** If anything other than `"armed"`, append a "skipped" entry to `coord/dev_loop/log.jsonl` and exit. Do not act.
 3. **Check active dispatches.** For each entry in `active_dispatches`:

@@ -1,6 +1,6 @@
 ID,Category,Title,Status,Owner,Effort,Updated,Notes
-W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),shipped,Kimi+Claude,~45 min,2026-05-21,"Commit 514945f; hybrid Kimi-CLI partial + Claude inline; 305/305 tests; 90% coverage"
-W20-OBSERVER,Wave 5.6,Independent observer primitive (the check on dev-manager authority),in_progress,Kimi via swarm,~60 min,2026-05-21,"Round 2 dispatch ongoing; see coord/packets/2026-05-20-observer-primitive/"
+W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),shipped,Kimi+Claude,~45 min,2026-05-21,Commit 514945f; hybrid Kimi-CLI partial + Claude inline; 305/305 tests; 90% coverage
+W20-OBSERVER,Wave 5.6,Independent observer primitive (the check on dev-manager authority),shipped,Kimi via swarm,~60 min,2026-05-21,Kimi-CLI landed 6 module files (state/scheduler/cycle/audit_prompt/flags/__init__) + tests/test_observer.py (22KB; 41 tests) + cli.py observer group (12 subcommands) + manager.md Step 0 during 1200s timeout per feedback_kimi_cli_incremental_edits. Claude removed obsolete observer_tick stub test. 346/346 tests pass; 79% coverage on harness.observer.
 WA-1,Wave A,Wire dispatch CLI verb to dispatch_packet,shipped,Claude,30 min,2026-05-20,"Commit 8b65dde; first wired verb, set pattern"
 WA-2,Wave A,Wire remaining 10 CLI verbs (init/status/engines/priority/burst/lock/observer-tick/retro/install/dashboard-serve/loops),shipped,Kimi via swarm,~30 min wall,2026-05-20,Commit d5def26; 24 new tests
 WA5,Wave A.5,HarnessError taxonomy module + spec + tests,shipped,Claude,~1 hr,2026-05-20,errors.py + spec/errors.md + 21 tests; 89/89 pass
