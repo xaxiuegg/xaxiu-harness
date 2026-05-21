@@ -632,3 +632,161 @@ def test_run_cycle_skips_low_and_med_flags(tmp_path: Path) -> None:
     assert len(report.flags_raised) == 2
     assert not (base / "HIGH_FLAG_PENDING.md").exists()
     assert not (base / "CRITICAL_FLAG_PENDING.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Scheduler helpers (direct coverage for observer.scheduler)
+# ---------------------------------------------------------------------------
+
+
+def test_observer_pwsh_returns_pwsh() -> None:
+    with patch(
+        "harness.observer.scheduler.shutil.which",
+        side_effect=lambda name: "C:\\pwsh" if name == "pwsh" else None,
+    ):
+        from harness.observer.scheduler import _pwsh
+        assert _pwsh() == "C:\\pwsh"
+
+
+def test_observer_pwsh_returns_powershell() -> None:
+    with patch(
+        "harness.observer.scheduler.shutil.which",
+        side_effect=lambda name: "C:\\powershell" if name == "powershell" else None,
+    ):
+        from harness.observer.scheduler import _pwsh
+        assert _pwsh() == "C:\\powershell"
+
+
+def test_observer_pwsh_returns_none() -> None:
+    with patch("harness.observer.scheduler.shutil.which", return_value=None):
+        from harness.observer.scheduler import _pwsh
+        assert _pwsh() is None
+
+
+def test_observer_project_root() -> None:
+    from harness.observer.scheduler import _project_root
+    with patch("harness.observer.scheduler._REPO_ROOT", Path("C:\\repo")):
+        assert _project_root() == "C:\\repo"
+
+
+def test_observer_cmd_uses_venv(tmp_path: Path) -> None:
+    venv_python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    from harness.observer.scheduler import _observer_cmd
+    with patch("harness.observer.scheduler._REPO_ROOT", tmp_path):
+        cmd = _observer_cmd()
+    assert str(venv_python) in cmd
+    assert cmd.endswith(" -m harness observer cycle-now")
+
+
+def test_observer_cmd_falls_back(tmp_path: Path) -> None:
+    from harness.observer.scheduler import _observer_cmd
+    with patch("harness.observer.scheduler._REPO_ROOT", tmp_path):
+        cmd = _observer_cmd()
+    assert cmd == "python -m harness observer cycle-now"
+
+
+def test_daily_retro_cmd_uses_venv(tmp_path: Path) -> None:
+    venv_python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    from harness.observer.scheduler import _daily_retro_cmd
+    with patch("harness.observer.scheduler._REPO_ROOT", tmp_path):
+        cmd = _daily_retro_cmd()
+    assert str(venv_python) in cmd
+    assert cmd.endswith(" -m harness observer daily-retro")
+
+
+def test_daily_retro_cmd_falls_back(tmp_path: Path) -> None:
+    from harness.observer.scheduler import _daily_retro_cmd
+    with patch("harness.observer.scheduler._REPO_ROOT", tmp_path):
+        cmd = _daily_retro_cmd()
+    assert cmd == "python -m harness observer daily-retro"
+
+
+def test_build_ps_script_task_name_interpolation() -> None:
+    from harness.observer.scheduler import _build_ps_script
+    script = _build_ps_script(
+        task_name="XaxiuHarnessObserverCycle",
+        trigger_ps="New-ScheduledTaskTrigger -Daily -At '23:00'",
+        action_cmd="python -m harness observer cycle-now",
+        description="test desc",
+    )
+    assert "$TaskName = 'XaxiuHarnessObserverCycle'" in script
+    assert "New-ScheduledTaskTrigger -Daily -At '23:00'" in script
+    assert "python -m harness observer cycle-now" in script
+    assert "test desc" in script
+    assert "-RunLevel Limited" in script
+    assert "try {" in script
+    assert "catch {" in script
+
+
+def test_register_tasks_mixed_success_cycle_ok_retro_fail() -> None:
+    from harness.observer.scheduler import register_tasks
+    with patch("harness.observer.scheduler._pwsh", return_value="powershell.exe"), \
+         patch("harness.observer.scheduler.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="OK\n", stderr=""),
+            MagicMock(returncode=1, stdout="FAIL", stderr=""),
+        ]
+        ok, msg = register_tasks()
+    assert ok is False
+    assert "Cycle task OK" in msg
+    assert "retro task failed" in msg
+
+
+def test_register_tasks_mixed_success_retro_ok_cycle_fail() -> None:
+    from harness.observer.scheduler import register_tasks
+    with patch("harness.observer.scheduler._pwsh", return_value="powershell.exe"), \
+         patch("harness.observer.scheduler.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="CYCLE_FAIL", stderr=""),
+            MagicMock(returncode=0, stdout="OK\n", stderr=""),
+        ]
+        ok, msg = register_tasks()
+    assert ok is False
+    assert "Retro task OK" in msg
+    assert "cycle task failed" in msg
+
+
+def test_register_tasks_both_fail() -> None:
+    from harness.observer.scheduler import register_tasks
+    with patch("harness.observer.scheduler._pwsh", return_value="powershell.exe"), \
+         patch("harness.observer.scheduler.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="CYCLE_FAIL", stderr=""),
+            MagicMock(returncode=1, stdout="RETRO_FAIL", stderr=""),
+        ]
+        ok, msg = register_tasks()
+    assert ok is False
+    assert "Cycle: CYCLE_FAIL" in msg
+    assert "Retro: RETRO_FAIL" in msg
+
+
+def test_unregister_tasks_iterates_both() -> None:
+    from harness.observer.scheduler import unregister_tasks
+    with patch("harness.observer.scheduler._pwsh", return_value="powershell.exe"), \
+         patch("harness.observer.scheduler.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="OK removed cycle", stderr=""),
+            MagicMock(returncode=0, stdout="SKIP retro not found", stderr=""),
+        ]
+        ok, msg = unregister_tasks()
+    assert ok is True
+    assert "OK removed cycle" in msg
+    assert "SKIP retro not found" in msg
+
+
+def test_register_tasks_both_ok() -> None:
+    from harness.observer.scheduler import register_tasks
+    with patch("harness.observer.scheduler._pwsh", return_value="powershell.exe"), \
+         patch("harness.observer.scheduler.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="OK\n", stderr=""),
+            MagicMock(returncode=0, stdout="OK\n", stderr=""),
+        ]
+        ok, msg = register_tasks(cadence_minutes=45, daily_time="22:30")
+    assert ok is True
+    assert "45 min" in msg
+    assert "22:30" in msg
