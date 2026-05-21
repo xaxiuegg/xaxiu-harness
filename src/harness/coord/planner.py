@@ -138,6 +138,39 @@ def plan(
     raise last_error
 
 
+def plan_from_description(
+    description: str,
+    *,
+    run_id: str | None = None,
+    engine: str = "claude",
+    model: str | None = None,
+    project_root: Path | None = None,
+    max_retries: int = 1,
+) -> WavePlan:
+    """Decompose a natural-language description into a WavePlan.
+
+    Writes the description to a temp .md file and delegates to plan().
+    Keeps wrapper logic small so callers (the new CLI verb) stay tiny.
+    """
+    import tempfile
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(f"# Task (from natural language)\n\n{description}\n")
+        tmp_path = Path(tmp.name)
+    try:
+        return plan(
+            tmp_path,
+            run_id=run_id,
+            engine=engine,
+            model=model,
+            project_root=project_root,
+            max_retries=max_retries,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def write_plan(plan_obj: WavePlan, run_dir: Path) -> Path:
     """Write the plan to runs/<run_id>/plan.json atomically."""
     run_dir.mkdir(parents=True, exist_ok=True)

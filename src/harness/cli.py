@@ -1300,6 +1300,21 @@ def coord_plan(spec: Path, run_id: str | None, engine: str, model: str | None, p
     click.echo(f"plan: {run_dir / 'plan.json'}")
 
 
+@coord_group.command(name="plan-from-description")
+@click.argument("description")
+@click.option("--engine", default="claude",
+              help="Planner engine: claude | kimi | kimi-api | deepseek | mock.")
+@click.option("--run-id", default=None)
+def coord_plan_from_description(description: str, engine: str, run_id: str | None) -> None:
+    """Generate a plan.json from a one-line natural-language description."""
+    from harness.coord.planner import plan_from_description, write_plan
+    waveplan = plan_from_description(description, engine=engine, run_id=run_id)
+    run_dir = Path("runs") / waveplan.run_id
+    out = write_plan(waveplan, run_dir)
+    click.echo(f"plan.json written to {out} (run_id={waveplan.run_id})")
+    click.echo(f"  {len(waveplan.tasks)} task(s); planner_engine={waveplan.planner_engine}")
+
+
 @coord_group.command(name="run")
 @click.option("--spec", required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--run-id", default=None, help="Run ID (defaults to auto-generated).")

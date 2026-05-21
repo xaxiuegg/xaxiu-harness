@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
 
 
 def _runs_dir() -> Path:
@@ -88,4 +89,55 @@ def make_router() -> APIRouter:
     def _proxy() -> dict[str, Any]:
         return proxy_state()
 
+    @router.get("/runs/{run_id}", response_class=HTMLResponse)
+    def _run_detail(run_id: str) -> str:
+        return _render_run_detail_html(run_id)
+
     return router
+
+
+def _render_run_detail_html(run_id: str) -> str:
+    """Render a self-contained HTML page for one run."""
+    workers = list_workers(run_id)
+    runs = {r["run_id"]: r for r in list_runs()}
+    meta = runs.get(run_id, {"state": "unknown", "tasks": 0})
+
+    rows: list[str] = []
+    for w in workers:
+        wid = (w.get("worker_id") or "-")
+        state = (w.get("state") or "-")
+        files = ", ".join(w.get("files_modified") or []) or "—"
+        sha = w.get("commit_sha") or "—"
+        tests = "✓" if w.get("tests_passed") else "—"
+        rows.append(
+            f"<tr><td>{wid}</td><td>{state}</td><td>{tests}</td>"
+            f"<td><code>{sha}</code></td><td><small>{files}</small></td></tr>"
+        )
+    rows_html = "\n".join(rows) if rows else "<tr><td colspan='5'>no workers</td></tr>"
+
+    return f"""<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<title>run {run_id}</title>
+<style>
+body {{ font-family: system-ui, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; }}
+h1 {{ font-size: 1.4em; }}
+.meta {{ color: #666; margin-bottom: 1em; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ border-bottom: 1px solid #eee; padding: 6px 10px; text-align: left; }}
+th {{ background: #f7f7f7; }}
+code {{ background: #f4f4f4; padding: 1px 4px; }}
+.state-completed {{ color: #060; }}
+.state-failed {{ color: #b00; }}
+.state-running {{ color: #04a; }}
+</style>
+</head><body>
+<h1>run <code>{run_id}</code></h1>
+<div class="meta">state: <strong class="state-{meta.get('state','unknown')}">{meta.get('state','unknown')}</strong> · tasks: {meta.get('tasks', 0)} · started: {meta.get('started_at') or '-'}</div>
+<table>
+<thead><tr><th>worker</th><th>state</th><th>tests</th><th>commit</th><th>files</th></tr></thead>
+<tbody>
+{rows_html}
+</tbody></table>
+<p><a href="/v2/runs/{run_id}/workers">raw JSON</a> · <a href="/v2/runs">all runs</a></p>
+</body></html>"""

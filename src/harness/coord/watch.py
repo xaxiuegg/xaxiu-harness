@@ -40,6 +40,8 @@ def watch_run(run_dir: Path, *, poll_seconds: float = WATCH_POLL_SECONDS) -> Ite
 
     last_state_mtime: float = 0.0
     last_ckpt_mtimes: dict[Path, float] = {}
+    last_progress_mtimes: dict[Path, float] = {}
+    last_progress_pos: dict[Path, int] = {}
     terminal_states = {"completed", "failed"}
 
     while True:
@@ -84,5 +86,34 @@ def watch_run(run_dir: Path, *, poll_seconds: float = WATCH_POLL_SECONDS) -> Ite
                         yield (
                             f"{summary['worker_id']}: {summary['state']}{step}{files}"
                         )
+
+        # progress event tails
+        if checkpoints_dir.exists():
+            for prog_path in sorted(checkpoints_dir.glob("*.progress.jsonl")):
+                try:
+                    mtime = prog_path.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime > last_progress_mtimes.get(prog_path, 0.0):
+                    # Read new lines since last position
+                    last_pos = last_progress_pos.get(prog_path, 0)
+                    try:
+                        with open(prog_path, "r", encoding="utf-8") as f:
+                            f.seek(last_pos)
+                            new_text = f.read()
+                            last_progress_pos[prog_path] = f.tell()
+                    except OSError:
+                        continue
+                    last_progress_mtimes[prog_path] = mtime
+                    for line in new_text.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        worker_id = prog_path.stem.replace(".progress", "")
+                        yield f"{worker_id}: {ev.get('event','?')} step={ev.get('step_id','-')}"
 
         time.sleep(poll_seconds)

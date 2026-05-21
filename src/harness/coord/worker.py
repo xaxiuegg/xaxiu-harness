@@ -14,6 +14,21 @@ from harness.coord.checkpoint import Checkpoint, read_checkpoint, write_checkpoi
 from harness.coord.worktree import WORKTREE_ROOT, worktree_path
 
 
+def _append_progress(run_dir: Path, worker_id: str, event: dict) -> None:
+    """Atomically append a progress event to checkpoints/<worker_id>.progress.jsonl.
+
+    Best-effort — never raises (worker steps must not fail on telemetry I/O).
+    """
+    try:
+        progress_path = run_dir / "checkpoints" / f"{worker_id}.progress.jsonl"
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps({"ts": now_iso(), **event}, ensure_ascii=False)
+        with open(progress_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
 def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> dict[str, Any]:
     """Run pytest on *test_set* and return a summary dict."""
     if not test_set:
@@ -181,6 +196,10 @@ def run_worker(
     idx = start_idx - 1
     for idx in range(start_idx, len(task_obj.steps)):
         step = task_obj.steps[idx]
+        _append_progress(run_dir, task_obj.worker_id, {
+            "event": "step_start", "step_id": step.step_id,
+            "kind": step.kind, "idx": idx,
+        })
 
         # Build and dispatch prompt packet for edit steps
         if step.kind == "edit" and step.target_files:
@@ -225,6 +244,10 @@ def run_worker(
             "commit_sha": commit_sha,
         })
         write_checkpoint(checkpoint_path, ckpt)
+        _append_progress(run_dir, task_obj.worker_id, {
+            "event": "step_done", "step_id": step.step_id,
+            "files_modified": list(ckpt.files_modified or []),
+        })
         files_modified = list(ckpt.files_modified)
 
     tests = _run_pytest(task_obj.test_set, cwd=wt_path)
@@ -236,6 +259,10 @@ def run_worker(
         "commit_sha": commit_sha,
     })
     write_checkpoint(checkpoint_path, ckpt)
+    _append_progress(run_dir, task_obj.worker_id, {
+        "event": "worker_done", "state": final_state,
+        "tests_passed": tests["failed"] == 0,
+    })
 
     # Record into per-engine budget ledger (best-effort, no fail-loud)
     try:
