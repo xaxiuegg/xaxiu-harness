@@ -152,6 +152,31 @@ def quarantine(alias: str) -> None:
     click.echo(f"Key '{alias}' quarantined (circuit permanently open).")
 
 
+def unquarantine(alias: str | None = None, all_keys: bool = False) -> tuple[bool, str]:
+    """Clear ``permanent`` + ``auto_quarantined_at`` flags on one or all keys.
+
+    Returns ``(ok, message)``.
+    """
+    state = read_state()
+    if not all_keys and not alias:
+        return False, "specify --alias <KEY> or --all"
+    cleared: list[str] = []
+    for key_alias, ks in state.keys.items():
+        if not all_keys and key_alias != alias:
+            continue
+        if ks.permanent or ks.auto_quarantined_at is not None:
+            ks.permanent = False
+            ks.auto_quarantined_at = None
+            ks.consecutive_failures = 0
+            ks.circuit_state = CircuitState.CLOSED
+            ks.cooldown_until = None
+            cleared.append(key_alias)
+    if not cleared:
+        return False, "no quarantined keys matched"
+    write_state(state)
+    return True, f"unquarantined: {', '.join(cleared)}"
+
+
 def disable_key(alias: str) -> None:
     path = _state_path()
     state = read_state(path)

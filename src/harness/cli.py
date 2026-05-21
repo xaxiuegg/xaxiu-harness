@@ -21,6 +21,7 @@ import yaml
 
 from harness.adapters.from_description import generate_adapter_from_nl
 from harness.adapters.loader import _repo_root, load_project_adapter, load_template
+from harness.adapters.scaffold import scaffold_adapter
 from harness.cli_helpers import probe_all_engines
 from harness.engines.dispatcher import dispatch_packet
 from harness.operator import OperatorMode, resolve_operator_config
@@ -542,6 +543,32 @@ def adapter_from_description(
     sys.exit(0)
 
 
+@adapter.command(name="create")
+@click.argument("project_name")
+@click.option("--target-dir", default=".", type=click.Path(path_type=Path),
+              help="Parent dir for the new project (default cwd).")
+@click.option("--template", default="basic",
+              help="Adapter template name (basic | generic-coding | solo-dev | …).")
+def adapter_create(project_name: str, target_dir: Path, template: str) -> None:
+    """Scaffold a new project: adapter YAML + coord layout + spec/ + runs/."""
+    try:
+        paths = scaffold_adapter(
+            project_name, target_dir=target_dir, template=template,
+        )
+    except FileExistsError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"error: scaffold failed: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"created project: {paths['project_dir']}")
+    click.echo(f"  adapter:   {paths['adapter_yaml']}")
+    click.echo(f"  STATUS:    {paths['status_csv']}")
+    click.echo(f"  state:     {paths['state_json']}")
+    click.echo(f"\nNext: cd {paths['project_dir']} && harness install")
+
+
 @adapter.command(name="list")
 def adapter_list() -> None:
     """List existing project adapters."""
@@ -635,6 +662,17 @@ def doctor_cmd(fmt: str) -> None:
         click.echo(f"overall: {overall.upper()}")
 
     sys.exit(0 if overall != "fail" else 1)
+
+
+@cli.command(name="panic-dump")
+@click.option("--target-dir", default=None, type=click.Path(path_type=Path),
+              help="Output dir (defaults to cwd).")
+def panic_dump_cmd(target_dir: Path | None) -> None:
+    """Capture a secret-scrubbed snapshot of harness state into one tarball."""
+    from harness.panic import panic_dump
+    p = panic_dump(target_dir=target_dir)
+    click.echo(f"panic-dump written: {p}")
+    click.echo(f"size: {p.stat().st_size} bytes")
 
 
 @cli.command()
@@ -1405,6 +1443,18 @@ def proxy_quarantine(alias: str) -> None:
     """Permanently open a key's circuit breaker."""
     from harness.proxy.cli import quarantine
     quarantine(alias)
+
+
+@proxy_group.command(name="unquarantine")
+@click.option("--alias", default=None, help="Specific key alias to unquarantine.")
+@click.option("--all", "all_keys", is_flag=True,
+              help="Clear quarantine on ALL keys.")
+def proxy_unquarantine(alias: str | None, all_keys: bool) -> None:
+    """Clear permanent-quarantine state set by --quarantine or AUTO-QUARANTINE-KEY."""
+    from harness.proxy.cli import unquarantine
+    ok, msg = unquarantine(alias=alias, all_keys=all_keys)
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
 
 
 @proxy_group.command(name="disable-key")
