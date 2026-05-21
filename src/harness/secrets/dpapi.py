@@ -325,6 +325,10 @@ def _cli_set(name: str) -> None:
     sys.stdout.write(f"{name}: SET\n")
 
 
+# Alias for unified read interface (v2/A proxy)
+read_secret = decrypt_secret
+
+
 if __name__ == "__main__":
     import sys
 
