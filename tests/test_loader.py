@@ -1,4 +1,4 @@
-"""Tests for src.harness.adapters.loader."""
+"""Tests for harness.adapters.loader."""
 
 from __future__ import annotations
 
@@ -9,13 +9,18 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from src.harness.adapters.loader import (
+from harness.adapters.loader import (
     ALLOWED_TEMPLATES,
     _repo_root,
     load_project_adapter,
     load_template,
     list_templates,
     resolve_placeholders,
+)
+from harness.adapters.schema import (
+    AdapterConfig,
+    ObserverConfig,
+    StatusTrackingConfig,
 )
 
 
@@ -75,7 +80,7 @@ def test_load_template_unknown_name() -> None:
         load_template("evil-template")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_load_template_missing_file(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     templates_dir = tmp_path / "adapters" / "templates"
@@ -84,7 +89,7 @@ def test_load_template_missing_file(mock_root, tmp_path: Path) -> None:
         load_template("warehouse-style")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_load_template_with_placeholder(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     templates_dir = tmp_path / "adapters" / "templates"
@@ -122,7 +127,7 @@ def test_load_project_adapter_invalid_name() -> None:
         load_project_adapter("../../etc/passwd")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_load_project_adapter_missing_file(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     with pytest.raises(FileNotFoundError):
@@ -132,7 +137,7 @@ def test_load_project_adapter_missing_file(mock_root, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Path security checks – MED-2 / MED-3
 # ---------------------------------------------------------------------------
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_project_root_not_absolute(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     _make_adapter_yaml(tmp_path, "bad-root", {"project_root": "relative/path"})
@@ -140,7 +145,7 @@ def test_project_root_not_absolute(mock_root, tmp_path: Path) -> None:
         load_project_adapter("bad-root")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_project_root_does_not_exist(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     _make_adapter_yaml(tmp_path, "bad-root", {"project_root": str(tmp_path / "missing")})
@@ -148,7 +153,7 @@ def test_project_root_does_not_exist(mock_root, tmp_path: Path) -> None:
         load_project_adapter("bad-root")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_project_root_under_system_dir(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     windir = os.environ.get("WINDIR", r"C:\Windows")
@@ -157,7 +162,7 @@ def test_project_root_under_system_dir(mock_root, tmp_path: Path) -> None:
         load_project_adapter("bad-root")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_csv_path_escapes_project_root(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     project_dir = tmp_path / "adapters" / "escaper" / "project"
@@ -177,7 +182,7 @@ def test_csv_path_escapes_project_root(mock_root, tmp_path: Path) -> None:
         load_project_adapter("escaper")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_markdown_path_escapes_project_root(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     project_dir = tmp_path / "adapters" / "escaper" / "project"
@@ -197,7 +202,7 @@ def test_markdown_path_escapes_project_root(mock_root, tmp_path: Path) -> None:
         load_project_adapter("escaper")
 
 
-@patch("src.harness.adapters.loader._repo_root")
+@patch("harness.adapters.loader._repo_root")
 def test_load_project_adapter_success(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
     project_dir = tmp_path / "adapters" / "good" / "project"
@@ -206,3 +211,54 @@ def test_load_project_adapter_success(mock_root, tmp_path: Path) -> None:
     cfg = load_project_adapter("good")
     assert cfg.name == "good"
     assert cfg.project_root == str(project_dir)
+
+
+
+# ---------------------------------------------------------------------------
+# Backwards compatibility
+# ---------------------------------------------------------------------------
+def test_adapter_config_without_operator() -> None:
+    cfg = AdapterConfig(
+        name="legacy",
+        project_root="C:\\legacy",
+        status_tracking=StatusTrackingConfig(
+            backend="csv", config={"csv_path": "STATUS.csv"}
+        ),
+        observer=ObserverConfig(),
+    )
+    assert cfg.operator is None
+
+
+# ---------------------------------------------------------------------------
+# Real template smoke tests
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("name", list_templates())
+def test_real_template_loads(name: str) -> None:
+    cfg = load_template(name)
+    assert cfg.operator is not None
+    assert cfg.operator.escalation_threshold == "L5"
+    assert cfg.operator.engine_fill == "aggressive"
+    assert cfg.operator.max_parallel_supervisors == 4
+    assert cfg.operator.explore_on_uncertainty == "dispatch_alternatives"
+    assert cfg.operator.observer_cadence_minutes == 60
+    assert cfg.operator.notification_method == "file"
+    assert cfg.operator.notification_target == "coord/dev_loop/escalations.md"
+
+
+def test_solo_dev_template_operator_overrides() -> None:
+    cfg = load_template("solo-dev")
+    assert cfg.operator is not None
+    assert cfg.operator.mode == "full_dev_authority"
+
+
+def test_writing_content_template_operator_overrides() -> None:
+    cfg = load_template("writing-content")
+    assert cfg.operator is not None
+    assert cfg.operator.profile == "non_technical"
+    assert cfg.operator.engine_routing.get("developing") == "claude-in-session"
+
+
+def test_research_comparison_template_operator_overrides() -> None:
+    cfg = load_template("research-comparison")
+    assert cfg.operator is not None
+    assert cfg.operator.engine_routing.get("developing") == "swarm/deepseek"

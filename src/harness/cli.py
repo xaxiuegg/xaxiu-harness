@@ -19,7 +19,9 @@ from typing import Optional
 import click
 import yaml
 
+from harness.adapters.from_description import generate_adapter_from_nl
 from harness.adapters.loader import _repo_root, load_project_adapter, load_template
+from harness.adapters.schema import AdapterConfig
 from harness.cli_helpers import probe_all_engines
 from harness.engines.dispatcher import dispatch_packet
 from harness.operator import OperatorMode, resolve_operator_config
@@ -369,6 +371,7 @@ def install(uninstall: bool) -> None:
             "writing-content",
             "research-comparison",
             "solo-dev",
+            "basic",
         ]
     ),
     default="warehouse-style",
@@ -417,6 +420,95 @@ def env(show_set: bool) -> None:
             click.echo(f"{key_name}: SET")
         else:
             click.echo(f"{key_name}: MISSING")
+    sys.exit(0)
+
+
+@cli.group(name="adapter")
+def adapter() -> None:
+    """Manage harness adapters (generate, list, validate)."""
+
+
+@adapter.command(name="from-description")
+@click.option("--project", "-p", required=True, help="Project name.")
+@click.option("--description", help="Natural-language description of the project.")
+@click.option("--description-file", type=click.Path(exists=True, dir_okay=False), help="Path to a file containing the description.")
+@click.option("--engine", default="swarm/kimi", help="Engine to use for generation.")
+@click.option("--force", is_flag=True, help="Overwrite existing adapter.")
+@click.pass_context
+def adapter_from_description(
+    ctx: click.Context,
+    project: str,
+    description: Optional[str],
+    description_file: Optional[str],
+    engine: str,
+    force: bool,
+) -> None:
+    """Generate an adapter YAML from a natural-language description."""
+    op_cfg = (ctx.obj or {}).get("operator_config") if ctx.obj else None
+    if op_cfg is not None and op_cfg.mode == OperatorMode.DRY_RUN:
+        click.echo("dry-run: would generate adapter from description")
+        sys.exit(0)
+
+    if description and description_file:
+        click.echo("error: --description and --description-file are mutually exclusive", err=True)
+        sys.exit(2)
+    if description_file:
+        description = Path(description_file).read_text(encoding="utf-8")
+    if not description:
+        click.echo("error: --description or --description-file is required", err=True)
+        sys.exit(2)
+
+    adapter_dir = _repo_root() / "adapters" / project
+    adapter_path = adapter_dir / "harness-adapter.yaml"
+
+    if adapter_path.exists() and not force:
+        click.echo(
+            f"error: adapter already exists for '{project}'; use --force to overwrite",
+            err=True,
+        )
+        sys.exit(2)
+
+    try:
+        cfg = generate_adapter_from_nl(project=project, description=description, engine=engine)
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    data = cfg.model_dump(mode="json")
+    data["name"] = project
+
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    adapter_path.write_text(
+        yaml.safe_dump(data, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+    click.echo(str(adapter_path))
+    sys.exit(0)
+
+
+@adapter.command(name="list")
+def adapter_list() -> None:
+    """List existing project adapters."""
+    adapters_dir = _repo_root() / "adapters"
+    projects = []
+    for path in adapters_dir.iterdir():
+        if path.is_dir() and (path / "harness-adapter.yaml").exists():
+            projects.append(path.name)
+    for name in sorted(projects):
+        click.echo(name)
+    sys.exit(0)
+
+
+@adapter.command(name="validate")
+@click.argument("project")
+def adapter_validate(project: str) -> None:
+    """Validate a project's harness-adapter.yaml."""
+    try:
+        load_project_adapter(project)
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"adapter for '{project}' is valid")
     sys.exit(0)
 
 

@@ -92,6 +92,31 @@ class ObserverConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class OperatorSection(BaseModel):
+    """Adapter YAML mirror of harness.operator.modes.OperatorConfig.
+
+    Kept structurally distinct from OperatorConfig so the adapter schema
+    has one source of truth for YAML validation; the runtime config is
+    materialized from this by harness.operator.config.resolve_operator_config.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    mode: Literal["review_each", "full_dev_authority", "dry_run"] = "review_each"
+    escalation_threshold: Literal["L1", "L2", "L3", "L4", "L5"] = "L5"
+    engine_fill: Literal["aggressive", "conservative", "manual"] = "aggressive"
+    max_parallel_supervisors: int = Field(default=4, ge=1, le=16)
+    explore_on_uncertainty: Literal[
+        "dispatch_alternatives", "inline", "ask_operator"
+    ] = "dispatch_alternatives"
+    observer_cadence_minutes: int = Field(default=60, ge=5, le=1440)
+    profile: Literal["technical", "non_technical"] = "technical"
+    engine_routing: dict[str, str] = Field(default_factory=dict)
+    engine_slots: dict[str, int] = Field(default_factory=dict)
+    notification_method: Literal["file", "windows_toast", "email"] = "file"
+    notification_target: str = "coord/dev_loop/escalations.md"
+
+
 _CRON_REGEX = re.compile(r"^(\S+\s+){4}\S+$")
 
 
@@ -137,6 +162,7 @@ class AdapterConfig(BaseModel):
     project_root: str = Field(max_length=4096)
     status_tracking: StatusTrackingConfig
     observer: ObserverConfig
+    operator: OperatorSection | None = None
     routing_rules: list[RoutingRule] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
 

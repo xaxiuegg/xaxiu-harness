@@ -1,0 +1,258 @@
+"""Tests for NL → harness-adapter.yaml translation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from click.testing import CliRunner
+
+from harness.adapters.from_description import (
+    _extract_adapter_yaml,
+    generate_adapter_from_nl,
+)
+from harness.adapters.schema import AdapterConfig, ObserverConfig, StatusTrackingConfig
+from harness.cli import cli
+from harness.errors import SchemaViolation
+
+
+# ---------------------------------------------------------------------------
+# _extract_adapter_yaml
+# ---------------------------------------------------------------------------
+
+
+def test_extract_adapter_yaml_success() -> None:
+    text = "prelude\n<<<ADAPTER\nname: demo\nproject_root: /tmp\nADAPTER>>>\nfooter"
+    assert _extract_adapter_yaml(text) == "name: demo\nproject_root: /tmp"
+
+
+def test_extract_adapter_yaml_missing_start() -> None:
+    with pytest.raises(ValueError, match="Missing <<<ADAPTER"):
+        _extract_adapter_yaml("no markers")
+
+
+def test_extract_adapter_yaml_missing_end() -> None:
+    with pytest.raises(ValueError, match="Missing ADAPTER>>>"):
+        _extract_adapter_yaml("<<<ADAPTER\nname: demo")
+
+
+# ---------------------------------------------------------------------------
+# generate_adapter_from_nl
+# ---------------------------------------------------------------------------
+
+
+def _valid_yaml_response(project: str = "demo") -> str:
+    return (
+        "<<<ADAPTER\n"
+        f"name: {project}\n"
+        "project_root: \"{{PROJECT_ROOT}}\"\n"
+        "status_tracking:\n"
+        "  backend: csv\n"
+        "  config:\n"
+        "    csv_path: STATUS.csv\n"
+        "observer:\n"
+        "  cadence_minutes: 60\n"
+        "ADAPTER>>>"
+    )
+
+
+@patch("harness.adapters.from_description._dispatch_via_packet")
+def test_generate_adapter_from_nl_success(mock_dispatch) -> None:
+    mock_dispatch.return_value = _valid_yaml_response("myproj")
+    cfg = generate_adapter_from_nl(project="myproj", description="A test project.")
+    assert isinstance(cfg, AdapterConfig)
+    assert cfg.name == "myproj"
+    assert cfg.project_root == "{{PROJECT_ROOT}}"
+
+
+@patch("harness.adapters.from_description._dispatch_via_packet")
+def test_generate_adapter_from_nl_retries_then_succeeds(mock_dispatch) -> None:
+    bad = "<<<ADAPTER\nname: bad\nunknown_field: 123\nADAPTER>>>"
+    good = _valid_yaml_response("myproj")
+    mock_dispatch.side_effect = [bad, good]
+
+    cfg = generate_adapter_from_nl(
+        project="myproj", description="A test project.", max_retries=1
+    )
+    assert isinstance(cfg, AdapterConfig)
+    assert cfg.name == "myproj"
+    assert mock_dispatch.call_count == 2
+
+
+@patch("harness.adapters.from_description._dispatch_via_packet")
+def test_generate_adapter_from_nl_exhausted_raises(mock_dispatch) -> None:
+    bad = "<<<ADAPTER\nname: bad\nunknown_field: 123\nADAPTER>>>"
+    mock_dispatch.return_value = bad
+
+    with pytest.raises(SchemaViolation, match="Adapter validation failed"):
+        generate_adapter_from_nl(
+            project="myproj", description="A test project.", max_retries=1
+        )
+    assert mock_dispatch.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# CLI adapter group
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
+
+
+@patch("harness.cli.generate_adapter_from_nl")
+@patch("harness.cli._repo_root")
+def test_cli_adapter_from_description_success(
+    mock_repo_root, mock_generate, runner: CliRunner, tmp_path: Path
+) -> None:
+    adapters_dir = tmp_path / "adapters"
+    adapters_dir.mkdir(parents=True, exist_ok=True)
+    mock_repo_root.return_value = tmp_path
+
+    cfg = AdapterConfig(
+        name="demo",
+        project_root=str(tmp_path / "project"),
+        status_tracking=StatusTrackingConfig(backend="csv"),
+        observer=ObserverConfig(),
+    )
+    mock_generate.return_value = cfg
+
+    result = runner.invoke(
+        cli,
+        ["adapter", "from-description", "-p", "myproj", "--description", "A test project."],
+    )
+    assert result.exit_code == 0
+    assert "harness-adapter.yaml" in result.output
+    mock_generate.assert_called_once_with(
+        project="myproj", description="A test project.", engine="swarm/kimi"
+    )
+
+
+@patch("harness.cli._repo_root")
+def test_cli_adapter_from_description_refuses_overwrite(
+    mock_repo_root, runner: CliRunner, tmp_path: Path
+) -> None:
+    adapters_dir = tmp_path / "adapters"
+    adapters_dir.mkdir(parents=True, exist_ok=True)
+    mock_repo_root.return_value = tmp_path
+
+    existing = adapters_dir / "myproj" / "harness-adapter.yaml"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("name: myproj\n", encoding="utf-8")
+
+    result = runner.invoke(
+        cli,
+        ["adapter", "from-description", "-p", "myproj", "--description", "A test project."],
+    )
+    assert result.exit_code == 2
+    assert "already exists" in result.output
+
+
+@patch("harness.cli.generate_adapter_from_nl")
+@patch("harness.cli._repo_root")
+def test_cli_adapter_from_description_force_overwrite(
+    mock_repo_root, mock_generate, runner: CliRunner, tmp_path: Path
+) -> None:
+    adapters_dir = tmp_path / "adapters"
+    adapters_dir.mkdir(parents=True, exist_ok=True)
+    mock_repo_root.return_value = tmp_path
+
+    existing = adapters_dir / "myproj" / "harness-adapter.yaml"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("name: myproj\n", encoding="utf-8")
+
+    cfg = AdapterConfig(
+        name="demo",
+        project_root=str(tmp_path / "project"),
+        status_tracking=StatusTrackingConfig(backend="csv"),
+        observer=ObserverConfig(),
+    )
+    mock_generate.return_value = cfg
+
+    result = runner.invoke(
+        cli,
+        [
+            "adapter",
+            "from-description",
+            "-p",
+            "myproj",
+            "--description",
+            "A test project.",
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0
+
+
+@patch("harness.cli._repo_root")
+def test_cli_adapter_list(mock_repo_root, runner: CliRunner, tmp_path: Path) -> None:
+    adapters_dir = tmp_path / "adapters"
+    adapters_dir.mkdir(parents=True, exist_ok=True)
+    mock_repo_root.return_value = tmp_path
+
+    (adapters_dir / "proj-a" / "harness-adapter.yaml").parent.mkdir(parents=True, exist_ok=True)
+    (adapters_dir / "proj-a" / "harness-adapter.yaml").write_text("name: a\n", encoding="utf-8")
+    (adapters_dir / "proj-b" / "harness-adapter.yaml").parent.mkdir(parents=True, exist_ok=True)
+    (adapters_dir / "proj-b" / "harness-adapter.yaml").write_text("name: b\n", encoding="utf-8")
+    (adapters_dir / "empty-dir").mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(cli, ["adapter", "list"])
+    assert result.exit_code == 0
+    lines = [line for line in result.output.splitlines() if line]
+    assert lines == ["proj-a", "proj-b"]
+
+
+@patch("harness.cli.load_project_adapter")
+def test_cli_adapter_validate_success(mock_load, runner: CliRunner) -> None:
+    mock_load.return_value = MagicMock()
+    result = runner.invoke(cli, ["adapter", "validate", "myproj"])
+    assert result.exit_code == 0
+    assert "valid" in result.output
+    mock_load.assert_called_once_with("myproj")
+
+
+@patch("harness.cli.load_project_adapter")
+def test_cli_adapter_validate_failure(mock_load, runner: CliRunner) -> None:
+    mock_load.side_effect = ValueError("corrupt yaml")
+    result = runner.invoke(cli, ["adapter", "validate", "badproj"])
+    assert result.exit_code == 1
+    assert "corrupt yaml" in result.output
+
+
+@patch("harness.cli.generate_adapter_from_nl")
+@patch("harness.cli._repo_root")
+def test_cli_adapter_from_description_description_file(
+    mock_repo_root, mock_generate, runner: CliRunner, tmp_path: Path
+) -> None:
+    adapters_dir = tmp_path / "adapters"
+    adapters_dir.mkdir(parents=True, exist_ok=True)
+    mock_repo_root.return_value = tmp_path
+
+    desc_file = tmp_path / "desc.txt"
+    desc_file.write_text("From file.", encoding="utf-8")
+
+    cfg = AdapterConfig(
+        name="demo",
+        project_root=str(tmp_path / "project"),
+        status_tracking=StatusTrackingConfig(backend="csv"),
+        observer=ObserverConfig(),
+    )
+    mock_generate.return_value = cfg
+
+    result = runner.invoke(
+        cli,
+        [
+            "adapter",
+            "from-description",
+            "-p",
+            "myproj",
+            "--description-file",
+            str(desc_file),
+        ],
+    )
+    assert result.exit_code == 0
+    mock_generate.assert_called_once_with(
+        project="myproj", description="From file.", engine="swarm/kimi"
+    )

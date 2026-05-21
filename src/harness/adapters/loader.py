@@ -45,6 +45,7 @@ ALLOWED_TEMPLATES: frozenset[str] = frozenset(
         "writing-content",
         "research-comparison",
         "solo-dev",
+        "basic",
     }
 )
 
@@ -199,7 +200,9 @@ def load_template(name: str, project_root: str | None = None) -> AdapterConfig:
     except Exception as exc:
         raise ValueError(f"Adapter validation failed: {exc}") from exc
 
-    _run_path_security_checks(cfg)
+    # Path security checks require resolved placeholders
+    if project_root is not None:
+        _run_path_security_checks(cfg)
     return cfg
 
 

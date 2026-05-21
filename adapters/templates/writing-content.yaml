@@ -1,0 +1,35 @@
+name: demo
+project_root: "{{PROJECT_ROOT}}"
+status_tracking:
+  backend: csv
+  config:
+    csv_path: STATUS.csv
+observer:
+  enabled: true
+  cadence_minutes: 30
+  daily_retro_time: "17:00"
+  flag_patterns:
+    - ".*FAIL.*"
+    - ".*BLOCKER.*"
+operator:
+  mode: review_each
+  escalation_threshold: L5
+  engine_fill: aggressive
+  max_parallel_supervisors: 4
+  explore_on_uncertainty: dispatch_alternatives
+  observer_cadence_minutes: 60
+  profile: non_technical
+  engine_routing:
+    creativity: claude-in-session
+    developing: claude-in-session
+    testing: swarm/kimi
+    integrating: claude-in-session
+    process_improvement: claude-in-session
+  engine_slots:
+    swarm/kimi: 3
+    swarm/kimi-api: 3
+    swarm/deepseek: 1
+  notification_method: file
+  notification_target: coord/dev_loop/escalations.md
+routing_rules: []
+scheduled_tasks: []

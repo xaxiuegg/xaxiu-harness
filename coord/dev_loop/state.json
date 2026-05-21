@@ -300,10 +300,15 @@
     {
       "id": "wave-5",
       "name": "templates + NL\u00e2\u2020\u2019YAML translator + visual config builder",
-      "status": "planned",
+      "status": "done",
       "depends_on": [
         "wave-4"
-      ]
+      ],
+      "dispatched_at": "2026-05-21T01:28:21Z",
+      "completed_at": "2026-05-21T01:50:00Z",
+      "current_dispatch": "b8nt1z3rd (swarm round-3)",
+      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
+      "completion_note": "Round 3 swarm: both workers tagged timeout @ 1200s but landed full deliverables via incremental Kimi-CLI edits. Wave 5/A: 6 templates created (adapters/templates/*.yaml). Wave 5/B: from_description.py + _nl_to_yaml_prompt.md + adapter verb group + 23 tests. Bonus: W7C OperatorSection added to schema.py + init verb emits operator: YAML (3 waves in 1 round). 369/369 tests pass."
     },
     {
       "id": "wave-3",
@@ -408,7 +413,8 @@
     "kimi": {
       "max_parallel": 6,
       "in_flight": [],
-      "fill_policy": "aggressive"
+      "fill_policy": "aggressive",
+      "session_pattern_2026_05_21": "Three consecutive timeout-but-landed runs (#19 bcsacjnox, #20 bq1ydqn3l, Round 3 b8nt1z3rd). Kimi-CLI incremental edits land robustly even when xaxiu-swarm reports timeout. Decision: treat swarm timeout as 'check git diff first' not 'failed'."
     },
     "kimi-api": {
       "max_parallel": 6,
