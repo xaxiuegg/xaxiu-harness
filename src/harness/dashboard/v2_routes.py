@@ -74,6 +74,56 @@ def proxy_state() -> dict[str, Any]:
     return _read_json(_proxy_state_path()) or {"status": "no-state-file"}
 
 
+def cost_panel() -> dict[str, Any]:
+    """Return a tiny dict of per-engine spend + cap progress for the dashboard.
+
+    Shape:
+        {
+            "total_usd": 1.23,
+            "cap_usd": 5.00 | None,
+            "cap_pct": 24.6 | None,
+            "by_engine": [
+                {"engine": "kimi", "usd": 0.80, "calls": 12},
+                ...
+            ],
+        }
+    """
+    from harness.budget import summary as budget_summary, DEFAULT_CAP_PATH
+
+    try:
+        summary = budget_summary()
+    except Exception:
+        summary = {}
+
+    by_engine: list[dict[str, Any]] = []
+    total_usd = 0.0
+    for engine, data in (summary or {}).items():
+        usd = float(data.get("total_cost_usd", 0.0))
+        calls = int(data.get("dispatches", 0))
+        by_engine.append({"engine": engine, "usd": usd, "calls": calls})
+        total_usd += usd
+    total_usd = round(total_usd, 6)
+
+    cap_usd = None
+    cap_pct = None
+    try:
+        if Path(DEFAULT_CAP_PATH).exists():
+            cap_data = json.loads(Path(DEFAULT_CAP_PATH).read_text(encoding="utf-8"))
+            cap_usd = float(cap_data.get("monthly_cap_usd", 0)) or None
+    except Exception:
+        cap_usd = None
+
+    if cap_usd:
+        cap_pct = round(100.0 * total_usd / cap_usd, 1)
+
+    return {
+        "total_usd": total_usd,
+        "cap_usd": cap_usd,
+        "cap_pct": cap_pct,
+        "by_engine": by_engine,
+    }
+
+
 def make_router() -> APIRouter:
     router = APIRouter(prefix="/v2")
 
@@ -88,6 +138,10 @@ def make_router() -> APIRouter:
     @router.get("/proxy-state")
     def _proxy() -> dict[str, Any]:
         return proxy_state()
+
+    @router.get("/cost-panel")
+    def _cost_panel() -> dict[str, Any]:
+        return cost_panel()
 
     @router.get("/runs/{run_id}", response_class=HTMLResponse)
     def _run_detail(run_id: str) -> str:

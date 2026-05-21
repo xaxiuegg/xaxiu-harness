@@ -7,6 +7,30 @@ from datetime import datetime, timedelta, timezone
 from harness.proxy.state import CircuitState, KeyState
 
 
+# AUTO-QUARANTINE-KEY (2026-05-21): 3+ circuit trips inside this window
+# auto-quarantines the key.  Tunable here so a future operator config knob
+# can override.
+FLAP_WINDOW_MINUTES = 60
+FLAP_THRESHOLD = 3
+
+
+def _detect_flap(state: KeyState, now: datetime) -> bool:
+    """Return True if ``state.circuit_trip_history`` shows ≥FLAP_THRESHOLD trips
+    within the last FLAP_WINDOW_MINUTES."""
+    if len(state.circuit_trip_history) < FLAP_THRESHOLD:
+        return False
+    window_start = now - timedelta(minutes=FLAP_WINDOW_MINUTES)
+    in_window = 0
+    for ts in state.circuit_trip_history:
+        try:
+            t = datetime.fromisoformat(ts)
+        except ValueError:
+            continue
+        if t >= window_start:
+            in_window += 1
+    return in_window >= FLAP_THRESHOLD
+
+
 def classify_outcome(http_status: int | None, exception: Exception | None) -> str:
     """Map an HTTP response or exception to an outcome label."""
     if exception is not None:
@@ -82,6 +106,15 @@ def transition(state: KeyState, outcome: str, *, now: datetime) -> KeyState:
         else:
             cooldown = timedelta(seconds=30)
         state.cooldown_until = _now_str(now + cooldown)
+        # AUTO-QUARANTINE-KEY: record this trip + check for flap
+        state.circuit_trip_history.append(_now_str(now))
+        if len(state.circuit_trip_history) > 20:
+            state.circuit_trip_history = state.circuit_trip_history[-20:]
+        if _detect_flap(state, now) and not state.permanent:
+            state.permanent = True
+            state.auto_quarantined_at = _now_str(now)
+            # Clear cooldown — permanent quarantine doesn't recover on time
+            state.cooldown_until = None
 
     return state
 

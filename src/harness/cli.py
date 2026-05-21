@@ -1057,9 +1057,25 @@ def loop_status_cmd(state_path: Path) -> None:
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
 @click.option("--jsonl-path", type=click.Path(path_type=Path), default=None)
 def replay_cmd(task_id: str, fmt: str, jsonl_path: Path | None) -> None:
-    """Reconstruct the dispatch lifecycle for TASK_ID."""
-    import dataclasses
-    from harness.replay import replay_dispatch, format_for_human
+    """Reconstruct the dispatch (or v2 coord run) lifecycle for TASK_ID."""
+    import dataclasses, re
+    from harness.replay import (
+        replay_dispatch, format_for_human,
+        replay_coord_run, format_coord_for_human,
+    )
+
+    is_run_id = bool(re.match(r"^\d{8}T\d{6}-[a-z0-9]{4}$", task_id))
+    if is_run_id:
+        try:
+            crep = replay_coord_run(task_id)
+        except FileNotFoundError as exc:
+            click.echo(f"error: {exc}", err=True)
+            sys.exit(1)
+        if fmt == "json":
+            click.echo(json.dumps(dataclasses.asdict(crep), indent=2, default=str))
+        else:
+            click.echo(format_coord_for_human(crep))
+        return
 
     report = replay_dispatch(task_id, jsonl_path=jsonl_path)
     if fmt == "json":
@@ -1587,3 +1603,23 @@ def coord_cleanup(run_id, dry_run, keep_deliverables, force):
     click.echo(f"{prefix}bytes freed: {report.bytes_freed}")
     if report.skipped_active:
         click.echo(f"{prefix}skipped active: {', '.join(report.skipped_active)}")
+
+
+@coord_group.command(name="cancel")
+@click.option("--run-id", required=True)
+def coord_cancel(run_id: str) -> None:
+    """Gracefully cancel an in-flight run: terminate workers + mark state cancelled."""
+    from harness.coord.canceller import cancel_run
+    run_dir = Path("runs") / run_id
+    if not run_dir.exists():
+        click.echo(f"error: no such run {run_id}", err=True)
+        sys.exit(1)
+    result = cancel_run(run_dir)
+    if not result.get("success"):
+        click.echo(f"error: {result.get('error','unknown')}", err=True)
+        sys.exit(1)
+    click.echo(
+        f"cancelled run {result['run_id']}: "
+        f"{len(result['terminated_pids'])} pid(s) terminated, "
+        f"{len(result['checkpoints_cancelled'])} checkpoint(s) marked"
+    )

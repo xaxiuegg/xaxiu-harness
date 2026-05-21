@@ -25,6 +25,7 @@ from harness.state.inspect import DEFAULT_STATE_PATH
 from harness.status.store import DEFAULT_STATUS_PATH, read_status, summary as status_summary
 from harness.dashboard.v2_routes import make_router as _v2_make_router
 from harness.dashboard.v2_routes import list_runs as _list_runs
+from harness.dashboard.v2_routes import cost_panel as _cost_panel
 
 _STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 
@@ -84,6 +85,7 @@ def _snapshot() -> dict[str, Any]:
     snapshot["v2"] = {
         "runs": runs,
         "top_run_workers": top_run_workers,
+        "cost": _cost_panel(),
     }
     return snapshot
 

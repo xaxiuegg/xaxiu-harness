@@ -33,6 +33,11 @@ class KeyState(BaseModel):
     avg_latency_ms: float = Field(ge=0.0, default=0.0)
     last_used_at: str | None = None
     permanent: bool = False
+    # AUTO-QUARANTINE-KEY (2026-05-21): ISO timestamps each time circuit
+    # transitions to OPEN.  When 3+ trips land within a rolling 60-min
+    # window the key is auto-quarantined (permanent=True).
+    circuit_trip_history: list[str] = Field(default_factory=list, max_length=20)
+    auto_quarantined_at: str | None = None
 
 
 class ProxyState(BaseModel):

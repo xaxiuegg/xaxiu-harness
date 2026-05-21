@@ -10,6 +10,7 @@ Operator surface: ``harness replay <task_id>`` (CLI verb wired in
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,9 @@ __all__ = [
     "ReplayReport",
     "replay_dispatch",
     "format_for_human",
+    "CoordRunReport",
+    "replay_coord_run",
+    "format_coord_for_human",
 ]
 
 
@@ -259,4 +263,88 @@ def format_for_human(report: ReplayReport) -> str:
         engine = evt.engine or "-"
         latency = f" [{evt.latency_ms}ms]" if evt.latency_ms else ""
         lines.append(f"  {evt.timestamp}  {evt.kind:14}  {engine:18}  {evt.detail}{latency}")
+    return "\n".join(lines)
+
+
+@dataclasses.dataclass
+class CoordRunReport:
+    """Reconstructed lifecycle for one v2 coord run."""
+    run_id: str
+    state: str
+    spec_path: str
+    workers: list[dict]
+    progress: list[dict]
+    notify: dict | None
+    total_events: int
+
+
+def replay_coord_run(run_id: str, *, runs_dir: Path | None = None) -> CoordRunReport:
+    """Reconstruct one v2 coord run from its on-disk artifacts.
+
+    Reads runs/<run_id>/{run_state.json, plan.json, checkpoints/*, notify.json}
+    and folds them into a single report ordered by per-step timestamp.
+    """
+    base = Path(runs_dir) if runs_dir else Path("runs")
+    run_dir = base / run_id
+    if not run_dir.exists():
+        raise FileNotFoundError(f"no such run {run_dir}")
+
+    def _load_json(p: Path) -> dict:
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    run_state = _load_json(run_dir / "run_state.json")
+    plan = _load_json(run_dir / "plan.json")
+    notify = _load_json(run_dir / "notify.json") or None
+
+    workers: list[dict] = []
+    progress: list[dict] = []
+    ckpt_dir = run_dir / "checkpoints"
+    if ckpt_dir.exists():
+        for p in sorted(ckpt_dir.glob("*.json")):
+            data = _load_json(p)
+            if data:
+                workers.append(data)
+        for p in sorted(ckpt_dir.glob("*.progress.jsonl")):
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ev["_worker_id"] = p.stem.replace(".progress", "")
+                    progress.append(ev)
+            except OSError:
+                continue
+    progress.sort(key=lambda e: e.get("ts", ""))
+
+    return CoordRunReport(
+        run_id=run_id,
+        state=str(run_state.get("state", "unknown")),
+        spec_path=str(plan.get("spec_path", "")),
+        workers=workers,
+        progress=progress,
+        notify=notify,
+        total_events=len(progress),
+    )
+
+
+def format_coord_for_human(report: CoordRunReport) -> str:
+    lines: list[str] = []
+    lines.append(f"run {report.run_id} (state: {report.state})")
+    lines.append(f"  spec: {report.spec_path}")
+    lines.append(f"  workers: {len(report.workers)}")
+    for w in report.workers:
+        wid = w.get("worker_id", "?")
+        state = w.get("state", "?")
+        sha = w.get("commit_sha") or "—"
+        lines.append(f"    {wid}: {state}  commit={sha}")
+    lines.append(f"  progress events: {report.total_events}")
+    if report.notify:
+        lines.append(f"  notify: success={report.notify.get('success')} commit={report.notify.get('commit_sha')}")
     return "\n".join(lines)
