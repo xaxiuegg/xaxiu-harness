@@ -863,3 +863,93 @@ def state_inspect(fmt: str, path: Path) -> None:
     except ConfigCorruption as exc:
         click.echo(f"error: {exc.tag()}: {exc.message}", err=True)
         sys.exit(exc.exit_code())
+
+
+# ---------------------------------------------------------------------------
+# Autonomous dev loop (Wave 6/B — productized coord/dev_loop/)
+# ---------------------------------------------------------------------------
+
+
+@cli.group(name="loop")
+def loop_group() -> None:
+    """Autonomous dev loop — productized coord/dev_loop/ scaffolding."""
+
+
+@loop_group.command(name="init")
+@click.option("--state-path", type=click.Path(path_type=Path),
+              default=Path("coord/dev_loop/state.json"))
+def loop_init_cmd(state_path: Path) -> None:
+    """Create state.json with defaults if missing."""
+    from harness.loops.state import LoopState, write_state
+
+    if state_path.exists():
+        click.echo(f"already exists: {state_path}")
+        sys.exit(0)
+    write_state(state_path, LoopState())
+    click.echo(f"created {state_path}")
+
+
+@loop_group.command(name="tick")
+@click.option("--state-path", type=click.Path(path_type=Path),
+              default=Path("coord/dev_loop/state.json"))
+@click.option("--project-root", type=click.Path(path_type=Path),
+              default=Path.cwd())
+def loop_tick_cmd(state_path: Path, project_root: Path) -> None:
+    """Run one tick of the autonomous loop."""
+    from datetime import datetime, timezone
+    from harness.loops.runner import tick as _tick
+
+    try:
+        result = _tick(
+            state_path=state_path,
+            observer_dir=Path("coord/observer"),
+            project=project_root,
+            now=datetime.now(timezone.utc),
+        )
+    except FileNotFoundError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    phases = ",".join(result.phases_acted_on) if result.phases_acted_on else "(none)"
+    click.echo(
+        f"tick #{result.tick_count} phases={phases} "
+        f"next={result.next_due_at or '-'} escalations={len(result.escalations_raised)}"
+    )
+
+
+@loop_group.command(name="start")
+@click.option("--cadence-minutes", type=int, default=30,
+              help="Minutes between tick runs.")
+def loop_start_cmd(cadence_minutes: int) -> None:
+    """Register Windows Task Scheduler entry to run tick every N minutes."""
+    from harness.loops.scheduler import register_loop_task
+
+    ok, msg = register_loop_task(cadence_minutes=cadence_minutes)
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
+
+
+@loop_group.command(name="stop")
+def loop_stop_cmd() -> None:
+    """Unregister the Task Scheduler entry."""
+    from harness.loops.scheduler import unregister_loop_task
+
+    ok, msg = unregister_loop_task()
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
+
+
+@loop_group.command(name="status")
+@click.option("--state-path", type=click.Path(path_type=Path),
+              default=Path("coord/dev_loop/state.json"))
+def loop_status_cmd(state_path: Path) -> None:
+    """Print loop_status + tick_count + last_tick_at."""
+    from harness.loops.scheduler import is_registered
+    from harness.loops.state import read_state
+
+    state = read_state(state_path)
+    scheduled = "yes" if is_registered() else "no"
+    click.echo(
+        f"loop: {state.loop_status} | tick #{state.tick_count} | "
+        f"last={state.last_tick_at or '-'} | active={len(state.active_dispatches)} | "
+        f"scheduled={scheduled}"
+    )
