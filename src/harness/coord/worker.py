@@ -29,6 +29,61 @@ def _append_progress(run_dir: Path, worker_id: str, event: dict) -> None:
         pass
 
 
+def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
+    """Shell out to xaxiu-swarm for `swarm/*` engines (agentic in-place edits).
+
+    Returns a DispatchResult-shaped namespace so the calling code in
+    run_worker treats the result the same as in-process dispatch_packet.
+
+    Discovered as a battle-test gap 2026-05-21: dispatch_packet validates
+    force_engine against SUPPORTED_BACKENDS which doesn't include the
+    `swarm/*` wrapper identifiers — every real worker run would have
+    failed with `unsupported_force_engine` before this fix.
+    """
+    from types import SimpleNamespace
+    backend = engine.split("/", 1)[1] if "/" in engine else engine
+    # Kimi-CLI applies edits in-place inside the cwd it's invoked from.
+    # --add-dir tells the CLI which worktree to scope to.  cwd= is the
+    # worktree IFF it exists (tests may invoke before worktree setup);
+    # otherwise we let xaxiu-swarm use its own default cwd.
+    cmd = [
+        "xaxiu-swarm", "dispatch",
+        "--backend", backend,
+        "--add-dir", str(wt_path),
+        "--timeout", "420",
+        str(packet_path),
+    ]
+    cwd_path = str(wt_path) if wt_path.exists() else None
+    try:
+        proc = subprocess.run(
+            cmd, cwd=cwd_path, capture_output=True, text=True,
+            timeout=600,
+        )
+    except FileNotFoundError:
+        return SimpleNamespace(
+            success=False, text="", error="xaxiu-swarm not on PATH",
+            tokens_used=0, cost_usd=0.0,
+        )
+    except NotADirectoryError:
+        return SimpleNamespace(
+            success=False, text="", error=f"worktree not found: {wt_path}",
+            tokens_used=0, cost_usd=0.0,
+        )
+    except subprocess.TimeoutExpired:
+        return SimpleNamespace(
+            success=False, text="", error="swarm dispatch timeout (600s)",
+            tokens_used=0, cost_usd=0.0,
+        )
+    success = proc.returncode == 0
+    return SimpleNamespace(
+        success=success,
+        text=proc.stdout,  # agentic CLI emits status to stdout; edits land on disk
+        error=None if success else (proc.stderr.strip() or f"swarm exit {proc.returncode}"),
+        tokens_used=0,
+        cost_usd=0.0,
+    )
+
+
 def _heartbeat_touch(run_dir: Path, worker_id: str) -> None:
     """Update mtime on checkpoints/<wid>.heartbeat sentinel.  Best-effort."""
     try:
@@ -224,11 +279,22 @@ def run_worker(
             packet_path.write_text(prompt, encoding="utf-8")
             try:
                 _heartbeat_touch(run_dir, task_obj.worker_id)
-                result = dispatch_packet(
-                    project="harness-worker",
-                    packet_path=str(packet_path),
-                    force_engine=engine,
-                )
+                # Route `swarm/*` engines through the xaxiu-swarm CLI
+                # (agentic in-place edits) rather than in-process
+                # dispatch_packet (which only knows direct engines).
+                # Battle-test finding 2026-05-21: dispatch_packet
+                # rejects "swarm/kimi" because SUPPORTED_BACKENDS doesn't
+                # include the wrapper-style identifiers.
+                if engine.startswith("swarm/"):
+                    result = _dispatch_via_swarm(
+                        packet_path, engine, wt_path,
+                    )
+                else:
+                    result = dispatch_packet(
+                        project="harness-worker",
+                        packet_path=str(packet_path),
+                        force_engine=engine,
+                    )
             finally:
                 packet_path.unlink(missing_ok=True)
 

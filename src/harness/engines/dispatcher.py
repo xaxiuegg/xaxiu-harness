@@ -119,9 +119,12 @@ _INJECTION_PATTERNS: list[tuple[str, "_re.Pattern[str]"]] = [
     ("net_invoke", _re.compile(r"Invoke-WebRequest|Invoke-RestMethod", _re.IGNORECASE)),
     ("net_curl", _re.compile(r"\bcurl\s+(?:[-A-Za-z]+\s+)*https?://")),
     ("net_wget", _re.compile(r"\bwget\s+https?://")),
-    # Common API-key var names in literal references
-    ("api_key_literal", _re.compile(
-        r"(KIMI|DEEPSEEK|ANTHROPIC|GEMINI|MOONSHOT|OPENAI)_API_KEY")),
+    # NOTE: previously had an `api_key_literal` rule matching bare
+    # KIMI_API_KEY / DEEPSEEK_API_KEY / etc. names.  Removed 2026-05-21
+    # after battle-testing showed it false-positives on every legitimate
+    # spec that documents env-var names (e.g. spec/samples/env-doctor-check.md).
+    # The other 6 rules above already cover the actual exfiltration
+    # vectors — naming an env-var without dereferencing it is harmless.
 ]
 
 

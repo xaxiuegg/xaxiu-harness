@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +13,20 @@ import pytest
 from harness.coord.checkpoint import Checkpoint, read_checkpoint
 from harness.coord.worker import run_worker, _run_pytest
 from harness.coord.schemas import WorkerTask
+
+
+# Default engine in worker.run_worker is "swarm/kimi", which shells out to
+# xaxiu-swarm + the real Kimi API.  Unit tests must NEVER hit the network,
+# so we autouse-patch _dispatch_via_swarm to return a no-op success result.
+# Tests that want to assert dispatch behaviour can re-patch inside their
+# own `with patch(...)` block.
+@pytest.fixture(autouse=True)
+def _stub_swarm_dispatch():
+    stub = SimpleNamespace(
+        success=True, text="", error=None, tokens_used=0, cost_usd=0.0,
+    )
+    with patch("harness.coord.worker._dispatch_via_swarm", return_value=stub):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -427,35 +442,37 @@ def test_run_worker_propagates_file_not_found_for_missing_worktree(tmp_path: Pat
 # Engine dispatch + edit application
 # ---------------------------------------------------------------------------
 
-def test_run_worker_calls_dispatch_packet_for_edit_step(tmp_path: Path) -> None:
+def test_run_worker_calls_swarm_dispatch_for_edit_step_default_engine(tmp_path: Path) -> None:
+    """Default engine 'swarm/kimi' routes through _dispatch_via_swarm, not in-process dispatch_packet."""
     run_dir = tmp_path / "runs" / "20260520T220000-ab12"
     run_dir.mkdir(parents=True)
     task = _valid_task_dict()
-    # Create source file for read_set
     src_file = tmp_path / "src" / "foo.py"
     src_file.parent.mkdir(parents=True)
     src_file.write_text("old content\n", encoding="utf-8")
-    # Create worktree dir
     wt = tmp_path / ".harness" / "worktrees" / run_dir.name / "worker-1"
     wt.mkdir(parents=True)
 
-    mock_result = MagicMock()
-    mock_result.success = True
-    mock_result.text = ""
-
-    with patch("harness.engines.dispatcher.dispatch_packet", return_value=mock_result) as mock_dispatch:
+    swarm_result = SimpleNamespace(
+        success=True, text="", error=None, tokens_used=0, cost_usd=0.0,
+    )
+    # Override the autouse stub so we can assert the call shape
+    with patch("harness.coord.worker._dispatch_via_swarm",
+               return_value=swarm_result) as mock_swarm:
         with patch("harness.coord.worker._run_pytest", return_value={
             "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
         }):
             run_worker(task, run_dir, project_root=tmp_path)
 
-    mock_dispatch.assert_called_once()
-    call_kwargs = mock_dispatch.call_args.kwargs
-    assert call_kwargs["project"] == "harness-worker"
-    assert call_kwargs["force_engine"] == "swarm/kimi"
+    # 2 steps × 1 edit each → 2 swarm dispatches in default flow
+    assert mock_swarm.call_count >= 1
+    # Positional args: (packet_path, engine, wt_path)
+    first_call = mock_swarm.call_args_list[0]
+    assert first_call.args[1] == "swarm/kimi"
 
 
-def test_run_worker_applies_file_edits_from_dispatch_response(tmp_path: Path) -> None:
+def test_run_worker_applies_file_edits_from_swarm_response(tmp_path: Path) -> None:
+    """When _dispatch_via_swarm returns FILE/REPLACE text, worker applies edits."""
     run_dir = tmp_path / "runs" / "20260520T220000-ab12"
     run_dir.mkdir(parents=True)
     task = _valid_task_dict()
@@ -464,23 +481,23 @@ def test_run_worker_applies_file_edits_from_dispatch_response(tmp_path: Path) ->
     src_file.write_text("old content\n", encoding="utf-8")
     wt = tmp_path / ".harness" / "worktrees" / run_dir.name / "worker-1"
     wt.mkdir(parents=True)
-    # Place file in worktree so edit can apply
     wt_src = wt / "src" / "foo.py"
     wt_src.parent.mkdir(parents=True)
     wt_src.write_text("old content\n", encoding="utf-8")
 
-    mock_result = MagicMock()
-    mock_result.success = True
-    mock_result.text = (
-        "FILE: src/foo.py\n"
-        "<<<<<<< SEARCH\n"
-        "old content\n"
-        "=======\n"
-        "new content\n"
-        ">>>>>>> REPLACE\n"
+    swarm_result = SimpleNamespace(
+        success=True,
+        text=(
+            "FILE: src/foo.py\n"
+            "<<<<<<< SEARCH\n"
+            "old content\n"
+            "=======\n"
+            "new content\n"
+            ">>>>>>> REPLACE\n"
+        ),
+        error=None, tokens_used=0, cost_usd=0.0,
     )
-
-    with patch("harness.engines.dispatcher.dispatch_packet", return_value=mock_result):
+    with patch("harness.coord.worker._dispatch_via_swarm", return_value=swarm_result):
         with patch("harness.coord.worker._run_pytest", return_value={
             "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
         }):

@@ -42,11 +42,34 @@ class EngineResponse:
 class Engine(ABC):
     """Abstract base class for all harness backends."""
 
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        """Store the api key in ``self._api_key`` for use by dispatch().
+
+        Battle-test 2026-05-21: all the v1 Concrete subclasses (KimiConcrete,
+        DeepSeekConcrete, AnthropicConcrete, GeminiConcrete) reference
+        ``self._api_key`` but never defined an ``__init__``, and the factory
+        ``get_engine()`` calls ``cls(api_key=...)`` which would fail with
+        ``TypeError: KimiConcrete() takes no arguments``.  Centralising the
+        constructor here means every subclass gets it for free.
+        """
+        self._api_key: Optional[str] = api_key
+
     @property
-    @abstractmethod
     def name(self) -> str:
-        """Return the canonical backend name (e.g. 'deepseek')."""
-        ...
+        """Return the canonical backend name (e.g. 'deepseek').
+
+        Default implementation derives from class name: ``KimiConcrete`` →
+        ``"kimi"``, ``DeepSeekStub`` → ``"deepseek"``.  Subclasses may
+        override to provide a non-derived name (e.g. ``MockEngine``).
+        """
+        cls_name = type(self).__name__
+        # Strip common suffixes: Concrete, Engine, Stub
+        for suffix in ("Concrete", "Engine", "Stub"):
+            if cls_name.endswith(suffix):
+                cls_name = cls_name[: -len(suffix)]
+                break
+        # Camel-to-lower: DeepSeek → deepseek
+        return cls_name.lower()
 
     @abstractmethod
     def dispatch(

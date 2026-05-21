@@ -46,13 +46,23 @@ def _make_user_agent() -> str:
 
 
 def _resolve_kimi_upstream() -> str:
-    """Route through local proxy when available, else direct."""
+    """Route through local proxy when available, else direct.
+
+    Battle-test 2026-05-21: `api.moonshot.cn` is the China endpoint;
+    international accounts (sk- keys issued via moonshot.ai) need
+    `api.moonshot.ai` and reject .cn-region requests with HTTP 401.
+    Allow operator override via ``KIMI_API_BASE_URL`` env var so the
+    key region matches the URL region.
+    """
     explicit = os.environ.get("HARNESS_PROXY_URL")
     if explicit:
         return explicit
     pid_file = Path(".harness") / "proxy.pid"
     if pid_file.exists():
         return "http://127.0.0.1:7879/v1/chat/completions"
+    base = os.environ.get("KIMI_API_BASE_URL", "").rstrip("/")
+    if base:
+        return f"{base}/v1/chat/completions"
     return "https://api.moonshot.cn/v1/chat/completions"
 
 
