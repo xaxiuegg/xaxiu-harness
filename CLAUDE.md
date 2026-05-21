@@ -2,32 +2,40 @@
 
 You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope. Don't update warehouse's STATUS.csv; don't dispatch warehouse work. See `feedback_multi_session_scoping.md`.
 
-## Current state — v0.3.x (active dev loop)
+## Current state — v0.4 (v1 + v2 architecture both complete)
 
-| Component | Status | Files |
-|---|---|---|
-| Adapter schema (Pydantic v2) | Done | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
-| CLI verbs (Wave A) | Done — 13 top-level verbs; `status` is now a group with 7 subcommands | [src/harness/cli.py](src/harness/cli.py) |
-| Engine ABC + 3 concrete impls | Done | [src/harness/engines/](src/harness/engines/) |
-| Auto-fallback orchestrator | Done — with optional wave_id-gated STATUS hooks | [src/harness/engines/dispatcher.py](src/harness/engines/dispatcher.py) |
-| State layer (JSON + SQLite + JSONL+redact) | Done | [src/harness/state/](src/harness/state/) |
-| DPAPI secrets (Windows-only v0.x) | Done | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
-| **HarnessError taxonomy (Wave A.5)** | **Done** — L1-L5 levels × domain × code | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
-| **Operational raises retrofit (Wave A.6)** | **Done** — 4 raises in jsonl_log + dpapi | (in respective modules) |
-| Boundary tests + CI (Wave B/B.2) | Done — 305/305 tests; coverage 85% TOTAL | (across modules) |
-| **Operator-modes config surface (Wave 7/A+B)** | **Done** — 7/C polish queued | [spec/operator-modes.md](spec/operator-modes.md), [src/harness/operator/](src/harness/operator/) |
-| Wave 4 — Windows installer | Done | [bin/install-harness.ps1](bin/install-harness.ps1) |
-| **STATUS tracker primitive (#19, Wave 5.5)** | **Done** — `harness status` group, atomic writes, dispatcher hooks | [src/harness/status/](src/harness/status/), [spec/status-tracker.md](spec/status-tracker.md) |
-| **Observer primitive (#20, Wave 5.6)** | **In flight** — bq1ydqn3l (2026-05-21T00:52Z) | [spec/observer.md](spec/observer.md) |
-| Wave 5/A — Templates with operator: section | Done | [adapters/templates/](adapters/templates/) (6 templates) |
-| Wave 5/B — NL→YAML translator + `harness adapter` group | Done | [src/harness/adapters/from_description.py](src/harness/adapters/from_description.py), [src/harness/adapters/templates/_nl_to_yaml_prompt.md](src/harness/adapters/templates/_nl_to_yaml_prompt.md) |
-| HEARTBEAT — passive liveness | Done | [src/harness/heartbeat.py](src/harness/heartbeat.py); `harness heartbeat pulse/show` |
-| STATE-INSPECT — operator-readable state printer | Done | [src/harness/state/inspect.py](src/harness/state/inspect.py); `harness state inspect --format pretty/json/compact` |
-| **Wave 3 — Dashboard (FastAPI + WebSocket)** | **Done** | [src/harness/dashboard/](src/harness/dashboard/); `harness dashboard-serve --port 7878` |
-| **Wave 6/A — Loops core (productize coord/dev_loop/)** | **Done** | [src/harness/loops/](src/harness/loops/): state.py + runner.py + supervisors.py |
-| **Wave 6/B — Loop CLI + Task Scheduler** | **Done** | `harness loop init/tick/start/stop/status`; [src/harness/loops/scheduler.py](src/harness/loops/scheduler.py) |
+**v1 core** (single-Claude dev manager, in-session orchestration):
 
-Smoke test: `PYTHONPATH=src python -c "from harness import cli; print(sorted(cli.cli.commands.keys()))"` — should list 13 verbs; `cli.cli.commands['status'].commands` should list `add init list report summary update verify`.
+| Component | Files |
+|---|---|
+| Adapter schema, loader, NL→YAML | [src/harness/adapters/](src/harness/adapters/) |
+| CLI — 22 top-level verbs | [src/harness/cli.py](src/harness/cli.py) |
+| Engine ABC + 4 concrete (kimi/deepseek/anthropic/gemini) + auto-fallback | [src/harness/engines/](src/harness/engines/) |
+| State layer (JSON + SQLite + JSONL+redact) | [src/harness/state/](src/harness/state/) |
+| DPAPI secrets | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
+| HarnessError L1-L5 taxonomy | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
+| Operator-modes (7 CLI flags + 11 YAML keys + OperatorSection) | [src/harness/operator/](src/harness/operator/), [spec/operator-modes.md](spec/operator-modes.md) |
+| Status tracker primitive (#19) | [src/harness/status/](src/harness/status/), [spec/status-tracker.md](spec/status-tracker.md) |
+| Observer primitive (#20) — armed via Task Scheduler | [src/harness/observer/](src/harness/observer/), [spec/observer.md](spec/observer.md) |
+| Heartbeat + state-inspect | [src/harness/heartbeat.py](src/harness/heartbeat.py), [src/harness/state/inspect.py](src/harness/state/inspect.py) |
+| Dashboard (FastAPI + WebSocket) | [src/harness/dashboard/](src/harness/dashboard/) |
+| Loops productization — `harness loop init/tick/start/stop/status` | [src/harness/loops/](src/harness/loops/) |
+| Replay (decision archaeology) | [src/harness/replay.py](src/harness/replay.py) |
+| Budget meter + per-engine cost ledger | [src/harness/budget.py](src/harness/budget.py) |
+| Session-handoff monitor (proactive transfer rec) | [src/harness/session/](src/harness/session/), [spec/session-handoff-monitor.md](spec/session-handoff-monitor.md) |
+
+**v2 architecture** (planner / worker / proxy / coordinator — multi-agent w/ worktrees):
+
+| Component | Files |
+|---|---|
+| **Spec** | [spec/multi-agent-harness-architecture.md](spec/multi-agent-harness-architecture.md) |
+| v2/A — Stateful 4-key proxy + circuit breaker | [src/harness/proxy/](src/harness/proxy/) |
+| v2/B — Coord schemas (WavePlan/WorkerTask/...) + Planner | [src/harness/coord/schemas.py](src/harness/coord/schemas.py), [src/harness/coord/planner.py](src/harness/coord/planner.py) |
+| v2/C — Worker + worktree + checkpoint | [src/harness/coord/worker.py](src/harness/coord/worker.py), [src/harness/coord/worktree.py](src/harness/coord/worktree.py), [src/harness/coord/checkpoint.py](src/harness/coord/checkpoint.py) |
+| v2/D — Coordinator + Integrator + `harness coord` CLI | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py) |
+
+Smoke test (22 verbs, 9 groups): `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
+Tests: 711/712 green (1 known Windows-concurrency flake in test_state_files).
 
 ## Operator authority + escalation (load-bearing)
 
