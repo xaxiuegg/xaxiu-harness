@@ -1080,3 +1080,106 @@ def budget_reset(force: bool) -> None:
     DEFAULT_LEDGER_PATH.rename(dest)
     click.echo(f"ledger archived to {dest}")
     sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Proxy primitive (v2/A)
+# ---------------------------------------------------------------------------
+
+
+@cli.group(name="proxy")
+def proxy_group() -> None:
+    """Stateful 4-key API proxy with circuit breaker."""
+
+
+@proxy_group.command(name="start")
+@click.option("--port", default=7879, type=int)
+@click.option("--host", default="127.0.0.1")
+def proxy_start(port: int, host: str) -> None:
+    """Start the proxy server in the background."""
+    from harness.proxy.cli import start
+    start(port=port, host=host)
+
+
+@proxy_group.command(name="stop")
+def proxy_stop() -> None:
+    """Stop the background proxy server."""
+    from harness.proxy.cli import stop
+    stop()
+
+
+@proxy_group.command(name="status")
+def proxy_status() -> None:
+    """Show per-key health table."""
+    from harness.proxy.cli import status
+    status()
+
+
+@proxy_group.command(name="reset-circuit")
+@click.argument("alias")
+def proxy_reset_circuit(alias: str) -> None:
+    """Manually reset a key's circuit breaker to CLOSED."""
+    from harness.proxy.cli import reset_circuit
+    reset_circuit(alias)
+
+
+@proxy_group.command(name="quarantine")
+@click.argument("alias")
+def proxy_quarantine(alias: str) -> None:
+    """Permanently open a key's circuit breaker."""
+    from harness.proxy.cli import quarantine
+    quarantine(alias)
+
+
+# ── Session ──────────────────────────────────────────────────────────────
+
+@cli.group(name="session")
+def session_group() -> None:
+    """Session-handoff monitor — proactive transfer recommendation."""
+
+
+@session_group.command(name="check")
+def session_check() -> None:
+    """Run a single health check and print the report."""
+    from harness.session.monitor import check
+    report = check()
+    click.echo(report.model_dump_json(indent=2))
+    if report.recommendation.value in ("critical", "strongly"):
+        raise SystemExit(1)
+
+
+@session_group.command(name="bootstrap")
+@click.option("--reason", default="", help="Reason / next-action for the new session.")
+def session_bootstrap(reason: str) -> None:
+    """Generate the 5-section master handoff prompt."""
+    from harness.session.bootstrap import generate_master_prompt
+    click.echo(generate_master_prompt(reason=reason))
+
+
+@session_group.command(name="ack")
+def session_ack() -> None:
+    """Acknowledge and remove pending handoff flag files."""
+    from harness.session.monitor import ack_handoff
+    ok, msg = ack_handoff()
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
+
+
+@session_group.command(name="crisis-check")
+def session_crisis_check() -> None:
+    """Run check and raise a Windows toast on CRITICAL."""
+    from harness.session.monitor import crisis_check
+    report = crisis_check()
+    click.echo(report.model_dump_json(indent=2))
+    if report.recommendation.value == "critical":
+        raise SystemExit(1)
+
+
+@session_group.command(name="arm-crisis-check")
+@click.option("--cadence", default=5, help="Check cadence in minutes.")
+def session_arm_crisis_check(cadence: int) -> None:
+    """Register a Windows Task Scheduler entry for periodic crisis checks."""
+    from harness.session.monitor import arm_crisis_check
+    ok, msg = arm_crisis_check(cadence_minutes=cadence)
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
