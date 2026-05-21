@@ -1183,3 +1183,108 @@ def session_arm_crisis_check(cadence: int) -> None:
     ok, msg = arm_crisis_check(cadence_minutes=cadence)
     click.echo(msg)
     sys.exit(0 if ok else 1)
+
+
+# ---------------------------------------------------------------------------
+# coord (v2/D)
+# ---------------------------------------------------------------------------
+
+@cli.group(name="coord")
+def coord_group() -> None:
+    """Coordinator commands: plan, run, integrate, status."""
+
+
+@coord_group.command(name="plan")
+@click.option("--spec", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--run-id", default=None, help="Run ID (defaults to auto-generated).")
+@click.option("--engine", default="kimi")
+@click.option("--model", default=None)
+@click.option("--project-root", default=".", type=click.Path(path_type=Path))
+def coord_plan(spec: Path, run_id: str | None, engine: str, model: str | None, project_root: Path) -> None:
+    """Generate a WavePlan from a spec markdown file."""
+    from harness.coord.planner import _new_run_id, plan as run_planner, write_plan
+    rid = run_id or _new_run_id()
+    run_dir = Path("runs") / rid
+    run_dir.mkdir(parents=True, exist_ok=True)
+    plan_obj = run_planner(spec, run_id=rid, engine=engine, model=model, project_root=project_root)
+    write_plan(plan_obj, run_dir)
+    click.echo(f"plan: {run_dir / 'plan.json'}")
+
+
+@coord_group.command(name="run")
+@click.option("--spec", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--run-id", default=None, help="Run ID (defaults to auto-generated).")
+@click.option("--resume", is_flag=True, help="Resume the latest run.")
+@click.option("--limit", default=None, type=int, help="In-flight worker limit.")
+def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None) -> None:
+    """Execute a coordination run (single tick)."""
+    from harness.coord.coordinator import Coordinator
+    from harness.coord.planner import _new_run_id
+    from harness.coord.run_state import read_run_state
+    if resume:
+        runs_dir = Path("runs")
+        if not runs_dir.exists():
+            click.echo("error: no runs directory")
+            raise SystemExit(1)
+        states = sorted(runs_dir.glob("*/run_state.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not states:
+            click.echo("error: no runs to resume")
+            raise SystemExit(1)
+        run_dir = states[0].parent
+        rid = read_run_state(states[0]).run_id if read_run_state(states[0]) else run_dir.name
+    else:
+        rid = run_id or _new_run_id()
+    run_dir = Path("runs") / rid
+    run_dir.mkdir(parents=True, exist_ok=True)
+    coord = Coordinator(run_id=rid, run_dir=run_dir)
+    report = coord.tick(spec, in_flight_limit=limit)
+    click.echo(f"run {report.run_id}: {report.state.value}")
+    if report.worker_summary:
+        for wid, st in report.worker_summary.items():
+            click.echo(f"  {wid}: {st}")
+    sys.exit(0 if report.state.value in ("completed", "running") else 1)
+
+
+@coord_group.command(name="work")
+@click.option("--run-id", required=True)
+@click.option("--worker-id", required=True)
+def coord_work(run_id: str, worker_id: str) -> None:
+    """Worker entry-point (stub)."""
+    click.echo(f"worker {worker_id} for run {run_id} — pending v2/C implementation")
+
+
+@coord_group.command(name="integrate")
+@click.option("--run-id", required=True)
+@click.option("--project-root", default=".", type=click.Path(path_type=Path))
+@click.option("--commit", is_flag=True)
+@click.option("--push", is_flag=True)
+def coord_integrate(run_id: str, project_root: Path, commit: bool, push: bool) -> None:
+    """Integrate a completed run: tests, commit, push."""
+    from harness.coord.integrator import integrate
+    run_dir = Path("runs") / run_id
+    report = integrate(run_dir, project_root=project_root, auto_commit=commit, auto_push=push)
+    click.echo(f"integrate: success={report.success} commit={report.commit_sha} pushed={report.pushed}")
+    if report.diagnostic:
+        click.echo(f"  diagnostic: {report.diagnostic}")
+    if report.test_summary:
+        click.echo(f"  tests: {report.test_summary}")
+    sys.exit(0 if report.success else 1)
+
+
+@coord_group.command(name="status")
+@click.option("--run-id", required=True)
+def coord_status(run_id: str) -> None:
+    """Show run state summary."""
+    from harness.coord.run_state import read_run_state
+    run_dir = Path("runs") / run_id
+    state = read_run_state(run_dir / "run_state.json")
+    if state is None:
+        click.echo("error: run not found")
+        raise SystemExit(1)
+    click.echo(f"run {state.run_id}: {state.state.value}")
+    click.echo(f"  plan: {state.plan_path}")
+    click.echo(f"  workers: {len(state.workers)}")
+    for wid, st in state.workers.items():
+        click.echo(f"    {wid}: {st.state.value}")
+    if state.escalations:
+        click.echo(f"  escalations: {len(state.escalations)}")
