@@ -16,6 +16,7 @@ Usage:
 
 import time
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -41,6 +42,17 @@ _DEFAULT_TIMEOUT = Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
 def _make_user_agent() -> str:
     """Return User-Agent header value: ``xaxiu-harness/<version>``."""
     return f"xaxiu-harness/{__version__}"
+
+
+def _resolve_kimi_upstream() -> str:
+    """Route through local proxy when available, else direct."""
+    explicit = os.environ.get("HARNESS_PROXY_URL")
+    if explicit:
+        return explicit
+    pid_file = Path(".harness") / "proxy.pid"
+    if pid_file.exists():
+        return "http://127.0.0.1:7879/v1/chat/completions"
+    return "https://api.moonshot.cn/v1/chat/completions"
 
 
 def _extract_chat_text(response_data: dict) -> str:
@@ -188,7 +200,7 @@ class KimiConcrete(Engine):
             ) as client:
                 payload = self._build_payload(packet_content, model, extra)
                 response = client.post(
-                    "https://api.moonshot.cn/v1/chat/completions",
+                    _resolve_kimi_upstream(),
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
                         "User-Agent": _make_user_agent(),

@@ -107,7 +107,22 @@ def stop() -> None:
 
 
 def status() -> None:
-    _print_status(_state_path())
+    import httpx
+    try:
+        resp = httpx.get("http://127.0.0.1:7879/healthz", timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+    except (httpx.ConnectError, httpx.TimeoutException):
+        click.echo("Proxy not responding on 127.0.0.1:7879. Is it running?")
+        sys.exit(1)
+    except Exception:
+        _print_status(_state_path())
+        return
+
+    click.echo(f"Proxy status:   {data['status']}")
+    click.echo(f"Pool size:      {data['pool_size']}")
+    click.echo(f"In-flight:      {data['in_flight']}")
+    click.echo(f"Max concurrent: {data['max_concurrent']}")
 
 
 def reset_circuit(alias: str) -> None:

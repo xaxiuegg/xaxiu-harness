@@ -102,3 +102,31 @@ def test_byte_for_byte_passthrough(client: TestClient, tmp_path: Path, monkeypat
     tc = TestClient(app)
     resp = tc.post("/v1/chat/completions", json={"model": "kimi", "messages": []})
     assert resp.content == body
+
+
+def test_healthz_returns_expected_shape(client: TestClient) -> None:
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["pool_size"] == 2
+    assert data["in_flight"] == 0
+    assert data["max_concurrent"] == 12
+
+
+def test_healthz_survives_empty_key_pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    state_path = tmp_path / "proxy_state.json"
+    app = create_app(
+        state_path=state_path,
+        keys={},
+        http_client=_FakeClient(),
+    )
+    tc = TestClient(app)
+    resp = tc.get("/healthz")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["pool_size"] == 0
+    assert data["in_flight"] == 0
+    assert data["max_concurrent"] == 0

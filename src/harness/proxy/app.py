@@ -94,12 +94,18 @@ def create_app(
         if not path.exists():
             state = _init_state(app_.state.keys)
             write_state(state, path)
+        pid_path = path.parent / "proxy.pid"
+        pid_path.write_text(str(os.getpid()), encoding="utf-8")
         if app_.state.http_client is None:
             app_.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
         yield
         # shutdown
         if app_.state.http_client is not None:
             await app_.state.http_client.aclose()
+        try:
+            pid_path.unlink()
+        except OSError:
+            pass
 
     app = FastAPI(title="xaxiu-harness proxy", lifespan=lifespan)
     app.state.state_path = _state_path(state_path)
@@ -162,5 +168,16 @@ def create_app(
             write_state(state, app.state.state_path)
 
         return Response(content=response_body, status_code=status_code or 502)
+
+    @app.get("/healthz")
+    async def _healthz():
+        state = await _load_or_init_state()
+        in_flight_total = sum(k.in_flight for k in state.keys.values())
+        return {
+            "status": "ok",
+            "pool_size": len(state.keys),
+            "in_flight": in_flight_total,
+            "max_concurrent": sum(k.max_concurrent for k in state.keys.values()),
+        }
 
     return app

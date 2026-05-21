@@ -17,6 +17,7 @@ from harness.engines.concrete import (
     DeepSeekConcrete,
     GeminiConcrete,
     KimiConcrete,
+    _resolve_kimi_upstream,
     get_engine,
 )
 
@@ -218,7 +219,27 @@ def test_deepseek_malformed_json(
 # ---------------------------------------------------------------------------
 
 KIMI_URL = "https://api.moonshot.cn/v1/chat/completions"
+KIMI_PROXY_URL = "http://127.0.0.1:7879/v1/chat/completions"
 KIMI_JSON_OK = {"choices": [{"message": {"content": "kimi-ok"}}]}
+
+
+def test_resolve_kimi_upstream_explicit_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HARNESS_PROXY_URL", "http://custom-proxy:9999/v1/chat/completions")
+    assert _resolve_kimi_upstream() == "http://custom-proxy:9999/v1/chat/completions"
+
+
+def test_resolve_kimi_upstream_pid_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HARNESS_PROXY_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    pid_file = tmp_path / ".harness" / "proxy.pid"
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text("12345")
+    assert _resolve_kimi_upstream() == KIMI_PROXY_URL
+
+
+def test_resolve_kimi_upstream_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HARNESS_PROXY_URL", raising=False)
+    assert _resolve_kimi_upstream() == KIMI_URL
 
 
 def test_kimi_success(
@@ -334,6 +355,26 @@ def test_kimi_malformed_json(
 
     assert resp.success is False
     assert resp.error == "internal"
+
+
+def test_kimi_routes_through_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kimi_engine: KimiConcrete
+) -> None:
+    monkeypatch.setenv("HARNESS_PROXY_URL", "http://proxy-test:7879/v1/chat/completions")
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json=KIMI_JSON_OK)
+
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(transport=httpx.MockTransport(handler))
+    )
+
+    resp = kimi_engine.dispatch("hello", "kimi-model", {})
+
+    assert resp.success is True
+    assert captured["url"] == "http://proxy-test:7879/v1/chat/completions"
 
 
 # ---------------------------------------------------------------------------
