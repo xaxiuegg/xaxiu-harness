@@ -1,0 +1,33 @@
+name: harness-worker
+project_root: "{{PROJECT_ROOT}}"
+status_tracking:
+  backend: csv
+  config:
+    csv_path: coord/STATUS.csv
+observer:
+  enabled: false
+  cadence_minutes: 60
+  daily_retro_time: "22:00"
+  flag_patterns: []
+operator:
+  mode: review_each
+  escalation_threshold: L5
+  engine_fill: conservative
+  max_parallel_supervisors: 1
+  explore_on_uncertainty: ask_operator
+  observer_cadence_minutes: 60
+  profile: technical
+  engine_routing:
+    creativity: claude-in-session
+    developing: swarm/kimi-api
+    testing: claude-in-session
+    integrating: claude-in-session
+    process_improvement: claude-in-session
+  engine_slots:
+    swarm/kimi: 1
+    swarm/kimi-api: 1
+    swarm/deepseek: 1
+  notification_method: file
+  notification_target: coord/observer/escalations.md
+routing_rules: []
+scheduled_tasks: []

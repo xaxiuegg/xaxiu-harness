@@ -32,7 +32,8 @@ class TestMockEngineUnit:
         engine = MockEngine()
         response = engine.dispatch("implement step s1", "", {})
         assert response.success is True
-        assert "<FILE: mock-out-1.txt>" in response.text
+        assert "FILE: mock-out-1.txt" in response.text
+        assert ">>>>>>> REPLACE" in response.text
         assert "hello from MockEngine" in response.text
 
     def test_fixture_file_matching(
@@ -60,7 +61,8 @@ class TestMockEngineUnit:
         response = engine.dispatch("does not match anything", "", {})
         assert response.success is True
         # Falls through to worker stub
-        assert "<FILE: mock-out-1.txt>" in response.text
+        assert "FILE: mock-out-1.txt" in response.text
+        assert ">>>>>>> REPLACE" in response.text
 
     def test_fixture_file_ignores_broken_json(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -73,7 +75,8 @@ class TestMockEngineUnit:
         response = engine.dispatch("anything", "", {})
         assert response.success is True
         # Falls through to worker stub
-        assert "<FILE: mock-out-1.txt>" in response.text
+        assert "FILE: mock-out-1.txt" in response.text
+        assert ">>>>>>> REPLACE" in response.text
 
     def test_mock_response_set_exists(self) -> None:
         rs = MockResponseSet(fixtures={"a": "b"})
@@ -91,8 +94,11 @@ class TestMockEngineUnit:
 
     def test_default_worker_stub_format(self) -> None:
         text = _default_worker_stub("")
-        assert "<FILE: mock-out-1.txt>" in text
-        assert "</FILE>" in text
+        assert "FILE: mock-out-1.txt" in text
+        assert "<<<<<<< SEARCH" in text
+        assert "=======" in text
+        assert ">>>>>>> REPLACE" in text
+        assert "hello from MockEngine" in text
 
 
 class TestMockEngineFactory:
@@ -155,4 +161,5 @@ class TestMockEngineEndToEnd:
         assert result.fallback_chain == ["mock"]
         assert result.error is None
         assert result.text is not None
-        assert "<FILE: mock-out-1.txt>" in result.text
+        assert "FILE: mock-out-1.txt" in result.text
+        assert ">>>>>>> REPLACE" in result.text

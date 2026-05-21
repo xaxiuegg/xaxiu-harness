@@ -45,9 +45,14 @@ class TestInitDb:
         # Should be usable
         assert db.get_connection() is not None
 
-    def test_get_connection_before_init_raises(self):
-        with pytest.raises(RuntimeError, match="not initialised"):
-            db.get_connection()
+    def test_get_connection_lazily_initialises(self, tmp_path, monkeypatch):
+        """get_connection auto-calls init_db at default STATE_DIR when needed."""
+        monkeypatch.setattr(db, "STATE_DIR", tmp_path)
+        # Force un-initialised state for this test
+        monkeypatch.setattr(db, "_connection", None)
+        conn = db.get_connection()
+        assert conn is not None
+        assert (tmp_path / "history.db").exists()
 
 
 class TestDispatchInsertQuery:

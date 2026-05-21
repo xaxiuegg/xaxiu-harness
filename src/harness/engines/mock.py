@@ -76,7 +76,12 @@ class MockEngine(Engine):
 
 
 def _default_waveplan_stub(packet: str) -> str:
-    """Return a stub WavePlan JSON for the planner."""
+    """Return a stub WavePlan JSON for the planner.
+
+    Emits a single worker with one ``edit`` step that the v2 worker.py
+    pipeline knows how to dispatch (it only dispatches ``kind == "edit"``
+    with non-empty ``target_files``).
+    """
     plan = {
         "schema_version": 1,
         "run_id": "MOCK-RUN-ID-PLACEHOLDER",
@@ -88,14 +93,14 @@ def _default_waveplan_stub(packet: str) -> str:
                 "worker_id": "worker-1",
                 "title": "Mock task 1",
                 "description": "Stub task for MockEngine smoke test",
-                "read_set": ["README.md"],
+                "read_set": [],
                 "write_set": ["mock-out-1.txt"],
                 "test_set": [],
                 "depends_on": [],
                 "steps": [
                     {
                         "step_id": "s1",
-                        "kind": "create",
+                        "kind": "edit",
                         "instruction": "Write hello to mock-out-1.txt",
                         "target_files": ["mock-out-1.txt"],
                         "expected_diff_lines": 1,
@@ -113,8 +118,22 @@ def _default_waveplan_stub(packet: str) -> str:
 
 
 def _default_worker_stub(packet: str) -> str:
-    """Return a stub FILE/REPLACE block for worker steps."""
-    return """<FILE: mock-out-1.txt>
-hello from MockEngine
-</FILE>
-"""
+    """Return a stub FILE/REPLACE block matching worker._parse_file_edits.
+
+    The format is:
+        FILE: path
+        <<<<<<< SEARCH
+        (empty — new file)
+        =======
+        content
+        >>>>>>> REPLACE
+    For new files, an empty SEARCH block is OK — worker._apply_file_edits
+    treats nonexistent files as create-new.
+    """
+    return (
+        "FILE: mock-out-1.txt\n"
+        "<<<<<<< SEARCH\n"
+        "=======\n"
+        "hello from MockEngine\n"
+        ">>>>>>> REPLACE\n"
+    )

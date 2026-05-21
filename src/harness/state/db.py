@@ -157,9 +157,16 @@ def init_db(db_path: str | None = None) -> None:
 
 
 def get_connection() -> sqlite3.Connection:
-    """Return the existing connection (must be initialised first)."""
+    """Return the existing connection, lazily initialising at the default path.
+
+    Production code paths (CLI dispatch, planner / worker dispatch, observer,
+    budget meter) all reach the database through this helper.  Lazy init
+    removes the requirement to call ``init_db()`` from every entry point —
+    explicit init is still required when a custom ``db_path`` is desired.
+    """
     if _connection is None:
-        raise RuntimeError("Database not initialised – call init_db() first")
+        init_db()
+    assert _connection is not None  # init_db sets it
     return _connection
 
 

@@ -231,7 +231,20 @@ def load_project_adapter(project_name: str) -> AdapterConfig:
     if not adapter_path.exists():
         raise FileNotFoundError(str(adapter_path))
 
-    # schema.load_adapter enforces yaml.safe_load (HIGH-7)
-    cfg = load_adapter(str(adapter_path))
+    # Resolve ``{{PROJECT_ROOT}}`` against the repo root so in-tree planner /
+    # worker adapters are portable across operator clones.  External-project
+    # adapters that hardcode an absolute path are unaffected.
+    yaml_text = resolve_placeholders(
+        adapter_path.read_text(encoding="utf-8"),
+        str(_repo_root()),
+    )
+    data = yaml.safe_load(yaml_text)
+    if data is None:
+        raise ValueError("YAML file is empty or contains only comments")
+    try:
+        cfg = AdapterConfig.model_validate(data)
+    except Exception as exc:
+        raise ValueError(f"Adapter validation failed: {exc}") from exc
+
     _run_path_security_checks(cfg)
     return cfg
