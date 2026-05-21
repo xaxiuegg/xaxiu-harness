@@ -23,8 +23,8 @@
     "windows_toast": false
   },
   "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-20T14:12:21Z",
-  "tick_count": 10,
+  "last_tick_at": "2026-05-21T00:02:35Z",
+  "tick_count": 11,
   "operator_directives": {
     "full_dev_authority": true,
     "escalation_threshold": "L5",
@@ -225,51 +225,19 @@
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
   "active_dispatches": [
     {
-      "task_id": "swarm-2026-05-20T13-50-waveB2-dpapi",
-      "packet": "coord/packets/2026-05-20-waveB2-dpapi-tests/packet.md",
+      "task_id": "dispatch-2026-05-21T00-02-status-tracker",
+      "packet": "coord/packets/2026-05-20-status-tracker-harness-feature/packet.md",
       "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T14:12:21Z",
+      "dispatched_at": "2026-05-21T00:02:35Z",
       "phase": "developing",
-      "wave_id": "wave-B2/dpapi",
-      "timeout_seconds": 1200
-    },
-    {
-      "task_id": "swarm-2026-05-20T13-50-waveB2-state-files",
-      "packet": "coord/packets/2026-05-20-waveB2-state-files-tests/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T14:12:21Z",
-      "phase": "developing",
-      "wave_id": "wave-B2/state-files",
-      "timeout_seconds": 1200
-    },
-    {
-      "task_id": "swarm-2026-05-20T13-50-waveB2-state-db",
-      "packet": "coord/packets/2026-05-20-waveB2-state-db-tests/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T14:12:21Z",
-      "phase": "developing",
-      "wave_id": "wave-B2/state-db",
-      "timeout_seconds": 1200
-    },
-    {
-      "task_id": "swarm-2026-05-20T13-50-waveB2-state-jsonl",
-      "packet": "coord/packets/2026-05-20-waveB2-state-jsonl-tests/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T14:12:21Z",
-      "phase": "developing",
-      "wave_id": "wave-B2/state-jsonl",
-      "timeout_seconds": 1200
-    },
-    {
-      "task_id": "swarm-2026-05-20T13-50-waveB2-cli-helpers",
-      "packet": "coord/packets/2026-05-20-waveB2-cli-helpers-tests/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-20T14:12:21Z",
-      "phase": "developing",
-      "wave_id": "wave-B2/cli-helpers",
-      "timeout_seconds": 1200
+      "wave_id": "wave-5.5",
+      "timeout_seconds": 1200,
+      "bg_handle": "bcsacjnox",
+      "note": "Round 1 of 5 in new session; recovery-layer primitive; cli.py-touching so #20 must wait"
     }
   ],
+  "reconciled_at": "2026-05-21T00:02:35Z",
+  "reconcile_note": "Cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b); marked wave-B2 done; cleared engine_slots.kimi.in_flight",
   "wave_plan": [
     {
       "id": "wave-A.1",
@@ -399,12 +367,41 @@
     {
       "id": "wave-B2",
       "name": "boundary tests for remaining 5 coverage gaps (dpapi/state-*/cli_helpers)",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "wave-A"
       ],
       "dispatched_via": "xaxiu-swarm swarm --max-concurrent 3 (5 packets queued)",
-      "current_swarm_run": "2026-05-20T13:50"
+      "current_swarm_run": "2026-05-20T13:50",
+      "completed_at": "2026-05-20T14:30:00Z",
+      "completion_note": "All 5 boundary test packets landed via incremental Kimi-CLI edits. Commits: d6acc1f (dpapi), 0a7a0f5 (state/files), d1e8f92 (state/db), f010ecf (state/jsonl), 34c920b (cli_helpers). 263/263 tests green.",
+      "reconciled_at": "2026-05-21T00:02:35Z"
+    },
+    {
+      "id": "wave-5.5",
+      "name": "canonical status tracker as harness primitive (roster #19)",
+      "status": "in_progress",
+      "depends_on": [
+        "wave-A",
+        "wave-B"
+      ],
+      "spec_ready": "spec/status-tracker.md",
+      "packet_ready": "coord/packets/2026-05-20-status-tracker-harness-feature/packet.md",
+      "dispatched_at": "2026-05-21T00:02:35Z",
+      "current_dispatch": "bcsacjnox",
+      "blocks": ["wave-5.6", "wave-5", "wave-3"],
+      "note": "Recovery layer for autonomous loops. Required before #20 because both touch cli.py."
+    },
+    {
+      "id": "wave-5.6",
+      "name": "independent observer (roster #20) — the check on dev-manager authority",
+      "status": "planned",
+      "depends_on": [
+        "wave-5.5"
+      ],
+      "spec_ready": "spec/observer.md",
+      "packet_ready": "coord/packets/2026-05-20-observer-primitive/packet.md",
+      "note": "Round 2 — sequential after #19 due to cli.py conflict."
     }
   ],
   "blockers": [],
@@ -415,11 +412,7 @@
     "kimi": {
       "max_parallel": 6,
       "in_flight": [
-        "swarm-2026-05-20T13-50-waveB2-dpapi",
-        "swarm-2026-05-20T13-50-waveB2-state-files",
-        "swarm-2026-05-20T13-50-waveB2-state-db",
-        "swarm-2026-05-20T13-50-waveB2-state-jsonl",
-        "swarm-2026-05-20T13-50-waveB2-cli-helpers"
+        "dispatch-2026-05-21T00-02-status-tracker"
       ],
       "fill_policy": "aggressive"
     },

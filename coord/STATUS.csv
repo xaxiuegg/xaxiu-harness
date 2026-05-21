@@ -1,5 +1,5 @@
 ID,Category,Title,Status,Owner,Effort,Updated,Notes
-W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),queued,Kimi via swarm,~45 min,2026-05-20,Packet ready at coord/packets/2026-05-20-status-tracker-harness-feature/; spec at spec/status-tracker.md; HIGHEST priority — recovery layer for autonomous loops; dispatch BEFORE Wave 5
+W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),in_progress,Kimi via swarm,~45 min,2026-05-21,Dispatched 2026-05-21T00:02Z bg-task bcsacjnox; spec at spec/status-tracker.md; HIGHEST priority — recovery layer for autonomous loops
 WA-1,Wave A,Wire dispatch CLI verb to dispatch_packet,shipped,Claude,30 min,2026-05-20,Commit 8b65dde; first wired verb, set pattern
 WA-2,Wave A,Wire remaining 10 CLI verbs (init/status/engines/priority/burst/lock/observer-tick/retro/install/dashboard-serve/loops),shipped,Kimi via swarm,~30 min wall,2026-05-20,Commit d5def26; 24 new tests
 WA5,Wave A.5,HarnessError taxonomy module + spec + tests,shipped,Claude,~1 hr,2026-05-20,errors.py + spec/errors.md + 21 tests; 89/89 pass
@@ -15,7 +15,7 @@ WB2-CLI-HELPERS,Wave B/2,Boundary tests for cli_helpers.py,shipped,Kimi via swar
 W4,Wave 4,Windows installer + first-run wizard,shipped,Kimi+Claude,~2 hr,2026-05-20,4 files + dpapi __main__; landed despite swarm timeout tag; 171/171 then 185/185 pass
 W7A,Wave 7/A,Operator-modes foundation (operator/* module + 14 tests),shipped,Claude,45 min,2026-05-20,Inline after 2 swarm/kimi attempts failed on too-broad packet
 W7B,Wave 7/B,Operator-modes CLI integration (apply_operator_flags + dispatch dry_run),shipped,Claude,20 min,2026-05-20,7 new flags on @cli.group; dry_run mode works end-to-end
-W7C,Wave 7/C,Operator-modes polish (schema OperatorSection + init verb operator: YAML emission),todo,Claude or Kimi,~30 min,-,Low priority; CLI flags + env vars already cover full functionality
+W7C,Wave 7/C,Operator-modes polish (schema OperatorSection + init verb operator: YAML emission),queued,Kimi via swarm,~30 min,2026-05-21,Packet drafted at coord/packets/2026-05-20-wave7C-schema-polish/; awaits Round 4 dispatch slot (cli.py conflict with HEARTBEAT/STATE-INSPECT — serialize)
 W5-PACKETS,Wave 5,"Wave 5 split into 5/A (templates) + 5/B (NL→YAML), both packets drafted",shipped,Claude,30 min,2026-05-20,Commit bd26470; both packets ready to dispatch when swarm slot opens
 W5A,Wave 5/A,Template refresh: add operator: section to all 6 templates,queued,Kimi via swarm,~10 min,2026-05-20,Packet ready at coord/packets/2026-05-20-wave5A-template-refresh/
 W5B,Wave 5/B,NL→YAML translator + harness adapter verb group,queued,Kimi via swarm,~30 min,2026-05-20,Packet ready at coord/packets/2026-05-20-wave5B-nl-to-yaml/
@@ -27,8 +27,8 @@ DEV-LOOP-EVENT-DRIVEN,Dev Loop,Cadence-is-the-floor / event-driven tick rule,shi
 DEV-LOOP-NO-IDLE-DM,Dev Loop,Dev manager does not idle either rule,shipped,Claude,5 min,2026-05-20,Same commit; roster row #18 origin
 DEV-LOOP-CALIBRATION,Dev Loop,Empirical concurrency calibration from warehouse,shipped,Claude,30 min,2026-05-20,engine_slots kimi 3→6 / kimi-api 2→6; cooldowns removed (immediate_fallback)
 DEV-LOOP-STATUS-CSV,Dev Loop,Canonical STATUS.csv tracker (this file),shipped,Claude,15 min,2026-05-20,Replicated from warehouse pattern; update on every task transition
-HEARTBEAT,Backlog (P2),harness heartbeat CLI verb (passive operator status),todo,Kimi,~30 min,-,Pulse to coord/dev_loop/heartbeat.json every N sec; harness status reads it
-STATE-INSPECT,Backlog (P2),harness state inspect CLI verb (pretty-print state.json),todo,Kimi,~30 min,-,Non-technical operator can't read state.json directly
+HEARTBEAT,Backlog (P2),harness heartbeat CLI verb (passive operator status),queued,Kimi via swarm,~30 min,2026-05-21,Packet drafted at coord/packets/2026-05-20-heartbeat-cli-verb/; pulse + show subcommands; coord/dev_loop/heartbeat.json schema
+STATE-INSPECT,Backlog (P2),harness state inspect CLI verb (pretty-print state.json),queued,Kimi via swarm,~30 min,2026-05-21,Packet drafted at coord/packets/2026-05-20-state-inspect-cli-verb/; pretty/json/compact formats; ANSI color
 SESSION-BOOTSTRAP,Doc,Durable session-bootstrap prompt (paste-to-boot-new-Claude),shipped,Claude,30 min,2026-05-20,"coord/SESSION_BOOTSTRAP.md; recovery artifact authored by a parallel Claude session, saved + annotated with state-delta; consider Wave 6 candidate for `harness session bootstrap` CLI verb"
 REPLAY-CLI,Backlog (creativity),harness replay CLI verb - decision archaeology for dispatches,proposed,Claude+Kimi,~3 hr,2026-05-20,creativity tick #1; needs operator approval before dispatch
 BUDGET-METER,Backlog (parked),Dispatch budget meter + per-engine cost ledger,parked,Claude+Kimi,~2 hr,2026-05-20,Idea score 82; revisit after Wave 3-5 done
