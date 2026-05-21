@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -239,3 +240,171 @@ class Coordinator:
             plan_path=self.plan_path,
             worker_summary={wid: str(st.state.value) for wid, st in state.workers.items()},
         )
+
+
+# ---------------------------------------------------------------------------
+# Cleanup helpers
+# ---------------------------------------------------------------------------
+
+_ACTIVE_STATES = frozenset({RunStateLiteral.PLANNING, RunStateLiteral.RUNNING, RunStateLiteral.INTEGRATING})
+
+
+@dataclass
+class CleanupReport:
+    runs_removed: list[str]
+    worktrees_removed: list[str]
+    bytes_freed: int
+    skipped_active: list[str]
+    dry_run: bool
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    if not path.exists():
+        return 0
+    try:
+        for entry in os.scandir(path):
+            if entry.is_file(follow_symlinks=False):
+                total += entry.stat().st_size
+            elif entry.is_dir(follow_symlinks=False):
+                total += _dir_size(Path(entry.path))
+    except OSError:
+        pass
+    return total
+
+
+def _remove_worktrees_for_run(
+    run_id: str,
+    repo_root: Path,
+    dry_run: bool,
+) -> tuple[list[str], int]:
+    removed: list[str] = []
+    bytes_freed = 0
+    wt_run_dir = repo_root / ".harness" / "worktrees" / run_id
+    if not wt_run_dir.exists():
+        return removed, bytes_freed
+
+    for worker_dir in sorted(wt_run_dir.iterdir()):
+        if not worker_dir.is_dir():
+            continue
+        bytes_freed += _dir_size(worker_dir)
+        removed.append(str(worker_dir))
+        if not dry_run:
+            subprocess.run(
+                ["git", "worktree", "remove", str(worker_dir), "--force"],
+                check=False,
+                cwd=repo_root,
+                capture_output=True,
+            )
+
+    bytes_freed += _dir_size(wt_run_dir)
+    if not dry_run:
+        shutil.rmtree(wt_run_dir, ignore_errors=True)
+
+    return removed, bytes_freed
+
+
+def cleanup_run(
+    run_id: str,
+    *,
+    repo_root: Path | None = None,
+    keep_deliverables: bool = False,
+    dry_run: bool = False,
+) -> CleanupReport:
+    repo = repo_root or Path.cwd()
+    run_dir = repo / "runs" / run_id
+    state_path = run_dir / "run_state.json"
+
+    state = read_run_state(state_path) if state_path.exists() else None
+    if state is not None and state.state in _ACTIVE_STATES:
+        return CleanupReport(
+            runs_removed=[],
+            worktrees_removed=[],
+            bytes_freed=0,
+            skipped_active=[run_id],
+            dry_run=dry_run,
+        )
+
+    bytes_freed = 0
+    worktrees_removed: list[str] = []
+    runs_removed: list[str] = []
+
+    # Worktrees
+    wts, wt_bytes = _remove_worktrees_for_run(run_id, repo, dry_run)
+    worktrees_removed.extend(wts)
+    bytes_freed += wt_bytes
+
+    # Run directory
+    if run_dir.exists():
+        if keep_deliverables:
+            checkpoints_dir = run_dir / "checkpoints"
+            if checkpoints_dir.exists():
+                bytes_freed += _dir_size(checkpoints_dir)
+                if not dry_run:
+                    shutil.rmtree(checkpoints_dir, ignore_errors=True)
+
+            rs_path = run_dir / "run_state.json"
+            if rs_path.exists():
+                bytes_freed += rs_path.stat().st_size
+                if not dry_run:
+                    rs_path.unlink(missing_ok=True)
+
+            for ckpt in run_dir.glob("*.json"):
+                if ckpt.name == "plan.json":
+                    continue
+                bytes_freed += ckpt.stat().st_size
+                if not dry_run:
+                    ckpt.unlink(missing_ok=True)
+
+            runs_removed.append(run_id)
+        else:
+            bytes_freed += _dir_size(run_dir)
+            if not dry_run:
+                shutil.rmtree(run_dir, ignore_errors=True)
+            runs_removed.append(run_id)
+
+    return CleanupReport(
+        runs_removed=runs_removed,
+        worktrees_removed=worktrees_removed,
+        bytes_freed=bytes_freed,
+        skipped_active=[],
+        dry_run=dry_run,
+    )
+
+
+def cleanup_all_completed(
+    *,
+    repo_root: Path | None = None,
+    keep_deliverables: bool = False,
+    dry_run: bool = False,
+) -> CleanupReport:
+    repo = repo_root or Path.cwd()
+    runs_dir = repo / "runs"
+
+    report = CleanupReport(
+        runs_removed=[],
+        worktrees_removed=[],
+        bytes_freed=0,
+        skipped_active=[],
+        dry_run=dry_run,
+    )
+
+    if not runs_dir.exists():
+        return report
+
+    for run_dir in sorted(runs_dir.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        run_id = run_dir.name
+        sub = cleanup_run(
+            run_id,
+            repo_root=repo,
+            keep_deliverables=keep_deliverables,
+            dry_run=dry_run,
+        )
+        report.runs_removed.extend(sub.runs_removed)
+        report.worktrees_removed.extend(sub.worktrees_removed)
+        report.bytes_freed += sub.bytes_freed
+        report.skipped_active.extend(sub.skipped_active)
+
+    return report

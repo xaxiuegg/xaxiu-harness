@@ -1,40 +1,36 @@
+"""Worker execution — runs one WorkerTask inside its worktree with checkpointing."""
+
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from harness.coord.checkpoint import (
-    Checkpoint,
-    read_checkpoint,
-    write_checkpoint,
-    now_iso,
-)
+from harness.coord.checkpoint import Checkpoint, read_checkpoint, write_checkpoint, now_iso
 from harness.coord.worktree import WORKTREE_ROOT, worktree_path
 
 
-def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> dict:
-    """Run pytest on the worker's local test_set; return summary dict."""
+def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> dict[str, Any]:
+    """Run pytest on *test_set* and return a summary dict."""
     if not test_set:
         return {"ran": 0, "passed": 0, "failed": 0, "skipped": 0, "duration_seconds": 0.0}
     start = datetime.now(timezone.utc)
     args = ["python", "-m", "pytest"] + list(test_set) + ["-q", "--tb=line"]
-    result = subprocess.run(
+    proc = subprocess.run(
         args, cwd=cwd, capture_output=True, text=True, timeout=timeout_seconds,
     )
     elapsed = (datetime.now(timezone.utc) - start).total_seconds()
     passed = failed = skipped = 0
-    m = re.search(r"(\d+) passed", result.stdout)
+    m = re.search(r"(\d+) passed", proc.stdout)
     if m:
         passed = int(m.group(1))
-    m = re.search(r"(\d+) failed", result.stdout)
+    m = re.search(r"(\d+) failed", proc.stdout)
     if m:
         failed = int(m.group(1))
-    m = re.search(r"(\d+) skipped", result.stdout)
+    m = re.search(r"(\d+) skipped", proc.stdout)
     if m:
         skipped = int(m.group(1))
     return {
@@ -47,20 +43,15 @@ def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> d
 
 
 def run_worker(
-    task: dict,   # WorkerTask dict (deferred-import friendly)
+    task: dict[str, Any],
     run_dir: Path,
     *,
     engine: str = "swarm/kimi",
     resume_from: Path | None = None,
     project_root: Path | None = None,
-) -> dict:   # WorkerResult dict
-    """Execute one task's steps inside its worktree.
-
-    Idempotent: if a checkpoint exists, resumes from the next step.
-    """
-    from harness.coord.schemas import (
-        WorkerTask, WorkerResult, WorkerStateLiteral, TestSummary,
-    )
+) -> dict[str, Any]:
+    """Execute a worker task and produce checkpoint + deliverable."""
+    from harness.coord.schemas import WorkerTask
 
     task_obj = WorkerTask.model_validate(task) if isinstance(task, dict) else task
     repo = project_root or Path.cwd()
@@ -78,13 +69,10 @@ def run_worker(
     started_at = now_iso()
     files_modified: list[str] = list(ckpt.files_modified or [])
 
-    # Iterate steps starting from last_completed_step_index + 1
     start_idx = ckpt.last_completed_step_index + 1
-    idx = start_idx - 1  # default if no steps run
+    idx = start_idx - 1
     for idx in range(start_idx, len(task_obj.steps)):
         step = task_obj.steps[idx]
-        # NOTE: actual edit application is engine-dispatched.  For v2/C we
-        # provide the scaffold; v2/D wires the dispatch.  Tests mock this.
         ckpt = ckpt.model_copy(update={
             "last_completed_step_id": step.step_id,
             "last_completed_step_index": idx,
@@ -93,7 +81,6 @@ def run_worker(
         write_checkpoint(checkpoint_path, ckpt)
         files_modified = list(ckpt.files_modified)
 
-    # Final test run on the task's test_set (inside worktree)
     tests = _run_pytest(task_obj.test_set, cwd=wt_path)
     final_state = "completed" if tests["failed"] == 0 else "failed"
     ckpt = ckpt.model_copy(update={
@@ -103,11 +90,8 @@ def run_worker(
     })
     write_checkpoint(checkpoint_path, ckpt)
 
-    steps_completed = []
-    if task_obj.steps:
-        steps_completed = [s.step_id for s in task_obj.steps[:idx + 1]]
-
-    result = {
+    steps_completed = [s.step_id for s in task_obj.steps[:idx + 1]] if task_obj.steps else []
+    result: dict[str, Any] = {
         "schema_version": 1,
         "worker_id": task_obj.worker_id,
         "run_id": run_dir.name,
@@ -124,7 +108,6 @@ def run_worker(
         "elapsed_seconds": int((datetime.now(timezone.utc) -
                                 datetime.fromisoformat(started_at)).total_seconds()),
     }
-    # Write deliverable JSON
     deliv_dir = run_dir / "deliverables"
     deliv_dir.mkdir(parents=True, exist_ok=True)
     (deliv_dir / f"{task_obj.worker_id}.json").write_text(

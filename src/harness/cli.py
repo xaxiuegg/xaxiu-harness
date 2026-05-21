@@ -1288,3 +1288,43 @@ def coord_status(run_id: str) -> None:
         click.echo(f"    {wid}: {st.state.value}")
     if state.escalations:
         click.echo(f"  escalations: {len(state.escalations)}")
+
+
+
+@coord_group.command(name="cleanup")
+@click.option("--run-id", default=None, help="Specific run to clean up; if omitted, cleans all completed runs.")
+@click.option("--dry-run", is_flag=True, help="Show what would be removed without deleting.")
+@click.option("--keep-deliverables", is_flag=True, help="Preserve deliverables/ and plan.json.")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+def coord_cleanup(run_id, dry_run, keep_deliverables, force):
+    """Remove worktrees and run state for completed/failed runs."""
+    from harness.coord.coordinator import cleanup_all_completed, cleanup_run
+
+    if run_id:
+        report = cleanup_run(
+            run_id,
+            keep_deliverables=keep_deliverables,
+            dry_run=dry_run,
+        )
+    else:
+        if not force and not dry_run:
+            click.echo("This will remove all completed/failed runs. Use --force to skip this prompt.")
+            try:
+                ans = click.prompt("Continue? [y/N]", default="n", show_default=False)
+            except click.exceptions.Abort:
+                click.echo("Aborted.")
+                raise SystemExit(1)
+            if ans.lower() not in ("y", "yes"):
+                click.echo("Aborted.")
+                raise SystemExit(1)
+        report = cleanup_all_completed(
+            keep_deliverables=keep_deliverables,
+            dry_run=dry_run,
+        )
+
+    prefix = "[dry-run] " if dry_run else ""
+    click.echo(f"{prefix}runs cleared: {len(report.runs_removed)}")
+    click.echo(f"{prefix}worktrees removed: {len(report.worktrees_removed)}")
+    click.echo(f"{prefix}bytes freed: {report.bytes_freed}")
+    if report.skipped_active:
+        click.echo(f"{prefix}skipped active: {', '.join(report.skipped_active)}")
