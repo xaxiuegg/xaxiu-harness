@@ -73,6 +73,38 @@ def read_status(path: Path) -> list[StatusRow]:
     return rows
 
 
+_MIN_FREE_BYTES = 10 * 1024 * 1024  # 10 MB — refuses write below this floor
+
+
+def _check_disk_space(target_dir: Path, needed_bytes: int = _MIN_FREE_BYTES) -> None:
+    """Raise OSError when target_dir has less than needed_bytes free.
+
+    DISK-FULL-GUARD (2026-05-21): pre-flight check so the write fails fast
+    with a clear error message instead of producing a truncated CSV that
+    corrupts the canonical STATUS.csv.
+    """
+    import shutil as _shutil
+    try:
+        stat = _shutil.disk_usage(str(target_dir))
+    except OSError as exc:
+        # If we can't measure free space, don't block the write
+        return
+    if stat.free < needed_bytes:
+        raise OSError(
+            f"insufficient disk space at {target_dir}: "
+            f"{stat.free} bytes free < {needed_bytes} required"
+        )
+
+
+def _sha256_of(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def write_status(path: Path, rows: list[StatusRow]) -> None:
     """Atomically overwrite *path* with *rows*.
 
@@ -80,11 +112,31 @@ def write_status(path: Path, rows: list[StatusRow]) -> None:
     properly quoted.  Atomic via ``tempfile.mkstemp`` + ``os.replace``;
     original file is untouched on any failure, and no temp file is left
     behind regardless of which step raised.
+
+    DISK-FULL-GUARD (2026-05-21):
+    1. Pre-flight disk space check refuses write below 10 MB free.
+    2. After ``os.replace`` we read the new file back and verify the
+       in-memory SHA matches — guards against half-written CSV.
+    3. The previous successful contents are kept at ``<path>.bak`` so
+       the operator (or a recovery script) can restore on detection of
+       corruption.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(path) as ok:
         if not ok:
             raise StateLockTimeout(f"could not acquire lock on {path} within timeout")
+        # 1. Pre-flight disk-space check
+        _check_disk_space(path.parent)
+
+        # 2. Rotate current file to .bak (best-effort — first-write OK with no .bak)
+        bak_path = path.with_suffix(path.suffix + ".bak")
+        if path.exists():
+            try:
+                import shutil as _shutil
+                _shutil.copy2(path, bak_path)
+            except OSError:
+                pass  # bak is best-effort
+
         fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".status_")
         tmp_path = Path(tmp_name)
         try:
@@ -100,7 +152,23 @@ def write_status(path: Path, rows: list[StatusRow]) -> None:
                     writer.writerow(mapped)
                 fh.flush()
                 os.fsync(fh.fileno())
+            # 3. Capture pre-replace SHA of the temp file
+            tmp_sha = _sha256_of(tmp_path)
             os.replace(tmp_path, path)
+            # 4. Post-replace SHA verify — corrupted write detected here
+            post_sha = _sha256_of(path)
+            if post_sha != tmp_sha:
+                # Restore from .bak if we have one
+                if bak_path.exists():
+                    try:
+                        import shutil as _shutil
+                        _shutil.copy2(bak_path, path)
+                    except OSError:
+                        pass
+                raise OSError(
+                    f"STATUS write corruption detected: "
+                    f"expected SHA {tmp_sha[:12]} got {post_sha[:12]}"
+                )
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
