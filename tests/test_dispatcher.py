@@ -130,7 +130,7 @@ def test_eligible_engines_sorts_by_priority() -> None:
     }
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
-    assert names == ["kimi", "deepseek", "anthropic"]
+    assert names == ["kimi", "deepseek", "anthropic", "gemini"]
 
 
 def test_eligible_engines_excludes_tried() -> None:
@@ -140,14 +140,14 @@ def test_eligible_engines_excludes_tried() -> None:
     }
     result = _eligible_engines(health, exclude={"deepseek"})
     names = [n for n, _ in result]
-    assert names == ["kimi", "anthropic"]
+    assert names == ["kimi", "anthropic", "gemini"]
 
 
 def test_eligible_engines_defaults_to_normal() -> None:
     health: dict[str, EngineHealth] = {}
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
-    assert names == ["deepseek", "kimi", "anthropic"]
+    assert names == ["deepseek", "kimi", "anthropic", "gemini"]
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +428,7 @@ def test_dispatch_all_fallbacks_exhausted(
         result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
 
     assert result.success is False
-    assert result.fallback_chain == ["deepseek", "kimi", "anthropic"]
+    assert result.fallback_chain == ["deepseek", "kimi", "anthropic", "gemini"]
     assert "all_fallbacks_exhausted" in result.error
     mock_db.update_dispatch_status.assert_called_with(
         "disp-1234", "all_fallbacks_exhausted", latency_ms=5
@@ -606,5 +606,5 @@ def test_dispatch_no_redispatch_same_engine(
 
     assert result.success is False
     # deepseek is tried once; fallback tries kimi then anthropic
-    assert len(result.fallback_chain) == 3
-    assert len(set(result.fallback_chain)) == 3  # all unique
+    assert len(result.fallback_chain) == 4
+    assert len(set(result.fallback_chain)) == 4  # all unique

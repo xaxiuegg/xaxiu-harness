@@ -12,6 +12,7 @@ _ENGINE_URLS: dict[str, str] = {
     "deepseek": "https://api.deepseek.com",
     "kimi": "https://api.moonshot.cn",
     "anthropic": "https://api.anthropic.com",
+    "gemini": "https://generativelanguage.googleapis.com",
 }
 
 

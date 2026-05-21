@@ -28,6 +28,17 @@ from harness.operator import OperatorMode, resolve_operator_config
 from harness.operator.flags import OPERATOR_FLAG_NAMES, apply_operator_flags
 from harness.state.files import read_engine_health, update_engine_health
 
+# Budget primitive (BUDGET-METER)
+from harness.budget import (
+    DEFAULT_CAP_PATH,
+    DEFAULT_LEDGER_PATH,
+    check_cap,
+    read_ledger,
+    record_dispatch,
+    summary as budget_summary,
+    total_spent,
+)
+
 # Observer primitive (roster #20)
 from harness.observer.cycle import run_cycle, CycleReport
 from harness.observer.flags import (
@@ -414,7 +425,7 @@ def env(show_set: bool) -> None:
     """Check which API keys are set (echo SET only)."""
     from harness.secrets.dpapi import has_secret
 
-    keys = ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY"]
+    keys = ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
     for key_name in keys:
         if os.environ.get(key_name) or has_secret(key_name):
             click.echo(f"{key_name}: SET")
@@ -550,7 +561,7 @@ def engines(list_: bool, health: bool) -> None:
         sys.exit(0)
 
     # Default / --list
-    for name in ["deepseek", "kimi", "anthropic"]:
+    for name in ["deepseek", "kimi", "anthropic", "gemini"]:
         cfg = state.get(name)
         if cfg:
             click.echo(
@@ -980,3 +991,92 @@ def replay_cmd(task_id: str, fmt: str, jsonl_path: Path | None) -> None:
         }, indent=2))
     else:
         click.echo(format_for_human(report))
+
+
+# ---------------------------------------------------------------------------
+# Budget (BUDGET-METER — dispatch cost ledger)
+# ---------------------------------------------------------------------------
+
+
+def _budget_archive_dir() -> Path:
+    return Path("coord/dev_loop/budget_archive")
+
+
+@cli.group(name="budget")
+def budget_group() -> None:
+    """Dispatch budget + per-engine cost ledger."""
+
+
+@budget_group.command(name="show")
+@click.option("--engine", default=None)
+@click.option("--since", default=None, help="ISO timestamp filter")
+def budget_show(engine: Optional[str], since: Optional[str]) -> None:
+    """Tabular ledger output."""
+    entries = read_ledger(DEFAULT_LEDGER_PATH)
+    if since:
+        entries = [e for e in entries if e.timestamp >= since]
+    if engine:
+        entries = [e for e in entries if e.engine == engine]
+    if not entries:
+        click.echo("(no entries)")
+        sys.exit(0)
+    for e in entries:
+        click.echo(f"{e.timestamp}  {e.engine:12}  {e.task_id:20}  ${e.cost_usd:.6f}")
+    sys.exit(0)
+
+
+@budget_group.command(name="summary")
+@click.option("--since", default="this-month")
+def budget_summary_cmd(since: str) -> None:
+    """Per-engine totals + grand total."""
+    since_iso = None
+    if since == "this-month":
+        since_iso = datetime.now(timezone.utc).strftime("%Y-%m")
+    else:
+        since_iso = since
+    agg = budget_summary(DEFAULT_LEDGER_PATH, since_iso=since_iso)
+    if not agg:
+        click.echo("(no dispatches)")
+        sys.exit(0)
+    total = 0.0
+    for eng, data in sorted(agg.items()):
+        click.echo(
+            f"{eng:12}  dispatches={int(data['dispatches'])}  "
+            f"cost=${data['total_cost_usd']:.6f}  "
+            f"in={int(data['total_input_tokens'])}  out={int(data['total_output_tokens'])}"
+        )
+        total += data["total_cost_usd"]
+    click.echo(f"{'total':12}  ${total:.6f}")
+    sys.exit(0)
+
+
+@budget_group.command(name="set-cap")
+@click.argument("amount_usd", type=float)
+def budget_set_cap(amount_usd: float) -> None:
+    """Write monthly cap to coord/dev_loop/budget_cap.json."""
+    DEFAULT_CAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_CAP_PATH.write_text(
+        json.dumps({"monthly_cap_usd": amount_usd}, indent=2),
+        encoding="utf-8",
+    )
+    click.echo(f"monthly cap set to ${amount_usd:.2f}")
+    sys.exit(0)
+
+
+@budget_group.command(name="reset")
+@click.option("--force", is_flag=True)
+def budget_reset(force: bool) -> None:
+    """Archive ledger + start fresh."""
+    if not DEFAULT_LEDGER_PATH.exists():
+        click.echo("ledger already empty")
+        sys.exit(0)
+    if not force:
+        click.echo("error: use --force to reset ledger", err=True)
+        sys.exit(1)
+    archive = _budget_archive_dir()
+    archive.mkdir(parents=True, exist_ok=True)
+    suffix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    dest = archive / f"budget_ledger_{suffix}.jsonl"
+    DEFAULT_LEDGER_PATH.rename(dest)
+    click.echo(f"ledger archived to {dest}")
+    sys.exit(0)

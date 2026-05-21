@@ -24,6 +24,7 @@ from httpx import Timeout
 from harness import __version__
 from harness._constants import API_KEY_ENV_VARS
 from harness.engines.base import Engine, EngineResponse
+from harness.engines.gemini import GeminiConcrete
 from harness.secrets import dpapi
 
 
@@ -356,7 +357,7 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
          attempted key value.
 
     Args:
-        name: One of ``"deepseek"``, ``"kimi"``, ``"anthropic"``.
+        name: One of ``"deepseek"``, ``"kimi"``, ``"anthropic"``, ``"gemini"``.
         prefer_dpapi: Try DPAPI first (default True).
 
     Returns:
@@ -392,6 +393,8 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
         cls = KimiConcrete
     elif name_lower == "anthropic":
         cls = AnthropicConcrete
+    elif name_lower == "gemini":
+        cls = GeminiConcrete
     else:
         # Should not happen due to earlier guard, but keep exhaustive.
         raise RuntimeError(f"Unsupported engine: {name_lower}")

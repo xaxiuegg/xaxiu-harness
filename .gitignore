@@ -45,3 +45,7 @@ coord/observer/
 
 # Heartbeat (HEARTBEAT): runtime pulse, per-machine, not committed.
 coord/dev_loop/heartbeat.json
+
+# Budget ledger (BUDGET-METER): runtime cost tracking, per-machine, not committed.
+coord/dev_loop/budget_ledger.jsonl
+coord/dev_loop/budget_archive/

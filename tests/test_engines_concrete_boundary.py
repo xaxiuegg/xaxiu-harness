@@ -15,7 +15,9 @@ import pytest
 from harness.engines.concrete import (
     AnthropicConcrete,
     DeepSeekConcrete,
+    GeminiConcrete,
     KimiConcrete,
+    get_engine,
 )
 
 # ---------------------------------------------------------------------------
@@ -457,3 +459,21 @@ def test_anthropic_malformed_json(
 
     assert resp.success is False
     assert resp.error == "internal"
+
+
+# ---------------------------------------------------------------------------
+# get_engine factory
+# ---------------------------------------------------------------------------
+
+
+def test_get_engine_returns_gemini_concrete(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "gk-test")
+    engine = get_engine("gemini", prefer_dpapi=False)
+    assert isinstance(engine, GeminiConcrete)
+
+
+def test_get_engine_gemini_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError) as exc_info:
+        get_engine("gemini", prefer_dpapi=False)
+    assert "gemini" in str(exc_info.value)
