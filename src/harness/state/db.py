@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import shutil
 import sqlite3
 import uuid
 from pathlib import Path
@@ -26,6 +27,75 @@ from harness._constants import (
     PROJECT_NAME_REGEX,
     STATE_DIR,
 )
+
+_SNAPSHOT_DIR_NAME = "db_snapshots"
+
+
+def _snapshot_dir() -> Path:
+    return STATE_DIR / _SNAPSHOT_DIR_NAME
+
+
+def _is_db_corrupt(db_path: Path) -> bool:
+    """Run PRAGMA integrity_check; return True if it returned anything other than 'ok'."""
+    if not db_path.exists():
+        return False
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.cursor()
+            cur.execute("PRAGMA integrity_check;")
+            row = cur.fetchone()
+            return not (row and row[0] == "ok")
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return True
+
+
+def _move_aside_corrupt(db_path: Path) -> Path:
+    """Rename a corrupt db to .corrupt.<ts>; return the new path."""
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    new_path = db_path.with_name(f"{db_path.name}.corrupt.{ts}")
+    db_path.rename(new_path)
+    return new_path
+
+
+def _restore_from_snapshot(db_path: Path) -> bool:
+    """If a snapshot exists, copy the newest one to db_path; return True on success."""
+    snap_dir = _snapshot_dir()
+    if not snap_dir.exists():
+        return False
+    snaps = sorted(snap_dir.glob(f"{db_path.name}.snap.*"))
+    if not snaps:
+        return False
+    newest = snaps[-1]
+    shutil.copy2(newest, db_path)
+    return True
+
+
+def _take_snapshot(db_path: Path) -> Path | None:
+    """Copy db_path to snapshot_dir with a timestamp suffix; return snapshot path."""
+    if not db_path.exists():
+        return None
+    snap_dir = _snapshot_dir()
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    snap_path = snap_dir / f"{db_path.name}.snap.{ts}"
+    try:
+        shutil.copy2(db_path, snap_path)
+    except OSError:
+        return None
+    # Cap snapshot count at 24 (last day at 1/hour)
+    all_snaps = sorted(snap_dir.glob(f"{db_path.name}.snap.*"))
+    for old in all_snaps[:-24]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return snap_path
+
 
 # ---------------------------------------------------------------------------
 # schema DDL – all CREATE TABLE with IF NOT EXISTS
@@ -142,6 +212,17 @@ def init_db(db_path: str | None = None) -> None:
         # default: <repo_root>/state/history.db via shared STATE_DIR
         # (avoids cwd-drift — Wave 2A MED fix)
         db_path = str(STATE_DIR / DB_FILE_NAME)
+
+    # DB-CORRUPT-RECOVERY (2026-05-21): if the db file is corrupt, move it
+    # aside and try to restore from the newest snapshot before opening.
+    pre_path = Path(db_path)
+    if pre_path.exists() and _is_db_corrupt(pre_path):
+        corrupt_path = _move_aside_corrupt(pre_path)
+        restored = _restore_from_snapshot(pre_path)
+        # Best-effort: if restore failed, init_db will create a fresh db
+        # below.  Either way, the corrupt file is preserved at corrupt_path
+        # for post-mortem.
+        del corrupt_path, restored  # silenced — logging not wired in this module
 
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)

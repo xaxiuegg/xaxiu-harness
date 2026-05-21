@@ -17,6 +17,7 @@ Security guarantees
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -94,6 +95,49 @@ def _read_packet(path: str) -> str:
             f"Packet file {size} bytes exceeds limit {MAX_PACKET_BYTES}"
         )
     return p.read_text(encoding="utf-8")
+
+
+# PACKET-INJECTION-FILTER (2026-05-21).  Outbound packets should never
+# instruct a worker to read environment variables, invoke DPAPI directly,
+# or make outbound network requests to arbitrary hosts.  Patterns matched
+# here are HEURISTIC — a determined attacker can evade with obfuscation —
+# but they catch the obvious "exfiltrate DEEPSEEK_API_KEY via curl"
+# templates that would otherwise sneak through an LLM-generated spec.
+
+import re as _re
+
+_INJECTION_PATTERNS: list[tuple[str, "_re.Pattern[str]"]] = [
+    # Windows env-var refs inside scripts
+    ("env_var_windows", _re.compile(r"\$env:[A-Z_][A-Z0-9_]*", _re.IGNORECASE)),
+    ("env_var_pct", _re.compile(r"%[A-Z][A-Z0-9_]+%")),
+    # Python env access
+    ("env_var_python", _re.compile(r"os\.environ(?:\[[^\]]+\]|\.get\()")),
+    # DPAPI exfiltration
+    ("dpapi_direct", _re.compile(r"(decrypt_secret|read_secret|list_secrets)\s*\(",
+                                  _re.IGNORECASE)),
+    # Outbound HTTP primitives
+    ("net_invoke", _re.compile(r"Invoke-WebRequest|Invoke-RestMethod", _re.IGNORECASE)),
+    ("net_curl", _re.compile(r"\bcurl\s+(?:[-A-Za-z]+\s+)*https?://")),
+    ("net_wget", _re.compile(r"\bwget\s+https?://")),
+    # Common API-key var names in literal references
+    ("api_key_literal", _re.compile(
+        r"(KIMI|DEEPSEEK|ANTHROPIC|GEMINI|MOONSHOT|OPENAI)_API_KEY")),
+]
+
+
+def scan_packet_for_injection(text: str) -> list[tuple[str, str]]:
+    """Return a list of ``(pattern_name, excerpt)`` for each suspicious match.
+
+    Returns an empty list when no patterns match.  Excerpts are clipped at
+    120 chars to avoid leaking the surrounding spec content into logs.
+    """
+    findings: list[tuple[str, str]] = []
+    for name, pat in _INJECTION_PATTERNS:
+        m = pat.search(text)
+        if m is not None:
+            excerpt = text[max(0, m.start() - 20): m.end() + 40][:120]
+            findings.append((name, excerpt))
+    return findings
 
 
 def _eligible_engines(
@@ -371,6 +415,23 @@ def dispatch_packet(
             error=f"packet_read_failed: {exc}",
             dispatch_id="",
         )
+
+    # ---- 4.5 PACKET-INJECTION-FILTER (2026-05-21) --------------------------
+    # Refuse packets that look like they're trying to exfiltrate secrets
+    # via env vars / DPAPI calls / outbound HTTP.  Operator can bypass by
+    # setting HARNESS_ALLOW_UNSAFE_PACKETS=1 (e.g. for security research).
+    if os.environ.get("HARNESS_ALLOW_UNSAFE_PACKETS", "").lower() != "1":
+        injections = scan_packet_for_injection(packet_content)
+        if injections:
+            pattern_names = ",".join(name for name, _ in injections)
+            return DispatchResult(
+                success=False,
+                engine_used="",
+                fallback_chain=[],
+                text="",
+                error=f"packet_injection_blocked: {pattern_names}",
+                dispatch_id="",
+            )
 
     # ---- 5. Read engine health (once per dispatch) -------------------------
     try:

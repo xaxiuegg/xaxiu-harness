@@ -31,6 +31,7 @@ from harness.state.files import read_engine_health, update_engine_health
 from harness.budget import (
     DEFAULT_CAP_PATH,
     DEFAULT_LEDGER_PATH,
+    export_daily_csv,
     read_ledger,
     summary as budget_summary,
 )
@@ -581,6 +582,36 @@ def lint_spec_cmd(spec_path: Path, fmt: str) -> None:
 
     # Exit 1 if any error-severity finding exists; exit 0 on warn-only / clean
     sys.exit(0 if ready else 1)
+
+
+@cli.command(name="doctor")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty")
+def doctor_cmd(fmt: str) -> None:
+    """Preflight: check git, python, DPAPI, secrets, coord/ perms, Task Scheduler."""
+    import dataclasses
+    from harness.doctor import run_all, overall_severity
+
+    diagnoses = run_all()
+    overall = overall_severity(diagnoses)
+
+    if fmt == "json":
+        click.echo(json.dumps({
+            "overall": overall,
+            "checks": [dataclasses.asdict(d) for d in diagnoses],
+        }, indent=2))
+    else:
+        glyph = {"ok": "[OK]", "warn": "[!]", "fail": "[X]"}
+        click.echo("harness doctor — preflight diagnostics")
+        click.echo("=" * 50)
+        for d in diagnoses:
+            click.echo(f"  {glyph.get(d.severity, '?')} {d.name:<16} {d.message}")
+            if d.fix:
+                click.echo(f"          fix: {d.fix}")
+        click.echo("=" * 50)
+        click.echo(f"overall: {overall.upper()}")
+
+    sys.exit(0 if overall != "fail" else 1)
 
 
 @cli.command()
@@ -1206,6 +1237,18 @@ def budget_reset(force: bool) -> None:
     DEFAULT_LEDGER_PATH.rename(dest)
     click.echo(f"ledger archived to {dest}")
     sys.exit(0)
+
+
+@budget_group.command(name="export-daily")
+@click.option("--date", default=None,
+              help="UTC date YYYY-MM-DD (defaults to today).")
+@click.option("--target-dir", default=None, type=click.Path(path_type=Path),
+              help="Override output dir (defaults to coord/cost_daily/).")
+def budget_export_daily(date: str | None, target_dir: Path | None) -> None:
+    """Append-only daily cost roll-up CSV (engine/model/tokens/$ for Excel reconciliation)."""
+    from harness.budget import export_daily_csv
+    out = export_daily_csv(target_dir=target_dir, date=date)
+    click.echo(f"wrote {out}")
 
 
 # ---------------------------------------------------------------------------

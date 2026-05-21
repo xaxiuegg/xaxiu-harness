@@ -222,3 +222,62 @@ def check_cap(
     if monthly_cap_usd <= 0.0:
         return (True, spent, monthly_cap_usd)
     return (spent < monthly_cap_usd, spent, monthly_cap_usd)
+
+
+def export_daily_csv(target_dir: Path | None = None, *, date: str | None = None) -> Path:
+    """Write a daily CSV roll-up of the budget ledger.
+
+    Filters ledger entries to *date* (defaults to UTC today).  Columns:
+    date, engine, model, requests, input_tokens, output_tokens, est_usd.
+
+    Returns the CSV path written.
+    """
+    import csv
+    from collections import defaultdict
+
+    target_dir = target_dir or Path("coord") / "cost_daily"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    iso_date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Aggregate by (engine, model)
+    agg: dict[tuple[str, str], dict[str, float | int]] = defaultdict(
+        lambda: {"requests": 0, "input_tokens": 0, "output_tokens": 0, "est_usd": 0.0}
+    )
+
+    def _get(e: object, *keys: str) -> object:
+        for k in keys:
+            if isinstance(e, dict):
+                if k in e:
+                    return e[k]
+            else:
+                val = getattr(e, k, None)
+                if val is not None:
+                    return val
+        return None
+
+    try:
+        entries = read_ledger() or []
+    except Exception:
+        entries = []
+    for e in entries:
+        ts = str(_get(e, "timestamp", "ts") or "")[:10]
+        if ts != iso_date:
+            continue
+        engine = str(_get(e, "engine") or "unknown")
+        model = str(_get(e, "model") or "-")
+        bucket = agg[(engine, model)]
+        bucket["requests"] += 1
+        bucket["input_tokens"] += int(_get(e, "input_tokens", "tokens_in") or 0)
+        bucket["output_tokens"] += int(_get(e, "output_tokens", "tokens_out", "tokens_used") or 0)
+        bucket["est_usd"] += float(_get(e, "cost_usd", "usd") or 0.0)
+
+    out_path = target_dir / f"{iso_date}.csv"
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["date", "engine", "model", "requests",
+                         "input_tokens", "output_tokens", "est_usd"])
+        for (engine, model), b in sorted(agg.items()):
+            writer.writerow([iso_date, engine, model,
+                             b["requests"], b["input_tokens"], b["output_tokens"],
+                             f"{b['est_usd']:.4f}"])
+    return out_path
