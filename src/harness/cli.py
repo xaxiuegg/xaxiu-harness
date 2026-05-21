@@ -953,3 +953,30 @@ def loop_status_cmd(state_path: Path) -> None:
         f"last={state.last_tick_at or '-'} | active={len(state.active_dispatches)} | "
         f"scheduled={scheduled}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Replay (REPLAY-CLI — decision archaeology for dispatches)
+# ---------------------------------------------------------------------------
+
+
+@cli.command(name="replay")
+@click.argument("task_id")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
+@click.option("--jsonl-path", type=click.Path(path_type=Path), default=None)
+def replay_cmd(task_id: str, fmt: str, jsonl_path: Path | None) -> None:
+    """Reconstruct the dispatch lifecycle for TASK_ID."""
+    import dataclasses
+    from harness.replay import replay_dispatch, format_for_human
+
+    report = replay_dispatch(task_id, jsonl_path=jsonl_path)
+    if fmt == "json":
+        click.echo(json.dumps({
+            "task_id": report.task_id,
+            "summary": report.summary,
+            "total_elapsed_ms": report.total_elapsed_ms,
+            "final_outcome": report.final_outcome,
+            "events": [dataclasses.asdict(e) for e in report.events],
+        }, indent=2))
+    else:
+        click.echo(format_for_human(report))
