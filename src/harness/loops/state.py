@@ -46,6 +46,8 @@ class LoopState(BaseModel):
     loop_status: str = "armed"
     tick_count: int = 0
     last_tick_at: str | None = None
+    started_at: str | None = None  # ISO-8601 UTC; first arm time. KILL-CONDITION-WIRING.
+    project_name: str | None = None  # adapter project name; used by kill_conditions
     phase_status: dict[str, str] = Field(default_factory=dict)
     active_dispatches: list[ActiveDispatch] = Field(default_factory=list)
     wave_plan: list[WaveEntry] = Field(default_factory=list)

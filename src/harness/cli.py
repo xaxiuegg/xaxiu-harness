@@ -837,6 +837,25 @@ def observer_uninstall_scheduler() -> None:
     sys.exit(0 if ok else 1)
 
 
+@observer.command(name="audit-chat")
+@click.option("--tail-lines", default=500, type=int,
+              help="Number of trailing transcript lines to scan.")
+def observer_audit_chat(tail_lines: int) -> None:
+    """Audit the Claude Code session transcript for dev-manager drift."""
+    from harness.observer.chat import audit
+    report = audit(tail_lines=tail_lines)
+    if report.transcript_path is None:
+        click.echo("error: could not locate session transcript jsonl", err=True)
+        sys.exit(1)
+    click.echo(f"transcript: {report.transcript_path}")
+    click.echo(f"lines: {report.line_count}  assistant_turns: {report.assistant_turn_count}")
+    if not report.flags:
+        click.echo("flags: none")
+        return
+    for f in report.flags:
+        click.echo(f"  [{f.severity}] {f.pattern}: {f.detail}")
+
+
 # ---------------------------------------------------------------------------
 # Heartbeat (HEARTBEAT — roster row #17)
 # ---------------------------------------------------------------------------
@@ -1369,6 +1388,30 @@ def coord_status(run_id: str) -> None:
     if state.escalations:
         click.echo(f"  escalations: {len(state.escalations)}")
 
+
+@coord_group.command(name="watch")
+@click.option("--run-id", required=True)
+@click.option("--max-seconds", default=None, type=int,
+              help="Stop watching after N seconds even if run is still active.")
+def coord_watch(run_id: str, max_seconds: int | None) -> None:
+    """Tail a running coord run and print events as they land."""
+    import time as _time
+    from harness.coord.watch import watch_run
+
+    run_dir = Path("runs") / run_id
+    if not run_dir.exists():
+        click.echo(f"error: no such run {run_id}", err=True)
+        sys.exit(1)
+
+    deadline = _time.monotonic() + max_seconds if max_seconds else None
+    try:
+        for event in watch_run(run_dir):
+            click.echo(event)
+            if deadline and _time.monotonic() > deadline:
+                click.echo("watch: max-seconds reached", err=True)
+                break
+    except KeyboardInterrupt:
+        click.echo("watch: interrupted", err=True)
 
 
 @coord_group.command(name="cleanup")

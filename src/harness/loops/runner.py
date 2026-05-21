@@ -107,6 +107,68 @@ class TickResult:
     escalations_raised: list[dict[str, Any]] = field(default_factory=list)
     observer_flags_seen: list[str] = field(default_factory=list)
     next_due_at: str | None = None
+    kill_triggered: str | None = None  # which kill_condition fired, if any
+
+
+def _check_kill_conditions(state: LoopState, project: Path) -> str | None:
+    """Return the name of the kill condition that fired, or None.
+
+    Reads ``operator.kill_conditions`` from the active adapter YAML (if any)
+    and compares against the loop's accumulated stats.  Conditions that are
+    None (the default) are disabled.
+
+    Returns the dotted condition name (e.g. ``"max_cost_usd"``) that fired
+    so the caller can record an L4 escalation and stop the loop.
+    """
+    try:
+        from harness.adapters.loader import load_project_adapter
+        from harness.budget import total_spent
+    except Exception:
+        return None
+
+    project_name = getattr(state, "project_name", None)
+    if not project_name:
+        return None
+
+    try:
+        adapter = load_project_adapter(project_name)
+    except Exception:
+        return None
+
+    op = getattr(adapter, "operator", None)
+    if op is None:
+        return None
+    kc = getattr(op, "kill_conditions", None)
+    if kc is None:
+        return None
+
+    # max_cost_usd
+    cost_cap = getattr(kc, "max_cost_usd", None)
+    if cost_cap is not None:
+        try:
+            spent = total_spent()
+        except Exception:
+            spent = 0.0
+        if spent >= cost_cap:
+            return "max_cost_usd"
+
+    # max_rows_dispatched
+    rows_cap = getattr(kc, "max_rows_dispatched", None)
+    if rows_cap is not None and state.tick_count >= rows_cap:
+        return "max_rows_dispatched"
+
+    # max_wallclock_minutes
+    wall_cap = getattr(kc, "max_wallclock_minutes", None)
+    if wall_cap is not None and state.started_at:
+        try:
+            started = _iso_to_dt(state.started_at)
+            elapsed_min = (datetime.now(timezone.utc) - started).total_seconds() / 60.0
+            if elapsed_min >= wall_cap:
+                return "max_wallclock_minutes"
+        except Exception:
+            pass
+
+    return None
 
 
 def tick(
@@ -159,6 +221,37 @@ def tick(
             tick_count=state.tick_count,
             phases_acted_on=[],
             observer_flags_seen=observer_flags_seen,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2.5: kill-conditions gate (KILL-CONDITION-WIRING)
+    # ------------------------------------------------------------------
+    killer = _check_kill_conditions(state, project)
+    if killer is not None:
+        # Stop the loop, record an L4 escalation, and refuse this tick.
+        state.loop_status = "stopped"
+        state.escalations.append({
+            "severity": "L4",
+            "code": f"E_KILL_{killer.upper()}",
+            "at": _dt_to_iso(now),
+            "reason": f"kill_condition {killer} exceeded; loop stopped",
+        })
+        write_state(state_path, state)
+        log_entry = {
+            "tick": state.tick_count,
+            "at": _dt_to_iso(now),
+            "event": "tick_killed",
+            "kill_condition": killer,
+            "phases_acted_on": [],
+        }
+        if state.event_log_path:
+            _atomic_append_jsonl(project / state.event_log_path, log_entry)
+        return TickResult(
+            tick_count=state.tick_count,
+            phases_acted_on=[],
+            observer_flags_seen=observer_flags_seen,
+            kill_triggered=killer,
+            escalations_raised=[state.escalations[-1]],
         )
 
     # ------------------------------------------------------------------

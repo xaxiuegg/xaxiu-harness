@@ -519,3 +519,101 @@ class TestTickNextDue:
         result = tick(state_path, observer_dir=None, project=tmp_path, now=now)
 
         assert result.next_due_at is None
+
+
+# ---------------------------------------------------------------------------
+# KILL-CONDITION-WIRING
+# ---------------------------------------------------------------------------
+
+
+class TestKillConditions:
+    """``operator.kill_conditions`` from adapter YAML halts the loop early."""
+
+    def _make_state(self, state_path: Path, **overrides) -> LoopState:
+        base: dict = dict(
+            loop_status="armed",
+            tick_count=0,
+            phase_status={},
+        )
+        base.update(overrides)
+        state = LoopState(**base)
+        state_path.write_text(state.model_dump_json(), encoding="utf-8")
+        return state
+
+    def test_no_kill_conditions_means_normal_tick(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "state.json"
+        self._make_state(state_path)
+        # No project_name → loader is never consulted → no kill possible
+        result = tick(state_path, observer_dir=None, project=tmp_path)
+        assert result.kill_triggered is None
+
+    def test_max_rows_dispatched_kills_when_exceeded(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        state_path = tmp_path / "state.json"
+        self._make_state(state_path, tick_count=10, project_name="harness-planner")
+
+        from types import SimpleNamespace
+        fake_adapter = SimpleNamespace(
+            operator=SimpleNamespace(kill_conditions=SimpleNamespace(
+                max_cost_usd=None,
+                max_rows_dispatched=10,
+                max_wallclock_minutes=None,
+            ))
+        )
+        monkeypatch.setattr(
+            "harness.adapters.loader.load_project_adapter",
+            lambda name: fake_adapter,
+        )
+        result = tick(state_path, observer_dir=None, project=tmp_path)
+        assert result.kill_triggered == "max_rows_dispatched"
+
+        post = read_state(state_path)
+        assert post.loop_status == "stopped"
+        assert any(e["code"] == "E_KILL_MAX_ROWS_DISPATCHED" for e in post.escalations)
+
+    def test_max_cost_usd_kills_when_exceeded(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        state_path = tmp_path / "state.json"
+        self._make_state(state_path, project_name="harness-planner")
+
+        from types import SimpleNamespace
+        fake_adapter = SimpleNamespace(
+            operator=SimpleNamespace(kill_conditions=SimpleNamespace(
+                max_cost_usd=1.00,
+                max_rows_dispatched=None,
+                max_wallclock_minutes=None,
+            ))
+        )
+        monkeypatch.setattr(
+            "harness.adapters.loader.load_project_adapter",
+            lambda name: fake_adapter,
+        )
+        monkeypatch.setattr("harness.budget.total_spent", lambda: 1.50)
+        result = tick(state_path, observer_dir=None, project=tmp_path)
+        assert result.kill_triggered == "max_cost_usd"
+
+    def test_kill_persists_state_with_l4_escalation(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        state_path = tmp_path / "state.json"
+        self._make_state(state_path, tick_count=99, project_name="harness-planner")
+
+        from types import SimpleNamespace
+        fake_adapter = SimpleNamespace(
+            operator=SimpleNamespace(kill_conditions=SimpleNamespace(
+                max_cost_usd=None,
+                max_rows_dispatched=1,
+                max_wallclock_minutes=None,
+            ))
+        )
+        monkeypatch.setattr(
+            "harness.adapters.loader.load_project_adapter",
+            lambda name: fake_adapter,
+        )
+        result = tick(state_path, observer_dir=None, project=tmp_path)
+
+        assert result.kill_triggered == "max_rows_dispatched"
+        assert len(result.escalations_raised) == 1
+        assert result.escalations_raised[0]["severity"] == "L4"
