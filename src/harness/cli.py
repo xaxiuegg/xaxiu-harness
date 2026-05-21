@@ -928,19 +928,68 @@ def observer_daily_retro() -> None:
 @click.option("--daily-time", default="23:00")
 @click.option("--include-chat", is_flag=True,
               help="Also register the chat-observer audit task (CHAT-OBSERVER).")
-def observer_install_scheduler(cadence_minutes: int, daily_time: str, include_chat: bool) -> None:
-    """Register Windows Task Scheduler entries for the observer."""
-    ok, msg = register_tasks(cadence_minutes=cadence_minutes, daily_time=daily_time, include_chat=include_chat)
-    click.echo(msg)
-    sys.exit(0 if ok else 1)
+@click.option("--all", "include_all", is_flag=True,
+              help="Arm every Task Scheduler entry (chat + cycle + retro + db-snapshot + cost-export).")
+def observer_install_scheduler(cadence_minutes: int, daily_time: str,
+                                include_chat: bool, include_all: bool) -> None:
+    """Register Windows Task Scheduler entries for the observer.
+
+    With --all, also arms downstream tasks: db snapshot (hourly) and
+    daily cost CSV export.  Independent of the observer/retro tasks
+    so they fail gracefully if any one isn't installable.
+    """
+    # --all implies --include-chat
+    include_chat = include_chat or include_all
+    ok, msg = register_tasks(
+        cadence_minutes=cadence_minutes, daily_time=daily_time,
+        include_chat=include_chat,
+    )
+    click.echo(f"observer/retro: {msg}")
+    overall_ok = ok
+
+    if include_all:
+        # DB-snapshot task (WIRE-DB-SNAPSHOT-CRON)
+        try:
+            from harness.state.db_scheduler import register_snapshot_task
+            ok_db, msg_db = register_snapshot_task(cadence_minutes=cadence_minutes)
+            click.echo(f"db-snapshot: {msg_db}")
+            overall_ok = overall_ok and ok_db
+        except ImportError:
+            click.echo("db-snapshot: SKIP — module not yet shipped")
+        # Daily cost-CSV export task
+        try:
+            from harness.budget import register_cost_export_task
+            ok_cost, msg_cost = register_cost_export_task(daily_time=daily_time)
+            click.echo(f"cost-export: {msg_cost}")
+            overall_ok = overall_ok and ok_cost
+        except ImportError:
+            click.echo("cost-export: SKIP — register_cost_export_task not implemented")
+
+    sys.exit(0 if overall_ok else 1)
 
 
 @observer.command(name="uninstall-scheduler")
 def observer_uninstall_scheduler() -> None:
-    """Remove observer Windows Task Scheduler entries."""
+    """Remove observer Windows Task Scheduler entries (chat + cycle + retro + db + cost when present)."""
     ok, msg = unregister_tasks()
-    click.echo(msg)
-    sys.exit(0 if ok else 1)
+    click.echo(f"observer/retro: {msg}")
+    overall_ok = ok
+    # Best-effort removal of downstream tasks
+    try:
+        from harness.state.db_scheduler import unregister_snapshot_task
+        ok_db, msg_db = unregister_snapshot_task()
+        click.echo(f"db-snapshot: {msg_db}")
+        overall_ok = overall_ok and ok_db
+    except ImportError:
+        pass
+    try:
+        from harness.budget import unregister_cost_export_task
+        ok_cost, msg_cost = unregister_cost_export_task()
+        click.echo(f"cost-export: {msg_cost}")
+        overall_ok = overall_ok and ok_cost
+    except ImportError:
+        pass
+    sys.exit(0 if overall_ok else 1)
 
 
 @observer.command(name="audit-chat")
@@ -1020,6 +1069,41 @@ def state_inspect(fmt: str, path: Path) -> None:
     except ConfigCorruption as exc:
         click.echo(f"error: {exc.tag()}: {exc.message}", err=True)
         sys.exit(exc.exit_code())
+
+
+@state.command(name="snapshot")
+@click.option("--db-path", default=None, type=click.Path(path_type=Path),
+              help="Path to history.db (defaults to STATE_DIR/history.db).")
+def state_snapshot_cmd(db_path: Path | None) -> None:
+    """Take a snapshot of history.db into STATE_DIR/db_snapshots/."""
+    from harness._constants import DB_FILE_NAME, STATE_DIR
+    from harness.state.db import _take_snapshot
+    target = db_path or (STATE_DIR / DB_FILE_NAME)
+    snap = _take_snapshot(target)
+    if snap is None:
+        click.echo(f"no snapshot taken (db missing or unreadable at {target})")
+        sys.exit(1)
+    click.echo(f"snapshot: {snap}")
+
+
+@state.command(name="snapshot-schedule")
+@click.option("--cadence-minutes", default=60, type=int,
+              help="Minutes between snapshots (default 60).")
+def state_snapshot_schedule_cmd(cadence_minutes: int) -> None:
+    """Register a Windows Scheduled Task to call `state snapshot` every N min."""
+    from harness.state.db_scheduler import register_snapshot_task
+    ok, msg = register_snapshot_task(cadence_minutes=cadence_minutes)
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
+
+
+@state.command(name="snapshot-unschedule")
+def state_snapshot_unschedule_cmd() -> None:
+    """Remove the snapshot Scheduled Task."""
+    from harness.state.db_scheduler import unregister_snapshot_task
+    ok, msg = unregister_snapshot_task()
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
 
 
 # ---------------------------------------------------------------------------
