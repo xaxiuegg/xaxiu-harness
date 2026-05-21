@@ -52,22 +52,33 @@ def _build_ps_script(
     action_cmd: str,
     description: str,
 ) -> str:
-    """Return a PowerShell script that idempotently registers a task."""
-    # Use a single-quoted here-string to avoid PowerShell escaping hell.
+    """Return a PowerShell script that idempotently registers a task.
+
+    Uses ``-RunLevel Limited`` (no admin) so the registration succeeds
+    in a non-elevated shell.  Wraps Register-ScheduledTask in
+    try/catch with ``-ErrorAction Stop`` so silent failures (the prior
+    bug) become explicit non-OK output.
+    """
     return f"""
 $TaskName = '{task_name}'
 $Action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command ""{action_cmd}""'
 $Trigger  = {trigger_ps}
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-$Principal = New-ScheduledTaskPrincipal -UserId '$env:USERNAME' -RunLevel Highest
+$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited
 
 $Existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($Existing) {{
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    try {{ Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop }}
+    catch {{ Write-Output ('FAILED: ' + $_.Exception.Message); exit 1 }}
 }}
 
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description '{description}' -Force | Out-Null
-Write-Output 'OK'
+try {{
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description '{description}' -Force -ErrorAction Stop | Out-Null
+    Write-Output 'OK'
+}} catch {{
+    Write-Output ('FAILED: ' + $_.Exception.Message)
+    exit 1
+}}
 """
 
 

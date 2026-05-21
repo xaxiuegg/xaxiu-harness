@@ -35,15 +35,21 @@ $TaskName = '{TASK_NAME}'
 $Action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command ""{action_cmd}""'
 $Trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes {cadence_minutes}) -RepetitionDuration (New-TimeSpan -Days 3650)
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-$Principal = New-ScheduledTaskPrincipal -UserId '$env:USERNAME' -RunLevel Highest
+$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited
 
 $Existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($Existing) {{
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    try {{ Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop }}
+    catch {{ Write-Output ('FAILED: ' + $_.Exception.Message); exit 1 }}
 }}
 
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description 'Xaxiu Harness autonomous loop tick (every {cadence_minutes} min)' -Force | Out-Null
-Write-Output 'OK'
+try {{
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description 'Xaxiu Harness autonomous loop tick (every {cadence_minutes} min)' -Force -ErrorAction Stop | Out-Null
+    Write-Output 'OK'
+}} catch {{
+    Write-Output ('FAILED: ' + $_.Exception.Message)
+    exit 1
+}}
 """
 
 
