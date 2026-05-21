@@ -12,14 +12,18 @@ from harness.engines.base import EngineResponse
 from harness.engines.dispatcher import (
     MAX_PACKET_BYTES,
     DispatchResult,
+    _audit_routing_change,
     _eligible_engines,
+    _map_error_to_outcome,
     _pick_initial_engine,
     _read_packet,
+    _remove_active_dispatch,
     _resolve_burst_engine,
     _resolve_locked_engine,
+    _update_active_dispatch_fallback,
     dispatch_packet,
 )
-from harness.state.files import ActiveDispatch, EngineHealth
+from harness.state.files import ActiveDispatch, EngineHealth, StateFileCorruptError
 
 
 # ---------------------------------------------------------------------------
@@ -608,3 +612,516 @@ def test_dispatch_no_redispatch_same_engine(
     # deepseek is tried once; fallback tries kimi then anthropic
     assert len(result.fallback_chain) == 4
     assert len(set(result.fallback_chain)) == 4  # all unique
+
+# ── _map_error_to_outcome ────────────────────────────────────────────────
+
+def test_map_error_to_outcome_timeout() -> None:
+    assert _map_error_to_outcome("timeout") == "timeout"
+
+
+def test_map_error_to_outcome_api_error() -> None:
+    assert _map_error_to_outcome("HTTP 500") == "api_error"
+    assert _map_error_to_outcome(None) == "api_error"
+
+
+# ── _audit_routing_change ────────────────────────────────────────────────
+
+def test_audit_routing_change_swallows_exception() -> None:
+    with patch(
+        "harness.engines.dispatcher.state_db.insert_routing_change",
+        side_effect=RuntimeError("db locked"),
+    ):
+        _audit_routing_change("lock", "deepseek")
+
+
+# ── _remove_active_dispatch / _update_active_dispatch_fallback ───────────
+
+def test_remove_active_dispatch_swallows_exception() -> None:
+    with patch(
+        "harness.engines.dispatcher.state_files.read_active_dispatches",
+        side_effect=RuntimeError("boom"),
+    ):
+        _remove_active_dispatch("disp-123")
+
+
+def test_update_active_dispatch_fallback_success() -> None:
+    entry = ActiveDispatch(
+        dispatch_id="disp-123",
+        project="p",
+        packet_path="pkt",
+        backend="deepseek",
+        started_at="2024-01-01T00:00:00+00:00",
+        status="running",
+        fallback_count=0,
+        current_backend="deepseek",
+    )
+    with patch(
+        "harness.engines.dispatcher.state_files.read_active_dispatches",
+        return_value=[entry],
+    ):
+        with patch(
+            "harness.engines.dispatcher.state_files.write_active_dispatches"
+        ) as mock_write:
+            _update_active_dispatch_fallback("disp-123", "kimi")
+            mock_write.assert_called_once()
+            written = mock_write.call_args[0][0]
+            assert written[0].current_backend == "kimi"
+            assert written[0].fallback_count == 1
+            assert written[0].status == "fallback"
+
+
+def test_update_active_dispatch_fallback_swallows_exception() -> None:
+    with patch(
+        "harness.engines.dispatcher.state_files.read_active_dispatches",
+        side_effect=RuntimeError("boom"),
+    ):
+        _update_active_dispatch_fallback("disp-123", "kimi")
+
+
+# ── _pick_initial_engine burst routing ───────────────────────────────────
+
+def test_pick_initial_engine_routing_rule_burst_active(
+    minimal_adapter: AdapterConfig,
+) -> None:
+    adapter = minimal_adapter.model_copy(
+        update={
+            "routing_rules": [
+                RoutingRule(if_="*.md", then=RoutingAction(backend="burst"))
+            ]
+        }
+    )
+    health = {"kimi": EngineHealth(burst_until="2099-01-01T00:00:00+00:00")}
+    result = _pick_initial_engine(adapter, health, "foo.md", None)
+    assert result[0] == "kimi"
+
+
+def test_pick_initial_engine_routing_rule_burst_expired(
+    minimal_adapter: AdapterConfig,
+) -> None:
+    adapter = minimal_adapter.model_copy(
+        update={
+            "routing_rules": [
+                RoutingRule(if_="*.md", then=RoutingAction(backend="burst"))
+            ]
+        }
+    )
+    health = {}
+    result = _pick_initial_engine(adapter, health, "foo.md", None)
+    assert result[0] == "deepseek"
+
+
+# ── dispatch_packet – engine health corrupt ──────────────────────────────
+
+def test_dispatch_engine_health_corrupt(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_state_files.StateFileCorruptError = StateFileCorruptError
+    mock_state_files.read_engine_health.side_effect = StateFileCorruptError(
+        Path("engine_health.json")
+    )
+    result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "engine_health_corrupt" in result.error
+    mock_db.insert_dispatch.assert_not_called()
+
+
+# ── dispatch_packet – engine selection failed ────────────────────────────
+
+def test_dispatch_engine_selection_failed(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    with patch(
+        "harness.engines.dispatcher._pick_initial_engine",
+        side_effect=RuntimeError("boom"),
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "engine_selection_failed" in result.error
+
+
+# ── dispatch_packet – db insert failed ───────────────────────────────────
+
+def test_dispatch_db_insert_failed(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+    mock_get_engine,
+) -> None:
+    mock_db.insert_dispatch.side_effect = RuntimeError("db locked")
+    result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "db_insert_failed" in result.error
+    assert result.engine_used == "deepseek"
+    assert result.fallback_chain == ["deepseek"]
+    assert result.dispatch_id == ""
+
+
+# ── dispatch_packet – append active dispatch swallowed ───────────────────
+
+def test_dispatch_append_active_dispatch_failure_swallowed(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_get_engine,
+    mock_load_adapter,
+) -> None:
+    mock_state_files.append_active_dispatch.side_effect = RuntimeError("disk full")
+    result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is True
+
+
+# ── dispatch_packet – wave_id status hooks ───────────────────────────────
+
+def test_dispatch_wave_id_status_hooks_success(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_get_engine,
+    mock_load_adapter,
+) -> None:
+    with patch("harness.status.hooks") as mock_hooks:
+        result = dispatch_packet(
+            project="valid-project", packet_path=tmp_packet, wave_id="W1-TEST"
+        )
+    assert result.success is True
+    mock_hooks.on_dispatch_start.assert_called_once_with(
+        task_id="disp-1234", wave_id="W1-TEST", engine="deepseek"
+    )
+    mock_hooks.on_dispatch_complete.assert_called_once_with(
+        task_id="disp-1234", wave_id="W1-TEST", outcome="success"
+    )
+
+
+def test_dispatch_wave_id_hooks_raise_start(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_get_engine,
+    mock_load_adapter,
+) -> None:
+    with patch("harness.status.hooks") as mock_hooks:
+        mock_hooks.on_dispatch_start.side_effect = RuntimeError("boom")
+        result = dispatch_packet(
+            project="valid-project", packet_path=tmp_packet, wave_id="W1-TEST"
+        )
+    assert result.success is True
+    mock_hooks.on_dispatch_complete.assert_called_once_with(
+        task_id="disp-1234", wave_id="W1-TEST", outcome="success"
+    )
+
+
+def test_dispatch_wave_id_hooks_raise_complete(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_get_engine,
+    mock_load_adapter,
+) -> None:
+    with patch("harness.status.hooks") as mock_hooks:
+        mock_hooks.on_dispatch_complete.side_effect = RuntimeError("boom")
+        result = dispatch_packet(
+            project="valid-project", packet_path=tmp_packet, wave_id="W1-TEST"
+        )
+    assert result.success is True
+    mock_hooks.on_dispatch_start.assert_called_once()
+
+
+# ── dispatch_packet – jsonl / db exception swallowing (success path) ─────
+
+def test_dispatch_update_status_failure_swallowed_success(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_get_engine,
+    mock_load_adapter,
+) -> None:
+    mock_db.update_dispatch_status.side_effect = RuntimeError("db locked")
+    result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is True
+
+
+def test_dispatch_jsonl_log_failure_swallowed_success(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_get_engine,
+    mock_load_adapter,
+) -> None:
+    mock_jsonl.write_log_entry.side_effect = RuntimeError("disk full")
+    result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is True
+
+
+def test_dispatch_update_health_failure_swallowed(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+    mock_get_engine,
+) -> None:
+    mock_state_files.update_engine_health.side_effect = RuntimeError("disk full")
+    mock_get_engine.return_value.dispatch.return_value = EngineResponse(
+        success=False, text="", latency_ms=5, error="timeout"
+    )
+    result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "all_fallbacks_exhausted" in result.error
+
+
+# ── dispatch_packet – locked engine + wave_id ────────────────────────────
+
+def test_dispatch_locked_engine_wave_id_hooks(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_state_files.read_engine_health.return_value = {
+        "deepseek": EngineHealth(locked=True),
+    }
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        return_value=MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=7, error="HTTP 503"
+                )
+            )
+        ),
+    ):
+        with patch("harness.status.hooks") as mock_hooks:
+            result = dispatch_packet(
+                project="valid-project", packet_path=tmp_packet, wave_id="W1-TEST"
+            )
+    assert result.success is False
+    assert "locked_engine_failed" in result.error
+    mock_hooks.on_dispatch_start.assert_called_once_with(
+        task_id="disp-1234", wave_id="W1-TEST", engine="deepseek"
+    )
+    mock_hooks.on_dispatch_complete.assert_called_once_with(
+        task_id="disp-1234",
+        wave_id="W1-TEST",
+        outcome="failure",
+        notes="locked_engine_failed: HTTP 503",
+    )
+
+
+def test_dispatch_update_status_failure_locked_engine(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_state_files.read_engine_health.return_value = {
+        "deepseek": EngineHealth(locked=True),
+    }
+    mock_db.update_dispatch_status.side_effect = RuntimeError("db locked")
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        return_value=MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=7, error="HTTP 503"
+                )
+            )
+        ),
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "locked_engine_failed" in result.error
+
+
+def test_dispatch_jsonl_log_failure_locked_engine(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_state_files.read_engine_health.return_value = {
+        "deepseek": EngineHealth(locked=True),
+    }
+    mock_jsonl.write_log_entry.side_effect = RuntimeError("disk full")
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        return_value=MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=7, error="HTTP 503"
+                )
+            )
+        ),
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "locked_engine_failed" in result.error
+
+
+# ── dispatch_packet – all fallbacks exhausted + wave_id ──────────────────
+
+def test_dispatch_all_fallbacks_exhausted_wave_id_hooks(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        return_value=MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=5, error="timeout"
+                )
+            )
+        ),
+    ):
+        with patch("harness.status.hooks") as mock_hooks:
+            result = dispatch_packet(
+                project="valid-project", packet_path=tmp_packet, wave_id="W1-TEST"
+            )
+    assert result.success is False
+    assert "all_fallbacks_exhausted" in result.error
+    mock_hooks.on_dispatch_start.assert_called_once_with(
+        task_id="disp-1234", wave_id="W1-TEST", engine="deepseek"
+    )
+    mock_hooks.on_dispatch_complete.assert_called_once_with(
+        task_id="disp-1234",
+        wave_id="W1-TEST",
+        outcome="failure",
+        notes="all_fallbacks_exhausted: timeout",
+    )
+
+
+def test_dispatch_update_status_failure_all_fallbacks(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_db.update_dispatch_status.side_effect = RuntimeError("db locked")
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        return_value=MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=5, error="timeout"
+                )
+            )
+        ),
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "all_fallbacks_exhausted" in result.error
+
+
+def test_dispatch_jsonl_log_failure_all_fallbacks(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_jsonl.write_log_entry.side_effect = RuntimeError("disk full")
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        return_value=MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=5, error="timeout"
+                )
+            )
+        ),
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is False
+    assert "all_fallbacks_exhausted" in result.error
+
+
+# ── dispatch_packet – fallback step exception swallowing ─────────────────
+
+def test_dispatch_insert_fallback_failure_swallowed(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_db.insert_fallback.side_effect = RuntimeError("db locked")
+    engines = {
+        "deepseek": MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=10, error="HTTP 500"
+                )
+            )
+        ),
+        "kimi": MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=True, text="fallback ok", latency_ms=20, error=None
+                )
+            )
+        ),
+    }
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        side_effect=lambda name: engines[name],
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is True
+    assert result.engine_used == "kimi"
+    assert result.fallback_chain == ["deepseek", "kimi"]
+
+
+def test_dispatch_jsonl_log_failure_fallback(
+    tmp_packet: str,
+    mock_db,
+    mock_state_files,
+    mock_jsonl,
+    mock_load_adapter,
+) -> None:
+    mock_jsonl.write_log_entry.side_effect = RuntimeError("disk full")
+    engines = {
+        "deepseek": MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=False, text="", latency_ms=10, error="HTTP 500"
+                )
+            )
+        ),
+        "kimi": MagicMock(
+            dispatch=MagicMock(
+                return_value=EngineResponse(
+                    success=True, text="fallback ok", latency_ms=20, error=None
+                )
+            )
+        ),
+    }
+    with patch(
+        "harness.engines.dispatcher.get_engine",
+        side_effect=lambda name: engines[name],
+    ):
+        result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    assert result.success is True
+    assert result.engine_used == "kimi"
