@@ -108,6 +108,29 @@ def dispatch(
     sys.exit(1)
 
 
+@cli.command(name="spec-register")
+@click.argument("spec_path", type=click.Path(exists=True, path_type=Path))
+def spec_register_cmd(spec_path: Path) -> None:
+    """Register a spec's SHA256 + author into the provenance log."""
+    from harness.coord.provenance import register
+    entry = register(spec_path)
+    click.echo(f"registered: {entry.spec_path}")
+    click.echo(f"  sha256:    {entry.sha256[:16]}...")
+    click.echo(f"  operator:  {entry.operator}")
+    click.echo(f"  commit:    {entry.git_commit}")
+    click.echo(f"  at:        {entry.registered_at}")
+
+
+@cli.command(name="spec-verify")
+@click.argument("spec_path", type=click.Path(exists=True, path_type=Path))
+def spec_verify_cmd(spec_path: Path) -> None:
+    """Verify a spec's on-disk SHA matches its provenance registration."""
+    from harness.coord.provenance import verify
+    matches, msg = verify(spec_path)
+    click.echo(f"{'OK' if matches else 'MISMATCH'}: {msg}")
+    sys.exit(0 if matches else 1)
+
+
 @cli.group(name="status")
 def status() -> None:
     """Canonical STATUS.csv task tracker (harness primitive #19).

@@ -26,6 +26,7 @@ __all__ = [
     "GitPushFailed",
     "ConfigCorruption",
     "WavePersistentlyFailing",
+    "StateLockTimeout",
     "ALLOWED_DOMAINS",
     "ALLOWED_LEVELS",
 ]
@@ -111,6 +112,13 @@ class EngineRefusal(HarnessError):
     level = 3
     domain = "engines"
     code = "E_ENGINE_REFUSAL"
+
+
+class StateLockTimeout(HarnessError):
+    """Could not acquire an advisory file lock within the configured timeout."""
+    level = 3
+    domain = "state"
+    code = "E_STATE_LOCK_TIMEOUT"
 
 
 # ---------------------------------------------------------------------------
