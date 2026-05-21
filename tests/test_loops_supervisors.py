@@ -30,36 +30,35 @@ def test_run_supervisor_unknown_phase_returns_noop() -> None:
     assert "pending Wave 6/B+" in result.log_summary
 
 
-def test_run_supervisor_creativity_noop() -> None:
+def test_run_supervisor_creativity_real() -> None:
+    """Wave 6/C: real CreativitySupervisor returns phase + result, no NoOp marker."""
     state = LoopState()
     result = run_supervisor("creativity", state, project=Path("/fake"), now=datetime.now(timezone.utc))
     assert result.phase == "creativity"
-    assert result.state_diff == {}
-    assert result.escalation is None
-    assert "pending Wave 6/B+" in result.log_summary
+    assert "pending Wave 6/B+" not in result.log_summary
 
 
-def test_run_supervisor_developing_noop() -> None:
+def test_run_supervisor_developing_real() -> None:
     state = LoopState()
     result = run_supervisor("developing", state, project=Path("/fake"), now=datetime.now(timezone.utc))
     assert result.phase == "developing"
-    assert "pending Wave 6/B+" in result.log_summary
+    assert "pending Wave 6/B+" not in result.log_summary
 
 
-def test_run_supervisor_integrating_noop() -> None:
+def test_run_supervisor_integrating_real() -> None:
     state = LoopState()
     result = run_supervisor("integrating", state, project=Path("/fake"), now=datetime.now(timezone.utc))
     assert result.phase == "integrating"
-    assert "pending Wave 6/B+" in result.log_summary
+    assert "pending Wave 6/B+" not in result.log_summary
 
 
-def test_run_supervisor_process_improvement_noop() -> None:
+def test_run_supervisor_process_improvement_real() -> None:
     state = LoopState()
     result = run_supervisor(
         "process_improvement", state, project=Path("/fake"), now=datetime.now(timezone.utc)
     )
     assert result.phase == "process_improvement"
-    assert "pending Wave 6/B+" in result.log_summary
+    assert "pending Wave 6/B+" not in result.log_summary
 
 
 # ---------------------------------------------------------------------------
