@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -248,6 +249,52 @@ class Coordinator:
             plan_path=self.plan_path,
             worker_summary={wid: str(st.state.value) for wid, st in state.workers.items()},
         )
+
+
+def detect_stalled_workers(
+    run_dir: Path,
+    *,
+    max_silence_seconds: int = 600,
+    now: datetime | None = None,
+) -> list[str]:
+    """Return worker_ids whose heartbeat file is older than max_silence_seconds.
+
+    A missing heartbeat is treated as "no heartbeat yet" — only counts as
+    stalled if the corresponding checkpoint is state="in_progress".
+    """
+    import time
+    from datetime import datetime, timezone
+    from harness.coord.checkpoint import read_checkpoint
+
+    now_dt = now or datetime.now(timezone.utc)
+    stalled: list[str] = []
+    ckpt_dir = run_dir / "checkpoints"
+    if not ckpt_dir.exists():
+        return stalled
+
+    for ckpt_path in sorted(ckpt_dir.glob("*.json")):
+        ckpt = read_checkpoint(ckpt_path)
+        if ckpt is None or ckpt.state != "in_progress":
+            continue
+        hb_path = ckpt_dir / f"{ckpt.worker_id}.heartbeat"
+        if not hb_path.exists():
+            # No heartbeat yet — count as stalled only if checkpoint is
+            # also older than the silence window (otherwise it might just
+            # have just started)
+            try:
+                age = now_dt.timestamp() - ckpt_path.stat().st_mtime
+            except OSError:
+                age = 0
+            if age > max_silence_seconds:
+                stalled.append(ckpt.worker_id)
+            continue
+        try:
+            hb_age = now_dt.timestamp() - hb_path.stat().st_mtime
+        except OSError:
+            continue
+        if hb_age > max_silence_seconds:
+            stalled.append(ckpt.worker_id)
+    return stalled
 
 
 # ---------------------------------------------------------------------------

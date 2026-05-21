@@ -2,16 +2,16 @@
 
 You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope. Don't update warehouse's STATUS.csv; don't dispatch warehouse work. See `feedback_multi_session_scoping.md`.
 
-## Current state — v0.4 (v1 + v2 architecture both complete)
+## Current state — v0.5 (v2 production-hardened + Phase-5 operator UX layered on top)
 
 **v1 core** (single-Claude dev manager, in-session orchestration):
 
 | Component | Files |
 |---|---|
 | Adapter schema, loader, NL→YAML | [src/harness/adapters/](src/harness/adapters/) |
-| CLI — 22 top-level verbs | [src/harness/cli.py](src/harness/cli.py) |
-| Engine ABC + 4 concrete (kimi/deepseek/anthropic/gemini) + auto-fallback | [src/harness/engines/](src/harness/engines/) |
-| State layer (JSON + SQLite + JSONL+redact) | [src/harness/state/](src/harness/state/) |
+| CLI — 22 top-level verbs (60+ subcommands incl. coord/observer/proxy/session/loop/budget/heartbeat/state/engines) | [src/harness/cli.py](src/harness/cli.py) |
+| Engine ABC + 5 concrete (kimi/deepseek/anthropic/gemini/mock) + auto-fallback (mock excluded from prod chain) | [src/harness/engines/](src/harness/engines/) |
+| State layer (JSON + SQLite + JSONL+redact; lazy init_db) | [src/harness/state/](src/harness/state/) |
 | DPAPI secrets | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
 | HarnessError L1-L5 taxonomy | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
 | Operator-modes (7 CLI flags + 11 YAML keys + OperatorSection) | [src/harness/operator/](src/harness/operator/), [spec/operator-modes.md](spec/operator-modes.md) |
@@ -29,13 +29,21 @@ You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM
 | Component | Files |
 |---|---|
 | **Spec** | [spec/multi-agent-harness-architecture.md](spec/multi-agent-harness-architecture.md) |
-| v2/A — Stateful 4-key proxy + circuit breaker | [src/harness/proxy/](src/harness/proxy/) |
-| v2/B — Coord schemas (WavePlan/WorkerTask/...) + Planner | [src/harness/coord/schemas.py](src/harness/coord/schemas.py), [src/harness/coord/planner.py](src/harness/coord/planner.py) |
-| v2/C — Worker + worktree + checkpoint | [src/harness/coord/worker.py](src/harness/coord/worker.py), [src/harness/coord/worktree.py](src/harness/coord/worktree.py), [src/harness/coord/checkpoint.py](src/harness/coord/checkpoint.py) |
-| v2/D — Coordinator + Integrator + `harness coord` CLI (6 subcommands: plan/run/work/integrate/status/cleanup) | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py) |
+| v2/A — Stateful 4-key proxy + circuit breaker + auto-quarantine on flap | [src/harness/proxy/](src/harness/proxy/) |
+| v2/B — Coord schemas + Planner + replan-from-failure + plan-from-NL | [src/harness/coord/schemas.py](src/harness/coord/schemas.py), [src/harness/coord/planner.py](src/harness/coord/planner.py) |
+| v2/C — Worker + worktree + checkpoint + progress-stream + heartbeat | [src/harness/coord/worker.py](src/harness/coord/worker.py), [src/harness/coord/worktree.py](src/harness/coord/worktree.py), [src/harness/coord/checkpoint.py](src/harness/coord/checkpoint.py) |
+| v2/D — Coordinator + Integrator + canceller + notify hook + `harness coord` CLI (12 subcommands) | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py), [src/harness/coord/canceller.py](src/harness/coord/canceller.py), [src/harness/coord/notify.py](src/harness/coord/notify.py) |
+| v2/E — Operator UX: dashboard /v2/* JSON + HTML detail + cost panel + WS embed | [src/harness/dashboard/v2_routes.py](src/harness/dashboard/v2_routes.py), [src/harness/dashboard/app.py](src/harness/dashboard/app.py) |
+| v2/F — Production hardening: MockEngine + V2-FIRST-RUN smoke + budget meter wired to worker telemetry | [src/harness/engines/mock.py](src/harness/engines/mock.py), [tests/test_coord_smoke_e2e.py](tests/test_coord_smoke_e2e.py) |
+| Operator-config sub-schemas (session_handoff / kill_conditions / production_hygiene_balance) | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
+| Spec lint (pre-flight) | [src/harness/lint.py](src/harness/lint.py) |
+| Replay (extended to v2 coord runs) | [src/harness/replay.py](src/harness/replay.py) |
+| Chat observer (meta-audit of session transcript) | [src/harness/observer/chat.py](src/harness/observer/chat.py) |
 
-Smoke test (22 verbs, 10 groups with subcommands): `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
-Tests: 711/712 green (1 known Windows-concurrency flake in test_state_files).
+`harness coord` subcommands: `plan`, `plan-from-description`, `run`, `work`, `retry`, `rerun-failed`, `integrate`, `replan`, `status`, `watch`, `list`, `cancel`, `cleanup`.
+
+Smoke test: `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
+Tests: 990/990 green as of commit `c0c156a` (2026-05-21).
 
 ## Operator authority + escalation (load-bearing)
 

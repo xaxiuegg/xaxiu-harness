@@ -48,10 +48,10 @@ harness <verb> --help
 | `adapter` | `from-description`, `list`, `validate` | Create or check project adapters (YAML configs that tell harness how to talk to each project). |
 | `budget` | `show`, `summary`, `set-cap`, `reset` | Track spending per engine and set monthly spending limits. |
 | `burst` | — | Temporarily send all traffic to one engine for a set number of minutes. |
-| `coord` | `plan`, `run`, `work`, `integrate`, `status`, `watch`, `list`, `cleanup` | Run the multi-agent coordinator: plan a wave, run workers, merge results, live-tail events, list runs, GC stale worktrees. |
+| `coord` | `plan`, `plan-from-description`, `run`, `work`, `retry`, `integrate`, `replan`, `status`, `watch`, `list`, `cancel`, `cleanup` | Run the multi-agent coordinator: plan a wave (from spec OR natural language), run workers, retry failed ones, merge results, live-tail events, list runs, cancel in-flight, GC stale worktrees. |
 | `dashboard-serve` | — | Launch the operator web dashboard (default port 7878). |
 | `dispatch` | — | Send a work packet to an engine; auto-routes if you do not pick one. |
-| `engines` | — | List engines or check which ones are healthy. |
+| `engines` | `cooldowns` | List engines + active cooldown windows from state.json. |
 | `env` | — | Show which API keys are set (Kimi, DeepSeek, Anthropic, Gemini). |
 | `heartbeat` | `pulse`, `show` | Emit or view a "still alive" signal from the dev loop. |
 | `init` | — | Create a starter adapter YAML for a new project. |

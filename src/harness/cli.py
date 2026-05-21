@@ -554,6 +554,35 @@ def dashboard_serve(port: int, host: str) -> None:
     serve(host=host, port=port)
 
 
+@cli.command(name="lint-spec")
+@click.argument("spec_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
+def lint_spec_cmd(spec_path: Path, fmt: str) -> None:
+    """Pre-flight: validate a markdown spec for plan-readiness."""
+    import dataclasses
+    from harness.lint import lint_spec, is_plan_ready
+
+    findings = lint_spec(spec_path)
+    ready = is_plan_ready(findings)
+
+    if fmt == "json":
+        click.echo(json.dumps({
+            "spec_path": str(spec_path),
+            "plan_ready": ready,
+            "findings": [dataclasses.asdict(f) for f in findings],
+        }, indent=2))
+    else:
+        click.echo(f"spec: {spec_path}")
+        click.echo(f"plan_ready: {ready}")
+        for f in findings:
+            click.echo(f"  [{f.severity}] {f.code}: {f.message}")
+        if not findings:
+            click.echo("  (no findings)")
+
+    # Exit 1 if any error-severity finding exists; exit 0 on warn-only / clean
+    sys.exit(0 if ready else 1)
+
+
 @cli.command()
 @click.option("--project", "-p", help="Project name.")
 @click.option("--add", help="Add loop: NAME::COMMAND::CRON")
@@ -1353,6 +1382,52 @@ def coord_replan(run_id: str, engine: str, new_run_id: str | None) -> None:
     out = write_plan(waveplan, new_dir)
     click.echo(f"replan: new plan.json at {out} (run_id={waveplan.run_id})")
     click.echo(f"  {len(waveplan.tasks)} task(s); planner_engine={waveplan.planner_engine}")
+
+
+@coord_group.command(name="rerun-failed")
+@click.option("--run-id", required=True, help="Run ID of the failed run.")
+@click.option("--engine", default="claude", help="Planner engine for replan.")
+@click.option("--worker-engine", default="swarm/kimi-api",
+              help="Engine for the new workers.")
+@click.option("--auto-integrate", is_flag=True,
+              help="Also run integrate after the new workers complete.")
+def coord_rerun_failed(run_id: str, engine: str, worker_engine: str,
+                       auto_integrate: bool) -> None:
+    """Chain replan → run → (optional) integrate for a failed run."""
+    from harness.coord.planner import replan_from_run, write_plan
+    from harness.coord.coordinator import Coordinator
+    from harness.coord.integrator import integrate
+
+    failed_dir = Path("runs") / run_id
+    if not failed_dir.exists():
+        click.echo(f"error: no such run {run_id}", err=True)
+        sys.exit(1)
+
+    # Step 1: replan
+    try:
+        new_plan = replan_from_run(failed_dir, engine=engine)
+    except FileNotFoundError as exc:
+        click.echo(f"error during replan: {exc}", err=True)
+        sys.exit(1)
+    new_run_dir = Path("runs") / new_plan.run_id
+    write_plan(new_plan, new_run_dir)
+    click.echo(f"replan: new run_id={new_plan.run_id} with {len(new_plan.tasks)} task(s)")
+
+    # Step 2: coord.tick — pass the original spec path from the new plan
+    coord = Coordinator(run_id=new_plan.run_id, run_dir=new_run_dir)
+    report = coord.tick(Path(new_plan.spec_path))
+    click.echo(f"run: state={report.state.value}")
+    for wid, st in (report.worker_summary or {}).items():
+        click.echo(f"  {wid}: {st}")
+
+    if not auto_integrate:
+        sys.exit(0 if report.state.value in ("completed", "running") else 1)
+
+    # Step 3: integrate (only when --auto-integrate)
+    irep = integrate(new_run_dir)
+    click.echo(f"integrate: success={irep.success} merged={len(irep.workers_merged)} "
+               f"conflicted={len(irep.workers_conflicted)}")
+    sys.exit(0 if irep.success else 1)
 
 
 @coord_group.command(name="run")

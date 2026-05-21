@@ -29,6 +29,20 @@ def _append_progress(run_dir: Path, worker_id: str, event: dict) -> None:
         pass
 
 
+def _heartbeat_touch(run_dir: Path, worker_id: str) -> None:
+    """Update mtime on checkpoints/<wid>.heartbeat sentinel.  Best-effort."""
+    try:
+        hb_path = run_dir / "checkpoints" / f"{worker_id}.heartbeat"
+        hb_path.parent.mkdir(parents=True, exist_ok=True)
+        hb_path.touch(exist_ok=True)
+        # Force mtime update even if file existed
+        import os, time
+        now = time.time()
+        os.utime(hb_path, (now, now))
+    except Exception:
+        pass
+
+
 def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> dict[str, Any]:
     """Run pytest on *test_set* and return a summary dict."""
     if not test_set:
@@ -196,6 +210,7 @@ def run_worker(
     idx = start_idx - 1
     for idx in range(start_idx, len(task_obj.steps)):
         step = task_obj.steps[idx]
+        _heartbeat_touch(run_dir, task_obj.worker_id)
         _append_progress(run_dir, task_obj.worker_id, {
             "event": "step_start", "step_id": step.step_id,
             "kind": step.kind, "idx": idx,
@@ -208,6 +223,7 @@ def run_worker(
             packet_path.parent.mkdir(parents=True, exist_ok=True)
             packet_path.write_text(prompt, encoding="utf-8")
             try:
+                _heartbeat_touch(run_dir, task_obj.worker_id)
                 result = dispatch_packet(
                     project="harness-worker",
                     packet_path=str(packet_path),
@@ -216,6 +232,7 @@ def run_worker(
             finally:
                 packet_path.unlink(missing_ok=True)
 
+            _heartbeat_touch(run_dir, task_obj.worker_id)
             if result.success and result.text.strip():
                 edits = _parse_file_edits(result.text)
                 if edits:
