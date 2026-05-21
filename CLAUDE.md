@@ -2,24 +2,28 @@
 
 You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope. Don't update warehouse's STATUS.csv; don't dispatch warehouse work. See `feedback_multi_session_scoping.md`.
 
-## Current state — v0.3.x (in active dev loop)
+## Current state — v0.3.x (active dev loop)
 
 | Component | Status | Files |
 |---|---|---|
 | Adapter schema (Pydantic v2) | Done | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
-| CLI verbs (Wave A) | Done — 13 verbs wired or with explicit pending messages | [src/harness/cli.py](src/harness/cli.py) |
+| CLI verbs (Wave A) | Done — 13 top-level verbs; `status` is now a group with 7 subcommands | [src/harness/cli.py](src/harness/cli.py) |
 | Engine ABC + 3 concrete impls | Done | [src/harness/engines/](src/harness/engines/) |
-| Auto-fallback orchestrator | Done | [src/harness/engines/dispatcher.py](src/harness/engines/dispatcher.py) |
+| Auto-fallback orchestrator | Done — with optional wave_id-gated STATUS hooks | [src/harness/engines/dispatcher.py](src/harness/engines/dispatcher.py) |
 | State layer (JSON + SQLite + JSONL+redact) | Done | [src/harness/state/](src/harness/state/) |
 | DPAPI secrets (Windows-only v0.x) | Done | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
 | **HarnessError taxonomy (Wave A.5)** | **Done** — L1-L5 levels × domain × code | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
 | **Operational raises retrofit (Wave A.6)** | **Done** — 4 raises in jsonl_log + dpapi | (in respective modules) |
-| Boundary tests + CI (Wave B) | Partial — CI live in [.github/workflows/test.yml](.github/workflows/test.yml); test files queued | (in flight) |
-| **Operator-modes config surface (Wave 7)** | **Spec done** — Kimi packet queued | [spec/operator-modes.md](spec/operator-modes.md) |
-| Dashboard (Wave 3), Installer (Wave 4), Templates+NL→YAML (Wave 5) | Planned | — |
-| Productized autonomous loops (Wave 6) | Planned — see [coord/dev_loop/](coord/dev_loop/) prototype | — |
+| Boundary tests + CI (Wave B/B.2) | Done — 305/305 tests; coverage 85% TOTAL | (across modules) |
+| **Operator-modes config surface (Wave 7/A+B)** | **Done** — 7/C polish queued | [spec/operator-modes.md](spec/operator-modes.md), [src/harness/operator/](src/harness/operator/) |
+| Wave 4 — Windows installer | Done | [bin/install-harness.ps1](bin/install-harness.ps1) |
+| **STATUS tracker primitive (#19, Wave 5.5)** | **Done** — `harness status` group, atomic writes, dispatcher hooks | [src/harness/status/](src/harness/status/), [spec/status-tracker.md](spec/status-tracker.md) |
+| **Observer primitive (#20, Wave 5.6)** | **In flight** — bq1ydqn3l (2026-05-21T00:52Z) | [spec/observer.md](spec/observer.md) |
+| Wave 5 — Templates + NL→YAML | Queued | [coord/packets/2026-05-20-wave5A-template-refresh/](coord/packets/2026-05-20-wave5A-template-refresh/), [coord/packets/2026-05-20-wave5B-nl-to-yaml/](coord/packets/2026-05-20-wave5B-nl-to-yaml/) |
+| Wave 3 — Dashboard | Planned | — |
+| Wave 6 — Productize autonomous loops | Planned | [coord/dev_loop/](coord/dev_loop/) prototype |
 
-Smoke test: `PYTHONPATH=src python -c "from harness import cli; print(sorted(cli.cli.commands.keys()))"` — should list 13 verbs.
+Smoke test: `PYTHONPATH=src python -c "from harness import cli; print(sorted(cli.cli.commands.keys()))"` — should list 13 verbs; `cli.cli.commands['status'].commands` should list `add init list report summary update verify`.
 
 ## Operator authority + escalation (load-bearing)
 
