@@ -1756,10 +1756,25 @@ def coord_rerun_failed(run_id: str, engine: str, worker_engine: str,
 @click.option("--engine", default=None,
               help="Engine identifier passed to each worker (e.g. swarm/kimi, swarm/kimi-api, swarm/deepseek). "
                    "When omitted, the worker subcommand default applies.")
+@click.option("--watch", is_flag=True,
+              help="Keep ticking the coordinator until the run reaches "
+                   "completed/failed.  Required for unattended overnight runs.")
+@click.option("--watch-interval", default=5, type=int,
+              help="Seconds between ticks in --watch mode (default 5).")
+@click.option("--watch-max-seconds", default=3600, type=int,
+              help="Hard cap on total --watch duration (default 1h).")
 def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
               proxy: str, label: str | None, dry_run: bool,
-              engine: str | None) -> None:
-    """Execute a coordination run (single tick)."""
+              engine: str | None, watch: bool, watch_interval: int,
+              watch_max_seconds: int) -> None:
+    """Execute a coordination run.
+
+    By default this performs a single tick of the coordinator state machine
+    (PLANNING -> RUNNING -> workers -> INTEGRATING -> DONE).  Pass
+    ``--watch`` to keep ticking until the run reaches a terminal state --
+    required for unattended overnight runs where the operator isn't
+    sitting at the keyboard issuing ``--resume`` ticks by hand.
+    """
     from harness.coord.coordinator import Coordinator
     from harness.coord.planner import _new_run_id, plan as run_planner
     from harness.coord.run_state import read_run_state
@@ -1823,6 +1838,78 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
         if report.worker_summary:
             for wid, st in report.worker_summary.items():
                 click.echo(f"  {wid}: {st}")
+
+        # --- W5-B 2026-05-22: --watch mode loops until terminal -----------
+        # Without --watch the operator must invoke `coord run --resume` for
+        # every state transition (PLANNING -> RUNNING -> workers spawn ->
+        # poll -> INTEGRATING -> DONE).  With --watch we hold this loop
+        # ourselves and fire the integrator automatically when the run
+        # reaches INTEGRATING, so a single command survives an unattended
+        # overnight.
+        if watch:
+            import time as _time
+            from harness.coord.integrator import integrate as _integrate
+            from harness.coord.run_state import write_run_state, read_run_state as _read_run_state
+            from harness.coord.schemas import RunStateLiteral
+
+            terminal_states = {"completed", "failed", "done", "aborted"}
+            deadline = _time.monotonic() + watch_max_seconds
+            last_state = report.state.value
+            integrate_fired = False
+
+            while last_state not in terminal_states:
+                if _time.monotonic() > deadline:
+                    click.echo(
+                        f"watch: max-seconds={watch_max_seconds} reached; "
+                        f"last state={last_state}", err=True)
+                    sys.exit(2)
+
+                # Fire integrator exactly once when we reach INTEGRATING
+                if last_state == "integrating" and not integrate_fired:
+                    integrate_fired = True
+                    click.echo("watch: firing integrator")
+                    report_int = _integrate(
+                        run_dir=run_dir, project_root=Path("."),
+                        merge_workers=True, auto_commit=False, auto_push=False,
+                    )
+                    click.echo(
+                        f"watch: integrator success={report_int.success} "
+                        f"merged={report_int.workers_merged} "
+                        f"skipped={report_int.workers_skipped} "
+                        f"conflicted={report_int.workers_conflicted}")
+                    if report_int.diagnostic:
+                        click.echo(f"watch: {report_int.diagnostic}")
+
+                    # Reflect integrator outcome into run_state so the next
+                    # tick observes a terminal state and exits.
+                    st = _read_run_state(run_dir / "run_state.json")
+                    if st is not None:
+                        st.state = (RunStateLiteral.COMPLETED if report_int.success
+                                    else RunStateLiteral.FAILED)
+                        write_run_state(run_dir / "run_state.json", st)
+                    last_state = "completed" if report_int.success else "failed"
+                    click.echo(f"run {rid}: integrating -> {last_state}")
+                    break
+
+                _time.sleep(max(1, watch_interval))
+                coord = Coordinator(run_id=rid, run_dir=run_dir, label=label)
+                report = coord.tick(spec, in_flight_limit=limit, engine=engine)
+                if report.state.value != last_state:
+                    click.echo(
+                        f"run {report.run_id}: {last_state} -> "
+                        f"{report.state.value}")
+                    last_state = report.state.value
+                    # Print worker summary only on state transition (not
+                    # every tick — pre-W5-B the log was a flood of identical
+                    # `worker-1: failed` lines).
+                    if report.worker_summary:
+                        for wid, st in report.worker_summary.items():
+                            click.echo(f"  {wid}: {st}")
+
+            click.echo(f"run {report.run_id if report else rid}: "
+                       f"terminal state={last_state}")
+            sys.exit(0 if last_state in {"completed", "done"} else 1)
+
         sys.exit(0 if report.state.value in ("completed", "running") else 1)
     finally:
         if proxy_proc is not None:

@@ -140,13 +140,21 @@ def _mimo_pricing_row(*, base: str) -> str:
     return base
 
 
+_KNOWN_FREE_ENGINES = frozenset({"mock", "mock-engine", "mockengine"})
+
+
 def _compute_cost(engine: str, input_tokens: int, output_tokens: int) -> float:
     pricing = _load_pricing()
     canonical = _normalize_engine(engine)
     table = pricing.get(canonical)
     if table is None:
-        logger.warning("Unknown engine %r (normalized %r); recording cost=0",
-                       engine, canonical)
+        # W5-G 2026-05-22: 'mock' is a documented free pseudo-engine used
+        # by the v2 coord smoke test; warning on every dispatch was pure
+        # noise.  Stay silent for the documented free engines, warn only
+        # when something genuinely unknown shows up.
+        if canonical not in _KNOWN_FREE_ENGINES:
+            logger.warning("Unknown engine %r (normalized %r); recording cost=0",
+                           engine, canonical)
         return 0.0
     input_cost = (input_tokens / 1_000_000) * table.get("input", 0.0)
     output_cost = (output_tokens / 1_000_000) * table.get("output", 0.0)
