@@ -91,6 +91,30 @@ def _merge_worker_branches(
     return merged, skipped, conflicted, ""
 
 
+DEFAULT_PYTEST_TIMEOUT_SEC: int = 600
+
+
+def _resolve_pytest_timeout(explicit: int | None) -> int:
+    """Pick the pytest timeout: explicit arg > env var > 600s default.
+
+    WIRE-INTEGRATOR-TIMEOUT (2026-05-22): battle-test 2026-05-21 showed
+    the legacy 120s default was below the actual ~157s suite duration.
+    Default is now 600s; operators can shrink for dev loops via
+    HARNESS_INTEGRATOR_PYTEST_TIMEOUT.
+    """
+    if explicit is not None and explicit > 0:
+        return explicit
+    env = os.environ.get("HARNESS_INTEGRATOR_PYTEST_TIMEOUT", "").strip()
+    if env:
+        try:
+            value = int(env)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return DEFAULT_PYTEST_TIMEOUT_SEC
+
+
 def integrate(
     run_dir: Path,
     *,
@@ -98,6 +122,7 @@ def integrate(
     auto_commit: bool = False,
     auto_push: bool = False,
     merge_workers: bool = True,
+    pytest_timeout: int | None = None,
 ) -> IntegrationReport:
     """Integrate a completed run: merge worker branches, run tests, optionally commit + push.
 
@@ -157,6 +182,7 @@ def integrate(
 
     # Run pytest and collect summary
     test_summary: dict[str, int] = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+    resolved_timeout = _resolve_pytest_timeout(pytest_timeout)
     try:
         proc = subprocess.run(
             ["python", "-m", "pytest", "-q", "--tb=no"],
@@ -164,7 +190,7 @@ def integrate(
             capture_output=True,
             text=True,
             check=False,
-            timeout=120,
+            timeout=resolved_timeout,
         )
         # Parse summary line like "2 passed, 1 failed, 3 skipped in 0.01s"
         for line in proc.stdout.splitlines():

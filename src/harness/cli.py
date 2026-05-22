@@ -1850,11 +1850,17 @@ def coord_retry(run_id: str, worker_id: str, engine: str) -> None:
 @click.option("--project-root", default=".", type=click.Path(path_type=Path))
 @click.option("--commit", is_flag=True)
 @click.option("--push", is_flag=True)
-def coord_integrate(run_id: str, project_root: Path, commit: bool, push: bool) -> None:
+@click.option("--pytest-timeout", default=None, type=int,
+              help="Seconds before the integrator pytest run is killed. "
+                   "Falls back to HARNESS_INTEGRATOR_PYTEST_TIMEOUT env, "
+                   "then 600s default.")
+def coord_integrate(run_id: str, project_root: Path, commit: bool, push: bool,
+                    pytest_timeout: int | None) -> None:
     """Integrate a completed run: tests, commit, push."""
     from harness.coord.integrator import integrate
     run_dir = Path("runs") / run_id
-    report = integrate(run_dir, project_root=project_root, auto_commit=commit, auto_push=push)
+    report = integrate(run_dir, project_root=project_root, auto_commit=commit,
+                       auto_push=push, pytest_timeout=pytest_timeout)
     click.echo(f"integrate: success={report.success} commit={report.commit_sha} pushed={report.pushed}")
     if report.diagnostic:
         click.echo(f"  diagnostic: {report.diagnostic}")

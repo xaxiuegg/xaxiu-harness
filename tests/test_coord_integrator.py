@@ -244,3 +244,54 @@ def test_integrate_skips_uncompleted_workers(tmp_path: Path) -> None:
     assert report.workers_merged == []
     assert report.workers_skipped == ["worker-1"]
     assert report.workers_conflicted == []
+
+
+# ---------------------------------------------------------------------------
+# WIRE-INTEGRATOR-TIMEOUT (2026-05-22) — D8
+# ---------------------------------------------------------------------------
+
+def test_resolve_pytest_timeout_uses_explicit_arg() -> None:
+    from harness.coord.integrator import _resolve_pytest_timeout
+    assert _resolve_pytest_timeout(900) == 900
+
+
+def test_resolve_pytest_timeout_uses_env_when_no_explicit(monkeypatch) -> None:
+    from harness.coord.integrator import _resolve_pytest_timeout
+    monkeypatch.setenv("HARNESS_INTEGRATOR_PYTEST_TIMEOUT", "1200")
+    assert _resolve_pytest_timeout(None) == 1200
+
+
+def test_resolve_pytest_timeout_falls_back_to_default(monkeypatch) -> None:
+    from harness.coord.integrator import _resolve_pytest_timeout, DEFAULT_PYTEST_TIMEOUT_SEC
+    monkeypatch.delenv("HARNESS_INTEGRATOR_PYTEST_TIMEOUT", raising=False)
+    assert _resolve_pytest_timeout(None) == DEFAULT_PYTEST_TIMEOUT_SEC
+    assert DEFAULT_PYTEST_TIMEOUT_SEC >= 600  # the post-battle-test floor
+
+
+def test_resolve_pytest_timeout_ignores_invalid_env(monkeypatch) -> None:
+    from harness.coord.integrator import _resolve_pytest_timeout, DEFAULT_PYTEST_TIMEOUT_SEC
+    monkeypatch.setenv("HARNESS_INTEGRATOR_PYTEST_TIMEOUT", "not-a-number")
+    assert _resolve_pytest_timeout(None) == DEFAULT_PYTEST_TIMEOUT_SEC
+
+
+def test_resolve_pytest_timeout_ignores_zero_and_negative(monkeypatch) -> None:
+    from harness.coord.integrator import _resolve_pytest_timeout, DEFAULT_PYTEST_TIMEOUT_SEC
+    monkeypatch.delenv("HARNESS_INTEGRATOR_PYTEST_TIMEOUT", raising=False)
+    assert _resolve_pytest_timeout(0) == DEFAULT_PYTEST_TIMEOUT_SEC
+    assert _resolve_pytest_timeout(-1) == DEFAULT_PYTEST_TIMEOUT_SEC
+
+
+@patch("harness.coord.integrator.subprocess.run")
+def test_integrate_passes_timeout_to_subprocess_run(mock_run, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("HARNESS_INTEGRATOR_PYTEST_TIMEOUT", raising=False)
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    _make_run_state(run_dir)
+    mock_run.return_value = MagicMock(stdout="1 passed in 0.01s", returncode=0)
+    integrate(run_dir, pytest_timeout=750)
+    # Find the pytest invocation and assert its timeout
+    pytest_calls = [c for c in mock_run.call_args_list
+                    if c.args and isinstance(c.args[0], list)
+                    and "pytest" in c.args[0]]
+    assert pytest_calls, "no pytest subprocess call observed"
+    assert pytest_calls[0].kwargs.get("timeout") == 750
