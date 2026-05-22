@@ -1433,6 +1433,80 @@ def budget_summary_cmd(since: str | None, since_days: int | None) -> None:
     sys.exit(0)
 
 
+@budget_group.command(name="by-run")
+@click.option("--since", default=None,
+              help="ISO-8601 timestamp lower bound (e.g. 2026-05-22T00:00:00Z).")
+@click.option("--since-days", type=int, default=None,
+              help="Look back N days (mutually exclusive with --since).")
+@click.option("--top", type=int, default=20,
+              help="Show only the top N most-expensive runs (default 20).")
+def budget_by_run(since: str | None, since_days: int | None, top: int) -> None:
+    """Per-run cost rollup using W4-K token tracking.
+
+    Groups ledger entries by `task_id` (which is the coord run-id for
+    worker-spawned dispatches) and shows tokens + cost per run.  Useful
+    for "did this overnight run blow my budget?" answer.
+    """
+    if since is not None and since_days is not None:
+        raise click.UsageError("--since and --since-days are mutually exclusive")
+    if since_days is not None and since_days < 1:
+        raise click.BadParameter("--since-days must be >= 1",
+                                 param_hint="'--since-days'")
+
+    entries = read_ledger(DEFAULT_LEDGER_PATH)
+    if since_days is not None:
+        threshold = datetime.now(timezone.utc) - timedelta(days=since_days)
+        threshold_iso = threshold.isoformat()
+        entries = [e for e in entries if e.timestamp >= threshold_iso]
+    elif since is not None:
+        entries = [e for e in entries if e.timestamp >= since]
+
+    if not entries:
+        click.echo("(no dispatches in range)")
+        sys.exit(0)
+
+    # Group by task_id; aggregate engine, dispatches, tokens, cost
+    by_run: dict[str, dict] = {}
+    for e in entries:
+        agg = by_run.setdefault(e.task_id, {
+            "engines": set(), "dispatches": 0,
+            "in_tokens": 0, "out_tokens": 0, "cost_usd": 0.0,
+        })
+        agg["engines"].add(e.engine)
+        agg["dispatches"] += 1
+        agg["in_tokens"] += e.input_tokens
+        agg["out_tokens"] += e.output_tokens
+        agg["cost_usd"] += e.cost_usd
+
+    # Sort: most expensive first
+    rows = sorted(by_run.items(), key=lambda kv: -kv[1]["cost_usd"])[:top]
+    click.echo(f"{'task_id':38} {'engines':18} {'dispatches':>10} "
+               f"{'in':>8} {'out':>8} {'cost':>10}")
+    grand_total_cost = 0.0
+    grand_total_in = 0
+    grand_total_out = 0
+    for task_id, agg in rows:
+        engines_str = ",".join(sorted(agg["engines"]))[:18]
+        click.echo(f"{task_id:38} {engines_str:18} "
+                   f"{agg['dispatches']:>10} "
+                   f"{agg['in_tokens']:>8} {agg['out_tokens']:>8} "
+                   f"${agg['cost_usd']:>9.6f}")
+        grand_total_cost += agg["cost_usd"]
+        grand_total_in += agg["in_tokens"]
+        grand_total_out += agg["out_tokens"]
+
+    # Footer with sum across shown rows + full-range total
+    click.echo("-" * 96)
+    full_range_total = sum(a["cost_usd"] for a in by_run.values())
+    click.echo(f"{'(top ' + str(len(rows)) + ')':38} {'':18} "
+               f"{'':10} {grand_total_in:>8} {grand_total_out:>8} "
+               f"${grand_total_cost:>9.6f}")
+    if len(by_run) > top:
+        click.echo(f"({len(by_run) - top} more runs not shown)  "
+                   f"full-range total: ${full_range_total:.6f}")
+    sys.exit(0)
+
+
 @budget_group.command(name="set-cap")
 @click.argument("amount_usd", type=float)
 def budget_set_cap(amount_usd: float) -> None:
