@@ -784,6 +784,42 @@ def engines(subcmd: str | None, list_: bool, health: bool) -> None:
     sys.exit(0)
 
 
+@cli.command(name="engines-reliability")
+@click.option("--publish", is_flag=True,
+              help="Write coord/engine_reliability.json from latest campaigns.")
+def engines_reliability(publish: bool) -> None:
+    """Show / publish engine reliability ranking from campaign data.
+
+    W5-C 2026-05-22: aggregates W4-G campaign outputs into a parseable-rate
+    ranking per engine.  The dispatcher consults this at fallback-time to
+    prefer engines that have shown empirical reliability over the
+    hardcoded chain.
+    """
+    from harness.engines.reliability import (
+        aggregate_campaigns, publish as publish_digest, load_published,
+    )
+
+    if publish:
+        out = publish_digest()
+        click.echo(f"published reliability digest to {out}")
+        # fall through to display it
+
+    digest = aggregate_campaigns() if not publish else load_published()
+    if digest is None or not digest.ranking:
+        click.echo("(no reliability data yet — run scripts/multi_agent_coverage.py)",
+                   err=True)
+        sys.exit(1 if not publish else 0)
+
+    click.echo(f"# engine reliability  (campaigns={len(digest.source_campaigns)})")
+    click.echo(f"{'engine':10} {'model':22} {'ok':>4} {'fail':>4} "
+               f"{'rate':>6} {'avg_lat_ms':>10}")
+    for r in digest.ranking:
+        click.echo(f"{r.engine:10} {(r.model or ''):22} "
+                   f"{r.ok:>4} {r.fail:>4} "
+                   f"{r.parseable_rate:>5.1%} {r.avg_latency_ms:>10}")
+    sys.exit(0)
+
+
 @cli.command(name="engines-cooldowns")
 def engines_cooldowns() -> None:
     """Show active engine cooldowns."""
