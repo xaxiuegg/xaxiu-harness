@@ -87,8 +87,10 @@ class TestStatusRowSchema:
             StatusRow(**self._minimal(title="x" * 201))
 
     def test_oversized_notes_rejected(self) -> None:
+        # max_length raised 1000→4000 on 2026-05-22 to accommodate
+        # verbose multi-engine defect logs from battle tests.
         with pytest.raises(ValidationError):
-            StatusRow(**self._minimal(notes="x" * 1001))
+            StatusRow(**self._minimal(notes="x" * 4001))
 
     def test_invalid_status_rejected(self) -> None:
         with pytest.raises(ValidationError):

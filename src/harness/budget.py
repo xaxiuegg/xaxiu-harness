@@ -37,6 +37,23 @@ PRICING_USD_PER_M_TOKENS: Final[dict[str, dict[str, float]]] = {
     "anthropic-opus":  {"input": 15.0,  "output": 75.0},   # Claude Opus
     "gemini":          {"input": 0.075, "output": 0.30},   # Gemini 2.0 Flash
     "gemini-pro":      {"input": 1.25,  "output": 5.00},   # Gemini 2.5 Pro
+    # Xiaomi MiMo Open Platform — Overseas API rates, ≤256K context slice
+    # (platform.xiaomimimo.com/docs/en-US/pricing, verified 2026-05-22).
+    # These are cache-miss rates for input; cache hits are ~5x cheaper
+    # (Pro: $0.20 hit / $1.00 miss; Standard: $0.08 hit / $0.40 miss).
+    # The harness records cache-miss conservatively; refine when we
+    # plumb cache-hit telemetry.
+    #
+    # Token Plan subscription (``tp-`` key prefix) maps to the ``-sub``
+    # rows so credit-based dispatches cost $0 in the per-token ledger.
+    # Actual credit burn (Pro=2x, Standard=1x) is tracked separately if
+    # the operator wires a credits sub-ledger.
+    "mimo":            {"input": 0.40,  "output": 2.00},   # MiMo V2.5 std (≤256K cache-miss)
+    "mimo-pro":        {"input": 1.00,  "output": 3.00},   # MiMo V2.5-Pro (≤256K cache-miss)
+    "mimo-long":       {"input": 0.80,  "output": 4.00},   # MiMo V2.5 std (256K–1M slice)
+    "mimo-pro-long":   {"input": 2.00,  "output": 6.00},   # MiMo V2.5-Pro (256K–1M slice)
+    "mimo-sub":        {"input": 0.0,   "output": 0.0},    # tp- key → free
+    "mimo-pro-sub":    {"input": 0.0,   "output": 0.0},    # tp- key → free
 }
 
 # ---------------------------------------------------------------------------
@@ -85,12 +102,17 @@ def _normalize_engine(engine: str) -> str:
     The xaxiu-swarm wrapper exposes ``swarm/kimi``, ``swarm/kimi-api``,
     ``swarm/deepseek-v4-flash``, etc.  The pricing table keys these
     backends bare (``kimi``, ``kimi-api``, ``deepseek``).  This helper
-    strips the ``swarm/`` prefix and folds DeepSeek variants
-    (``deepseek-v4-flash``, ``deepseek-v4-pro``) onto their priced rows.
+    strips the ``swarm/`` prefix and folds DeepSeek + MiMo variants
+    onto their priced rows.
 
     WIRE-BUDGET-SWARM (2026-05-22): added after battle-test 2026-05-21
     surfaced "Unknown engine 'swarm/kimi'; recording cost=0" on every
     real coord-run worker dispatch.
+
+    WIRE-MIMO-BUDGET (2026-05-22): when the operator's MIMO_API_KEY
+    starts with ``tp-`` (Token Plan subscription), MiMo dispatches map
+    to the zero-cost ``-sub`` pricing rows so the ledger reflects
+    actual spend.  ``sk-`` keys retain the published per-token rates.
     """
     e = engine
     if e.startswith("swarm/"):
@@ -102,7 +124,20 @@ def _normalize_engine(engine: str) -> str:
     if e in ("deepseek-v4-pro", "deepseek-v4-pro-thinking",
              "deepseek-pro-thinking"):
         return "deepseek-pro"
+    # MiMo variants
+    if e in ("mimo-v2.5", "mimo-v25", "mimo-standard", "mimo"):
+        return _mimo_pricing_row(base="mimo")
+    if e in ("mimo-v2.5-pro", "mimo-v25-pro", "mimo-pro"):
+        return _mimo_pricing_row(base="mimo-pro")
     return e
+
+
+def _mimo_pricing_row(*, base: str) -> str:
+    """Return base or base+``-sub`` based on MIMO_API_KEY prefix."""
+    key = os.environ.get("MIMO_API_KEY", "")
+    if key.startswith("tp-"):
+        return f"{base}-sub"
+    return base
 
 
 def _compute_cost(engine: str, input_tokens: int, output_tokens: int) -> float:

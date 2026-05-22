@@ -104,11 +104,15 @@ def test_env_var_inventory_message_format(monkeypatch) -> None:
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "another_secret")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("MIMO_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     d = _check_env_var_inventory()
     parts = d.message.split(", ")
     keys = [p.split(":")[0] for p in parts]
-    assert keys == ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]
+    assert keys == [
+        "KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY", "MIMO_API_KEY", "OPENAI_API_KEY",
+    ]
     for p in parts:
         assert p.endswith(":SET") or p.endswith(":UNSET")
     assert "secret_value" not in d.message
@@ -166,3 +170,30 @@ def test_cli_doctor_json_format(tmp_path, monkeypatch) -> None:
     data = json.loads(result.output)
     assert data["overall"] == "ok"
     assert data["checks"][0]["name"] == "python"
+
+
+# ---------------------------------------------------------------------------
+# WIRE-MIMO-DOCTOR (2026-05-22) — surface tp-/sk- MiMo key in reachability
+# ---------------------------------------------------------------------------
+
+def test_engine_reachability_surfaces_mimo_tokenplan(monkeypatch) -> None:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("MIMO_API_KEY", "tp-secret")
+    with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
+        d = _check_engine_reachability()
+    assert d.severity == "ok"
+    assert "mimo=tokenplan" in d.message
+    # never leak the actual key
+    assert "tp-secret" not in d.message
+
+
+def test_engine_reachability_surfaces_mimo_payg(monkeypatch) -> None:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("MIMO_API_KEY", "sk-paykey")
+    with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
+        d = _check_engine_reachability()
+    assert d.severity == "ok"
+    assert "mimo=payg" in d.message
+    assert "sk-paykey" not in d.message

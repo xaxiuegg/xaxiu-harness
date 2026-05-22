@@ -7,13 +7,17 @@ Prevents the duplicate-source-of-truth drift flagged in the v1.2 security audit
 from pathlib import Path
 from typing import Final
 
-SUPPORTED_BACKENDS: Final = ["deepseek", "kimi", "anthropic", "gemini", "mock"]
+SUPPORTED_BACKENDS: Final = ["deepseek", "kimi", "anthropic", "gemini", "mimo", "mock"]
 
 API_KEY_ENV_VARS: Final = {
     "deepseek": "DEEPSEEK_API_KEY",
     "kimi": "KIMI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    # Xiaomi MiMo Open Platform (added 2026-05-22, WIRE-MIMO).  Key prefix
+    # selects endpoint at dispatch time: ``sk-...`` → pay-as-you-go,
+    # ``tp-...`` → Token Plan subscription (treated as zero-cost in budget).
+    "mimo": "MIMO_API_KEY",
 }
 
 DASHBOARD_PORT: Final = 7878

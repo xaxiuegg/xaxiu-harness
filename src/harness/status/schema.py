@@ -32,4 +32,7 @@ class StatusRow(BaseModel):
     owner: str = Field(min_length=1, max_length=80)
     effort: str = Field(default="-", max_length=40)
     updated: str = Field(default="-", pattern=r"^(\d{4}-\d{2}-\d{2}|-)$")
-    notes: str = Field(default="", max_length=1000)
+    # Bumped 1000→4000 (2026-05-22) — real-world defect logs from
+    # multi-engine battle tests need room for verbatim error tags +
+    # commit hashes + verbose diagnostics in a single cell.
+    notes: str = Field(default="", max_length=4000)

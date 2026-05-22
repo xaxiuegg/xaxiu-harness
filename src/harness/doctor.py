@@ -68,7 +68,8 @@ def _check_secrets() -> Diagnosis:
         names = set(dpapi.list_secrets())
     except Exception:
         return Diagnosis("secrets", "warn", "couldn't enumerate secrets")
-    required_any = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"}
+    required_any = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+                    "GEMINI_API_KEY", "MIMO_API_KEY"}
     present_dpapi = names & required_any
     present_env = {k for k in required_any if os.environ.get(k)}
     if present_dpapi or present_env:
@@ -82,7 +83,8 @@ def _check_secrets() -> Diagnosis:
 
 
 def _check_engine_reachability() -> Diagnosis:
-    required = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"}
+    required = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+                "GEMINI_API_KEY", "MIMO_API_KEY"}
     try:
         from harness.secrets import dpapi
         dpapi_count = sum(1 for s in dpapi.list_secrets() if s in required)
@@ -93,13 +95,21 @@ def _check_engine_reachability() -> Diagnosis:
         return Diagnosis(
             "engine_reachability", "fail",
             "no engine API keys found (DPAPI or env)",
-            "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY env vars",
+            "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY / MIMO_API_KEY env vars",
         )
     parts = []
     if dpapi_count:
         parts.append(f"dpapi={dpapi_count}")
     if env_hits:
         parts.append(f"env={env_hits[0]}")
+    # WIRE-MIMO-DOCTOR (2026-05-22): surface Token Plan subscription
+    # status when MIMO_API_KEY is set, so operators know the tp- key
+    # was recognised as "unlimited".
+    mimo_key = os.environ.get("MIMO_API_KEY", "")
+    if mimo_key.startswith("tp-"):
+        parts.append("mimo=tokenplan")
+    elif mimo_key.startswith("sk-"):
+        parts.append("mimo=payg")
     return Diagnosis("engine_reachability", "ok", " ".join(parts))
 
 
@@ -109,6 +119,7 @@ def _check_env_var_inventory() -> Diagnosis:
         "DEEPSEEK_API_KEY",
         "ANTHROPIC_API_KEY",
         "GEMINI_API_KEY",
+        "MIMO_API_KEY",
         "OPENAI_API_KEY",
     ]
     parts = []
