@@ -179,7 +179,24 @@ def classify_response(
             error="anthropic_refusal",
         )
 
-    # Rule 4 — no match
+    # Rule 4 — MiMo silent-empty (W4-J 2026-05-22)
+    # The W4-G multi-agent campaign caught MiMo v2.5-Pro returning
+    # success=True text="" on 3/5 dispatches with source-laden packets
+    # (~4KB).  Re-label so the dispatcher falls back instead of pretending
+    # the empty body is a valid response.  Covers BOTH Pro and Standard
+    # variants since the empty-text symptom is identical.
+    #
+    # Only re-label SUCCESS responses — an already-failed response (e.g.
+    # HTTP 500 with empty body) keeps its more-specific original error.
+    if backend == "mimo" and response.success and response.text.strip() == "":
+        return EngineResponse(
+            success=False,
+            text=response.text,
+            latency_ms=response.latency_ms,
+            error="mimo_empty",
+        )
+
+    # Rule 5 — no match
     return response
 
 

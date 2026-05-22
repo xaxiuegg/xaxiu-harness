@@ -35,13 +35,21 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def read_status(path: Path) -> list[StatusRow]:
+def read_status(path: Path | None = None) -> list[StatusRow]:
     """Read and validate *path* as a STATUS.csv.
 
     Tolerates rows with extra (unquoted-comma) fields by appending the
     overflow back into the Notes column rather than dropping it.  Strict
     schema validation runs on the merged result.
+
+    W4-H 2026-05-22: ``path`` is now optional and defaults to
+    ``coord/STATUS.csv`` relative to cwd, matching the canonical-tracker
+    convention from memory.  External agents inspecting the function
+    signature (W4-G campaign) previously guessed a zero-arg invocation
+    that crashed with ``TypeError: missing 1 required positional``.
     """
+    if path is None:
+        path = Path("coord/STATUS.csv")
     if not path.exists():
         return []
     rows: list[StatusRow] = []

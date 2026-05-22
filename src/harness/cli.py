@@ -606,12 +606,28 @@ def dashboard_serve(port: int, host: str) -> None:
 
 
 @cli.command(name="lint-spec")
-@click.argument("spec_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("spec_path", type=click.Path(exists=True, path_type=Path), required=False)
+@click.option("--spec", "spec_opt", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Spec markdown path (alternative to positional argument).")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
-def lint_spec_cmd(spec_path: Path, fmt: str) -> None:
-    """Pre-flight: validate a markdown spec for plan-readiness."""
+def lint_spec_cmd(spec_path: Path | None, spec_opt: Path | None, fmt: str) -> None:
+    """Pre-flight: validate a markdown spec for plan-readiness.
+
+    W4-H 2026-05-22: accept either `lint-spec <path>` (positional, original)
+    or `lint-spec --spec <path>` (flag, what external agents kept guessing
+    in the W4-G campaign).  Caller must supply exactly one.
+    """
     import dataclasses
     from harness.lint import lint_spec, is_plan_ready
+
+    if spec_path is None and spec_opt is None:
+        click.echo("Error: must supply SPEC_PATH positional OR --spec flag", err=True)
+        sys.exit(2)
+    if spec_path is not None and spec_opt is not None:
+        click.echo("Error: cannot supply both positional and --spec — pick one", err=True)
+        sys.exit(2)
+    spec_path = spec_path if spec_path is not None else spec_opt
+    assert spec_path is not None  # narrow for type-checker
 
     findings = lint_spec(spec_path)
     ready = is_plan_ready(findings)
@@ -726,10 +742,27 @@ def loops(
 
 
 @cli.command()
+@click.argument("subcmd", required=False)
 @click.option("--list", "list_", is_flag=True, help="List engines.")
 @click.option("--health", is_flag=True, help="Check engine health.")
-def engines(list_: bool, health: bool) -> None:
-    """Query or modify the engine pool."""
+def engines(subcmd: str | None, list_: bool, health: bool) -> None:
+    """Query or modify the engine pool.
+
+    W4-H 2026-05-22: accept either ``engines --list`` (original flag) or
+    ``engines list`` (subcommand-style guess from W4-G campaign).  Same
+    for ``engines health`` ↔ ``engines --health``.  No-arg invocation
+    defaults to listing.
+    """
+    # Normalise subcommand-style guesses into flag-style
+    if subcmd == "list":
+        list_ = True
+    elif subcmd == "health":
+        health = True
+    elif subcmd is not None:
+        click.echo(f"Error: unknown subcommand {subcmd!r}; use 'list' or 'health' "
+                   f"(or --list / --health flags)", err=True)
+        sys.exit(2)
+
     state = read_engine_health()
 
     if health:

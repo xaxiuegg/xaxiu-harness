@@ -242,7 +242,50 @@ def test_classify_response_anthropic_refusal_exactly_at_500_boundary() -> None:
 
 
 # ---------------------------------------------------------------------------
-# classify_response — Rule 4: no match (pass-through)
+# classify_response — Rule 4: MiMo silent-empty (W4-J 2026-05-22)
+# ---------------------------------------------------------------------------
+
+def test_classify_response_mimo_empty_positive() -> None:
+    """W4-G campaign found MiMo Pro returning success=True text='' on 3/5."""
+    resp = EngineResponse(success=True, text="", latency_ms=22000)
+    result = classify_response(
+        backend="mimo", model="mimo-v2.5-pro", packet_content="", response=resp
+    )
+    assert result.success is False
+    assert result.error == "mimo_empty"
+
+
+def test_classify_response_mimo_empty_whitespace_only() -> None:
+    """Whitespace-only response is still empty for our purposes."""
+    resp = EngineResponse(success=True, text="   \n\t  ", latency_ms=20000)
+    result = classify_response(
+        backend="mimo", model="mimo-v2.5", packet_content="", response=resp
+    )
+    assert result.success is False
+    assert result.error == "mimo_empty"
+
+
+def test_classify_response_mimo_empty_negative_with_content() -> None:
+    """Real MiMo content must NOT flag."""
+    resp = EngineResponse(success=True, text="here's your answer", latency_ms=15000)
+    result = classify_response(
+        backend="mimo", model="mimo-v2.5-pro", packet_content="", response=resp
+    )
+    assert result is resp
+
+
+def test_classify_response_mimo_empty_negative_other_backend() -> None:
+    """Empty text from non-MiMo backend should not flag as mimo_empty."""
+    resp = EngineResponse(success=True, text="", latency_ms=10)
+    result = classify_response(
+        backend="deepseek", model="deepseek-chat", packet_content="", response=resp
+    )
+    # DeepSeek empty doesn't trip Rule 4; falls through to "no match"
+    assert result is resp
+
+
+# ---------------------------------------------------------------------------
+# classify_response — Rule 5: no match (pass-through)
 # ---------------------------------------------------------------------------
 
 def test_classify_response_no_match_returns_original() -> None:

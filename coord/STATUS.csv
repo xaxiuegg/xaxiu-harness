@@ -150,5 +150,5 @@ W3-F-OK-TO-STOP-JSON,Wave 3,session ok-to-stop --json structured output (Pack C 
 W4-A,Wave 4,Worker hard-fails on silent no-op (edit step + 0 modified files),shipped,Claude,~30 min,2026-05-22,Commit c8665bd; L3.dispatch.E_SILENT_NO_OP; tests green
 W4-B,Wave 4,Integrator surfaces 0-merged-worker run as silent_no_op (sister fix),shipped,Claude,~15 min,2026-05-22,Commit d91f48d; integrator no longer reports success when nothing committed
 W4-G,Wave 4,Multi-engine multi-agent functional coverage campaign (20 dispatches),shipped,Claude,~45 min,2026-05-22,"Commit d6e3260+probe-exec; deepseek 5/5 reliability, kimi 0/5 empty"
-W4-H,Wave 5,UX polish: harness engines list subcommand + lint-spec --spec flag + read_status() default path,todo,claude:dispatch,~30 min,2026-05-22,Surfaced by W4-G campaign — agents read source but guessed wrong invocations
-W4-J,Wave 4,Engine-side silent-empty hardening: dispatcher should detect kimi/mimo empty-text returns,todo,Claude,~45 min,2026-05-22,"W4-G found Kimi 5/5 empty, MiMo Pro 3/5 empty on >4KB packets — extend W3-C to detect input-side silent fail too"
+W4-H,Wave 5,UX polish: engines list subcommand + lint-spec --spec flag + read_status() default path,shipped,Claude,~30 min,2026-05-22,Surfaced by W4-G campaign; backward-compatible; 10 new tests
+W4-J,Wave 4,Dispatcher silent-empty guard: mimo backend success+empty -> mimo_empty error -> fallback,shipped,Claude,~20 min,2026-05-22,Pairs with W4-K cost-tracking; only re-labels success=True (preserves more-specific failure errors)

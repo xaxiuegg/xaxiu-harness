@@ -52,3 +52,10 @@ coord/dev_loop/heartbeat.json
 # Budget ledger (BUDGET-METER): runtime cost tracking, per-machine, not committed.
 coord/dev_loop/budget_ledger.jsonl
 coord/dev_loop/budget_archive/
+
+# STATUS.csv atomic-write backup — write_status() drops a .bak next to
+# the tracker for crash safety; no need to commit.
+coord/STATUS.csv.bak
+
+# Panic-dump test artifacts (left by `harness panic-dump --target-dir tmp_panic`)
+tmp_panic/
