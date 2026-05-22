@@ -139,6 +139,36 @@ def _extract_anthropic_text(response_data: dict) -> str:
     return ""
 
 
+def _extract_openai_usage(response_data: dict) -> tuple[int, int]:
+    """Read OpenAI-compat (DeepSeek/Kimi/MiMo) ``usage`` block.
+
+    Returns ``(prompt_tokens, completion_tokens)``; falls back to ``(0, 0)``
+    if the field is absent or malformed.  Wired W4-K (2026-05-22): previously
+    every ledger row reported tokens_in=0 tokens_out=0 because none of the
+    engine sites read this block off the JSON response.
+    """
+    usage = response_data.get("usage") or {}
+    if not isinstance(usage, dict):
+        return (0, 0)
+    try:
+        return (int(usage.get("prompt_tokens", 0)),
+                int(usage.get("completion_tokens", 0)))
+    except (TypeError, ValueError):
+        return (0, 0)
+
+
+def _extract_anthropic_usage(response_data: dict) -> tuple[int, int]:
+    """Read Anthropic ``usage`` block (different keys from OpenAI compat)."""
+    usage = response_data.get("usage") or {}
+    if not isinstance(usage, dict):
+        return (0, 0)
+    try:
+        return (int(usage.get("input_tokens", 0)),
+                int(usage.get("output_tokens", 0)))
+    except (TypeError, ValueError):
+        return (0, 0)
+
+
 # ---------------------------------------------------------------------------
 # Concrete engine classes
 # ---------------------------------------------------------------------------
@@ -180,12 +210,15 @@ class DeepSeekConcrete(Engine):
                 response.raise_for_status()
                 data = response.json()
                 text = _extract_chat_text(data)
+                tokens_in, tokens_out = _extract_openai_usage(data)
                 latency_ms = int((time.monotonic() - start) * 1000)
                 return EngineResponse(
                     success=True,
                     text=text,
                     latency_ms=latency_ms,
                     error=None,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
                 )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -294,12 +327,15 @@ class KimiConcrete(Engine):
                 response.raise_for_status()
                 data = response.json()
                 text = _extract_chat_text(data)
+                tokens_in, tokens_out = _extract_openai_usage(data)
                 latency_ms = int((time.monotonic() - start) * 1000)
                 return EngineResponse(
                     success=True,
                     text=text,
                     latency_ms=latency_ms,
                     error=None,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
                 )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -391,12 +427,15 @@ class AnthropicConcrete(Engine):
                 response.raise_for_status()
                 data = response.json()
                 text = _extract_anthropic_text(data)
+                tokens_in, tokens_out = _extract_anthropic_usage(data)
                 latency_ms = int((time.monotonic() - start) * 1000)
                 return EngineResponse(
                     success=True,
                     text=text,
                     latency_ms=latency_ms,
                     error=None,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
                 )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -602,12 +641,15 @@ class MiMoConcrete(Engine):
                 response.raise_for_status()
                 data = response.json()
                 text = _extract_chat_text(data)
+                tokens_in, tokens_out = _extract_openai_usage(data)
                 latency_ms = int((time.monotonic() - start) * 1000)
                 return EngineResponse(
                     success=True,
                     text=text,
                     latency_ms=latency_ms,
                     error=None,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
                 )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
