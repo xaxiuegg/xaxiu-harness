@@ -136,12 +136,22 @@ def run_cycle(
     packet_path = packet_dir / "packet.md"
     packet_path.write_text(prompt, encoding="utf-8")
 
+    # WIRE-OBSERVER-SWARM-ENGINE (2026-05-22): observer historically
+    # used 'swarm/deepseek' as the engine identifier, but dispatch_packet
+    # validates force_engine against bare SUPPORTED_BACKENDS — so every
+    # auto-fired cycle since arming has come back with
+    # 'unsupported_force_engine' and zero findings.  Strip the swarm/
+    # prefix at dispatch time (operator-facing identifier preserved in
+    # observer state + cycle reports).
+    dispatch_engine = engine.split("/", 1)[1] if "/" in engine else engine
+
     result: DispatchResult = dispatcher(
         project="observer",
         packet_path=str(packet_path),
-        force_engine=engine,
+        force_engine=dispatch_engine,
         force_model=None,
         wave_id=cycle_id,
+        trusted_source=True,  # observer prompt builds from operator-authored state
     )
 
     ended_at = datetime.now(timezone.utc)
