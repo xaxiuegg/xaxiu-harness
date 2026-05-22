@@ -22,8 +22,21 @@ from harness.coord.schemas import WorkerTask
 # own `with patch(...)` block.
 @pytest.fixture(autouse=True)
 def _stub_swarm_dispatch():
+    # WIRE-NOOP-DETECT (2026-05-22): worker.run_worker now hard-fails when
+    # an edit step's target_files were declared but zero files actually
+    # changed.  The stub MUST return a FILE/REPLACE block that creates
+    # src/foo.py (the default task fixture's target_files) — otherwise
+    # every test using this autouse stub triggers silent_no_op detection.
     stub = SimpleNamespace(
-        success=True, text="", error=None, tokens_used=0, cost_usd=0.0,
+        success=True,
+        text=(
+            "FILE: src/foo.py\n"
+            "<<<<<<< SEARCH\n"
+            "=======\n"
+            "# stub edit applied by autouse fixture\n"
+            ">>>>>>> REPLACE\n"
+        ),
+        error=None, tokens_used=0, cost_usd=0.0,
     )
     with patch("harness.coord.worker._dispatch_via_swarm", return_value=stub):
         yield
@@ -342,10 +355,26 @@ def test_run_worker_resumes_from_step_two_of_five(tmp_path: Path) -> None:
     from harness.coord.checkpoint import write_checkpoint
     write_checkpoint(checkpoint_path, existing)
 
-    with patch("harness.coord.worker._run_pytest", return_value={
-        "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
-    }):
-        result = run_worker(task, run_dir, project_root=tmp_path)
+    # WIRE-NOOP-DETECT (2026-05-22): override the autouse stub so each
+    # step's dispatch returns a FILE/REPLACE that creates the step's
+    # actual target file (src/fN.py).  Counter-based since the packet
+    # text doesn't contain the bare target path in a stable form.
+    _step_counter = {"n": 2}  # resume starts at step-3 (index 2)
+
+    def _per_step_stub(packet_path, engine, wt_path):
+        _step_counter["n"] += 1
+        n = _step_counter["n"]
+        return SimpleNamespace(
+            success=True,
+            text=f"FILE: src/f{n}.py\n<<<<<<< SEARCH\n=======\n# step {n}\n>>>>>>> REPLACE\n",
+            error=None, tokens_used=0, cost_usd=0.0,
+        )
+
+    with patch("harness.coord.worker._dispatch_via_swarm", side_effect=_per_step_stub):
+        with patch("harness.coord.worker._run_pytest", return_value={
+            "ran": 5, "passed": 5, "failed": 0, "skipped": 0, "duration_seconds": 1.2,
+        }):
+            result = run_worker(task, run_dir, project_root=tmp_path)
 
     ckpt = read_checkpoint(checkpoint_path)
     assert ckpt is not None

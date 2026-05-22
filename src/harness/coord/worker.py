@@ -403,13 +403,21 @@ def run_worker(
                 packet_path.unlink(missing_ok=True)
 
             _heartbeat_touch(run_dir, task_obj.worker_id)
+            # WIRE-NOOP-DETECT (2026-05-22): track ACTUALLY-modified files per
+            # step so we can distinguish "engine returned FILE/REPLACE blocks
+            # that matched anchors" from "engine returned junk and zero edits
+            # landed".  Without this, target_files (the SPEC's claim of what
+            # SHOULD change) was being unconditionally folded into checkpoint
+            # files_modified, masking silent no-ops where the worker reports
+            # state=completed without shipping anything.
+            step_modified: list[str] = []
             if result.success and result.text.strip():
                 edits = _parse_file_edits(result.text)
                 if edits:
-                    modified = _apply_file_edits(edits, wt_path)
-                    files_modified = list(set(files_modified + modified))
+                    step_modified = _apply_file_edits(edits, wt_path)
+                    files_modified = list(set(files_modified + step_modified))
                     # Update read_set contents with modified files
-                    for rel_path in modified:
+                    for rel_path in step_modified:
                         mod_file = wt_path / rel_path
                         if mod_file.exists():
                             read_set_contents[rel_path] = mod_file.read_text(encoding="utf-8")
@@ -418,16 +426,68 @@ def run_worker(
                 total_tokens += int(getattr(result, "tokens_used", 0) or 0)
                 total_cost_usd += float(getattr(result, "cost_usd", 0.0) or 0.0)
 
+            # WIRE-NOOP-DETECT: if this is an edit step with target_files,
+            # we EXPECTED edits.  Zero actual edits → engine failure mode.
+            # Fail the worker loud rather than silently claiming completion.
+            if step.kind == "edit" and step.target_files and not step_modified:
+                diagnostic = (
+                    f"silent_no_op: step {step.step_id} declared "
+                    f"target_files={list(step.target_files)} but 0 files were "
+                    f"modified.  Engine likely returned non-matching anchors "
+                    f"or no FILE/REPLACE blocks.  result.success={result.success}, "
+                    f"text_len={len(result.text or '')}."
+                )
+                ckpt = ckpt.model_copy(update={
+                    "state": "failed",
+                    "tests_summary": f"silent_no_op:{step.step_id}",
+                })
+                write_checkpoint(checkpoint_path, ckpt)
+                err_path = checkpoint_path.with_suffix(".error.json")
+                try:
+                    err_path.write_text(json.dumps({
+                        "worker_id": task_obj.worker_id,
+                        "error_tag": "L3.dispatch.E_SILENT_NO_OP",
+                        "diagnostic": diagnostic,
+                        "at": now_iso(),
+                    }, indent=2), encoding="utf-8")
+                except OSError:
+                    pass
+                _append_progress(run_dir, task_obj.worker_id, {
+                    "event": "worker_failed",
+                    "error_tag": "L3.dispatch.E_SILENT_NO_OP",
+                    "diagnostic": diagnostic[:200],
+                })
+                return {
+                    "schema_version": 1,
+                    "worker_id": task_obj.worker_id,
+                    "run_id": run_dir.name,
+                    "state": "failed",
+                    "started_at": started_at,
+                    "finished_at": now_iso(),
+                    "steps_completed": [],
+                    "files_modified": [],
+                    "test_summary": {"ran": 0, "passed": 0, "failed": 0, "skipped": 0, "duration_seconds": 0.0},
+                    "commit_sha": commit_sha,
+                    "error_tag": "L3.dispatch.E_SILENT_NO_OP",
+                    "diagnostic": diagnostic,
+                    "tokens_used": total_tokens,
+                    "cost_usd": total_cost_usd,
+                    "elapsed_seconds": 0,
+                }
+
             # Commit step changes
             sha = _git_commit(wt_path, f"[{step.step_id}] {task_obj.title}")
             if sha:
                 commit_sha = sha
 
-        # Update checkpoint after each step
+        # Update checkpoint after each step.
+        # WIRE-NOOP-DETECT: files_modified now reflects ACTUAL applied edits
+        # (step_modified) accumulated into files_modified above, not the spec's
+        # intended scope (step.target_files).
         ckpt = ckpt.model_copy(update={
             "last_completed_step_id": step.step_id,
             "last_completed_step_index": idx,
-            "files_modified": list(set(files_modified + step.target_files)),
+            "files_modified": list(files_modified),
             "commit_sha": commit_sha,
         })
         write_checkpoint(checkpoint_path, ckpt)
