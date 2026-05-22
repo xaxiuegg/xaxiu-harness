@@ -220,7 +220,18 @@ def _parse_file_edits(text: str) -> list[tuple[str, str, str]]:
 
 
 def _apply_file_edits(edits: list[tuple[str, str, str]], base_path: Path) -> list[str]:
-    """Apply parsed edits under *base_path*; return list of modified files."""
+    """Apply parsed edits under *base_path*; return list of modified files.
+
+    Edit semantics:
+      - File does not exist + non-empty REPLACE → create file with REPLACE content
+      - File exists + non-empty SEARCH found in content → replace first occurrence
+      - File exists + empty SEARCH → APPEND replace to end of file (engines use
+        this idiom when they want to add tests to an existing test file without
+        echoing the whole prior content into SEARCH).  Separator newline
+        inserted if the existing content doesn't already end with one.
+      - File exists + non-empty SEARCH NOT found → skip silently (caller logs
+        which files weren't modified via the returned list)
+    """
     modified: list[str] = []
     for rel_path, search, replace in edits:
         file_path = base_path / rel_path
@@ -231,6 +242,12 @@ def _apply_file_edits(edits: list[tuple[str, str, str]], base_path: Path) -> lis
             modified.append(rel_path)
             continue
         content = file_path.read_text(encoding="utf-8")
+        if not search.strip():
+            # Empty SEARCH on existing file → append idiom
+            sep = "" if content.endswith("\n") else "\n"
+            file_path.write_text(content + sep + replace, encoding="utf-8")
+            modified.append(rel_path)
+            continue
         if search not in content:
             continue
         new_content = content.replace(search, replace, 1)
