@@ -504,6 +504,27 @@ def dispatch_packet(
 
     model = force_model if force_model is not None else rule_model
 
+    # WIRE-DISPATCH-DEFAULT-MODEL (2026-05-22): when force_engine is set but
+    # neither force_model nor a routing-rule model is available, each engine
+    # gets passed model="" → for DeepSeek that yields HTTP 400 ("model is
+    # required"), which marks the response success=False and triggers the
+    # full fallback chain.  Net effect was silent engine substitution
+    # (force_engine=deepseek silently served by kimi/mimo via fallback).
+    # Both MiMo Pro + DeepSeek reviewers caught this during the
+    # post-migration infra smoke 2026-05-22.
+    #
+    # Fix: supply a per-engine default model when none was resolved.
+    if not model:
+        _ENGINE_DEFAULT_MODELS = {
+            "kimi":      "kimi-for-coding",
+            "deepseek":  "deepseek-v4-flash",
+            "anthropic": "claude-sonnet-4-5-20250929",
+            "gemini":    "gemini-2.0-flash",
+            "mimo":      "mimo-v2.5-pro",   # text default; multimodal auto-detected in MiMoConcrete.dispatch
+            "mock":      "mock-model",
+        }
+        model = _ENGINE_DEFAULT_MODELS.get(initial_engine, "")
+
     # ---- 7. Insert dispatch into history.db ---------------------------------
     try:
         dispatch_id = state_db.insert_dispatch(

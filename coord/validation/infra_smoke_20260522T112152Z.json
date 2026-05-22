@@ -1,0 +1,146 @@
+{
+  "run_at_utc": "2026-05-22T11:21:52.454008+00:00",
+  "cwd": "D:\\xaxiu-harness-standalone",
+  "checks": [
+    {
+      "category": "A",
+      "name": "kimi-k2.6",
+      "status": "PASS",
+      "latency_ms": 8329,
+      "detail": "http 200 (317 chars)",
+      "extras": {}
+    },
+    {
+      "category": "A",
+      "name": "deepseek-v4-flash",
+      "status": "PASS",
+      "latency_ms": 1351,
+      "detail": "http 200 (561 chars)",
+      "extras": {}
+    },
+    {
+      "category": "A",
+      "name": "mimo-pro-sgp",
+      "status": "PASS",
+      "latency_ms": 1432,
+      "detail": "http 200 (428 chars)",
+      "extras": {}
+    },
+    {
+      "category": "A",
+      "name": "mimo-std-sgp",
+      "status": "PASS",
+      "latency_ms": 2016,
+      "detail": "http 200 (424 chars)",
+      "extras": {}
+    },
+    {
+      "category": "B",
+      "name": "dispatch_packet/kimi",
+      "status": "PASS",
+      "latency_ms": 3169,
+      "detail": "engine_used=kimi text='OK'",
+      "extras": {}
+    },
+    {
+      "category": "B",
+      "name": "dispatch_packet/deepseek",
+      "status": "PASS",
+      "latency_ms": 4049,
+      "detail": "engine_used=kimi text='OK'",
+      "extras": {}
+    },
+    {
+      "category": "B",
+      "name": "dispatch_packet/mimo",
+      "status": "PASS",
+      "latency_ms": 6309,
+      "detail": "engine_used=mimo text='OK'",
+      "extras": {}
+    },
+    {
+      "category": "C",
+      "name": "run_worker (mocked engine)",
+      "status": "PASS",
+      "latency_ms": 33,
+      "detail": "state=completed steps=[]",
+      "extras": {}
+    },
+    {
+      "category": "D",
+      "name": "cycle-now",
+      "status": "FAIL",
+      "latency_ms": 34654,
+      "detail": "AttributeError: 'CycleReport' object has no attribute 'dispatch_success'",
+      "extras": {}
+    },
+    {
+      "category": "D",
+      "name": "observer-state",
+      "status": "PASS",
+      "latency_ms": 0,
+      "detail": "armed=True total_cycles=8",
+      "extras": {}
+    },
+    {
+      "category": "E",
+      "name": "coord plan --engine mimo",
+      "status": "PASS",
+      "latency_ms": 31163,
+      "detail": "tasks=2",
+      "extras": {}
+    },
+    {
+      "category": "F",
+      "name": "doctor",
+      "status": "PASS",
+      "latency_ms": 2410,
+      "detail": "exit=0 out=776ch",
+      "extras": {}
+    },
+    {
+      "category": "F",
+      "name": "observer status",
+      "status": "PASS",
+      "latency_ms": 1,
+      "detail": "exit=0 out=195ch",
+      "extras": {}
+    },
+    {
+      "category": "F",
+      "name": "observer flags",
+      "status": "PASS",
+      "latency_ms": 0,
+      "detail": "exit=0 out=19ch",
+      "extras": {}
+    },
+    {
+      "category": "F",
+      "name": "budget summary",
+      "status": "PASS",
+      "latency_ms": 6,
+      "detail": "exit=0 out=145ch",
+      "extras": {}
+    },
+    {
+      "category": "F",
+      "name": "engines",
+      "status": "PASS",
+      "latency_ms": 0,
+      "detail": "exit=0 out=215ch",
+      "extras": {}
+    },
+    {
+      "category": "F",
+      "name": "coord (help)",
+      "status": "PASS",
+      "latency_ms": 1,
+      "detail": "exit=0 out=1087ch",
+      "extras": {}
+    }
+  ],
+  "summary": {
+    "PASS": 16,
+    "FAIL": 1
+  }
+}

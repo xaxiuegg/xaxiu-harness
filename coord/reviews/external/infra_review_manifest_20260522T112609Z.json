@@ -1,0 +1,20 @@
+{
+  "run_at_utc": "2026-05-22T11:26:42.404610+00:00",
+  "packet_chars": 3228,
+  "results": [
+    {
+      "label": "mimo-pro",
+      "ok": true,
+      "latency_ms": 21386,
+      "chars": 3101,
+      "path": "coord\\reviews\\external\\20260522T112609Z_infra_review_mimo-pro.md"
+    },
+    {
+      "label": "deepseek-thinking",
+      "ok": true,
+      "latency_ms": 11568,
+      "chars": 1602,
+      "path": "coord\\reviews\\external\\20260522T112609Z_infra_review_deepseek-thinking.md"
+    }
+  ]
+}
