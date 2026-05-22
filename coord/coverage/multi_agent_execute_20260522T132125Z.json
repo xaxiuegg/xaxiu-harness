@@ -1,0 +1,215 @@
+{
+  "run_at_utc": "2026-05-22T13:21:25.041382+00:00",
+  "source_campaign": "multi_agent_campaign_20260522T130924Z.json",
+  "by_verdict": {
+    "SKIP": 2,
+    "FAIL": 2,
+    "PASS": 5,
+    "DEGRADED": 1
+  },
+  "by_fut": {
+    "coord run (mock)": [
+      [
+        "mimo/mimo-v2.5-pro",
+        "SKIP"
+      ]
+    ],
+    "coord integrate": [
+      [
+        "mimo/mimo-v2.5-pro",
+        "SKIP"
+      ]
+    ],
+    "engines list": [
+      [
+        "mimo/mimo-v2.5",
+        "FAIL"
+      ]
+    ],
+    "budget summary": [
+      [
+        "mimo/mimo-v2.5",
+        "PASS"
+      ]
+    ],
+    "loop start/stop": [
+      [
+        "mimo/mimo-v2.5",
+        "PASS"
+      ]
+    ],
+    "STATUS.csv schema": [
+      [
+        "deepseek/deepseek-v4-flash",
+        "DEGRADED"
+      ]
+    ],
+    "proxy lifecycle": [
+      [
+        "deepseek/deepseek-v4-flash",
+        "PASS"
+      ]
+    ],
+    "spec lint": [
+      [
+        "deepseek/deepseek-v4-flash",
+        "FAIL"
+      ]
+    ],
+    "panic-dump": [
+      [
+        "deepseek/deepseek-v4-flash",
+        "PASS"
+      ]
+    ],
+    "observer flags": [
+      [
+        "deepseek/deepseek-v4-flash",
+        "PASS"
+      ]
+    ]
+  },
+  "disagreements": [],
+  "results": [
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "coord run (mock)",
+      "probe": "harness coord run --run-id test-run-123 --engine swarm/mock",
+      "expected": "stdout logs worker spawn events for run test-run-123 with mock engine, including worker process IDs.",
+      "confidence": 0.7,
+      "exit_code": -1,
+      "stdout": "",
+      "stderr": "",
+      "runtime_ms": 0,
+      "verdict": "SKIP",
+      "notes": "fabricated run-id not in state"
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "coord integrate",
+      "probe": "python -m harness coord integrate --run-id test_run_001",
+      "expected": "Exit code 0 with 'Integration successful' in stdout, pytest shows 100% pass rate",
+      "confidence": 0.65,
+      "exit_code": -1,
+      "stdout": "",
+      "stderr": "",
+      "runtime_ms": 0,
+      "verdict": "SKIP",
+      "notes": "fabricated run-id not in state"
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "engines list",
+      "probe": "python -m harness engines list",
+      "expected": "A list of engines with their status, e.g., 'engine1: healthy' or 'engine2: unhealthy', possibly in table format.",
+      "confidence": 0.7,
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "Usage: python -m harness engines [OPTIONS]\nTry 'python -m harness engines --help' for help.\n\nError: Got unexpected extra argument (list)\n",
+      "runtime_ms": 454,
+      "verdict": "FAIL",
+      "notes": "exit=2, stderr=\"Usage: python -m harness engines [OPTIONS]\\nTry 'python -m harness engines --help' for help.\\n\\nError: Got unexpected extra\""
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "budget summary",
+      "probe": "harness budget summary",
+      "expected": "Outputs a budget summary with total cost and ledger entry count; count must be > 0 for valid data.",
+      "confidence": 0.75,
+      "exit_code": 0,
+      "stdout": "anthropic     dispatches=12  cost=$0.000000  in=0  out=0\ndeepseek      dispatches=117  cost=$0.000000  in=0  out=0\nkimi          dispatches=82  cost=$0.000000  in=0  out=0\nmimo          dispatches=11  cost=$0.000000  in=0  out=0\nmock          dispatches=304  cost=$0.000000  in=0  out=10947\nswarm/kimi    dispatches=1346  cost=$0.000000  in=0  out=59\nswarm/mimo    dispatches=2  cost=$0.000000  in=0  out=0\nswarm/mock    dispatches=1  cost=$0.000000  in=0  out=0\ntotal         $0.000000\n",
+      "stderr": "",
+      "runtime_ms": 443,
+      "verdict": "PASS",
+      "notes": "exit=0, keyword-overlap=2/8"
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "loop start/stop",
+      "probe": "harness loop status",
+      "expected": "Outputs a status line indicating the current loop state, e.g., 'Loop is running' or 'No active loop'.",
+      "confidence": 0.6,
+      "exit_code": 0,
+      "stdout": "loop: armed | tick #11 | last=2026-05-21T00:02:35Z | active=2 | scheduled=yes\nobserver: clean\nsession: healthy (no handoff flagged)\n",
+      "stderr": "",
+      "runtime_ms": 4488,
+      "verdict": "PASS",
+      "notes": "exit=0, keyword-overlap=1/8"
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "STATUS.csv schema",
+      "probe": "python -c \"from harness.status.store import read_status; print(len(read_status()))\"",
+      "expected": "An integer representing the number of rows in STATUS.csv (e.g., 127)",
+      "confidence": 0.9,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "",
+      "runtime_ms": 65,
+      "verdict": "DEGRADED",
+      "notes": "exit=0 but empty stdout/stderr"
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "proxy lifecycle",
+      "probe": "python -m harness proxy --help",
+      "expected": "Usage: harness proxy [OPTIONS] COMMAND [ARGS]...\n\n  Manage the v2 stateful proxy process.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  start  Start the proxy.\n  stop   Stop the proxy.\n  status Check if proxy is listening.",
+      "confidence": 0.9,
+      "exit_code": 0,
+      "stdout": "Usage: python -m harness proxy [OPTIONS] COMMAND [ARGS]...\n\n  Stateful 4-key API proxy with circuit breaker.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  disable-key    Manually disable a key so the proxy won't route to it.\n  quarantine     Permanently open a key's circuit breaker.\n  reset-circuit  Manually reset a key's circuit breaker to CLOSED.\n  start          Start the proxy server in the background.\n  status         Show per-key health table.\n  stop           Stop the backg",
+      "stderr": "",
+      "runtime_ms": 446,
+      "verdict": "PASS",
+      "notes": "exit=0, keyword-overlap=7/8"
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "spec lint",
+      "probe": "python -m harness lint-spec --spec spec/samples/hello-world.md",
+      "expected": "Exit code 0; no error findings; optionally a single warn (W_NO_ACCEPTANCE) if spec lacks acceptance criteria.",
+      "confidence": 0.8,
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "Usage: python -m harness lint-spec [OPTIONS] SPEC_PATH\nTry 'python -m harness lint-spec --help' for help.\n\nError: No such option: --spec\n",
+      "runtime_ms": 445,
+      "verdict": "FAIL",
+      "notes": "exit=2, stderr=\"Usage: python -m harness lint-spec [OPTIONS] SPEC_PATH\\nTry 'python -m harness lint-spec --help' for help.\\n\\nError: No suc\""
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "panic-dump",
+      "probe": "python -m harness panic-dump --target-dir tmp_panic",
+      "expected": "Creates a gzipped tarball (e.g., panic-<timestamp>.tar.gz) in tmp_panic with scrubbed state files (git.txt, status.csv, etc.) or empty entries if missing.",
+      "confidence": 0.8,
+      "exit_code": 0,
+      "stdout": "panic-dump written: tmp_panic\\panic-20260522T132124Z.tar.gz\nsize: 32926 bytes\n",
+      "stderr": "",
+      "runtime_ms": 587,
+      "verdict": "PASS",
+      "notes": "exit=0, keyword-overlap=1/8"
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "observer flags",
+      "probe": "harness observer flags",
+      "expected": "Prints a JSON array of flag objects (each with fields like flag_id, raised_at, acknowledged, etc.) or a plain-text list. If no flags raised, output may be empty array or 'No flags'.",
+      "confidence": 0.7,
+      "exit_code": 0,
+      "stdout": "(no pending flags)\n",
+      "stderr": "",
+      "runtime_ms": 445,
+      "verdict": "PASS",
+      "notes": "exit=0, keyword-overlap=1/8"
+    }
+  ]
+}

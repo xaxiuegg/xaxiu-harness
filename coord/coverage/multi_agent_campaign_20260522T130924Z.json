@@ -1,0 +1,325 @@
+{
+  "run_at_utc": "2026-05-22T13:17:31.044083+00:00",
+  "total_agents": 20,
+  "ok": 10,
+  "by_engine": {
+    "kimi/kimi-for-coding": {
+      "ok": 0,
+      "fail": 5
+    },
+    "mimo/mimo-v2.5-pro": {
+      "ok": 2,
+      "fail": 3
+    },
+    "mimo/mimo-v2.5": {
+      "ok": 3,
+      "fail": 2
+    },
+    "deepseek/deepseek-v4-flash": {
+      "ok": 5,
+      "fail": 0
+    }
+  },
+  "results": [
+    {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "fut": "harness doctor",
+      "success": false,
+      "latency_ms": 62995,
+      "raw_text": "",
+      "parsed": {},
+      "error": "internal"
+    },
+    {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "fut": "observer cycle",
+      "success": false,
+      "latency_ms": 51180,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "fut": "observer audit-chat",
+      "success": false,
+      "latency_ms": 20053,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "fut": "state inspect",
+      "success": false,
+      "latency_ms": 21699,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "fut": "replay",
+      "success": false,
+      "latency_ms": 50338,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "coord plan",
+      "success": false,
+      "latency_ms": 24163,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "coord run (mock)",
+      "success": true,
+      "latency_ms": 18634,
+      "raw_text": "{\n  \"fut\": \"coord run (mock)\",\n  \"probe\": \"harness coord run --run-id test-run-123 --engine swarm/mock\",\n  \"expected\": \"stdout logs worker spawn events for run test-run-123 with mock engine, including worker process IDs.\",\n  \"failure_modes\": [\"run-id 'test-run-123' not found in run state\", \"mock engine 'swarm/mock' initialization fails\", \"file system errors during worktree creation for workers\"],\n  \"confidence\": 0.7\n}",
+      "parsed": {
+        "fut": "coord run (mock)",
+        "probe": "harness coord run --run-id test-run-123 --engine swarm/mock",
+        "expected": "stdout logs worker spawn events for run test-run-123 with mock engine, including worker process IDs.",
+        "failure_modes": [
+          "run-id 'test-run-123' not found in run state",
+          "mock engine 'swarm/mock' initialization fails",
+          "file system errors during worktree creation for workers"
+        ],
+        "confidence": 0.7
+      },
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "coord integrate",
+      "success": true,
+      "latency_ms": 18385,
+      "raw_text": "```json\n{\n  \"fut\": \"coord integrate\",\n  \"probe\": \"python -m harness coord integrate --run-id test_run_001\",\n  \"expected\": \"Exit code 0 with 'Integration successful' in stdout, pytest shows 100% pass rate\",\n  \"failure_modes\": [\"Worker branch conflicts preventing merge\", \"Missing checkpoint files causing skipped workers\", \"Test suite failures post-integration\"],\n  \"confidence\": 0.65\n}\n```",
+      "parsed": {
+        "fut": "coord integrate",
+        "probe": "python -m harness coord integrate --run-id test_run_001",
+        "expected": "Exit code 0 with 'Integration successful' in stdout, pytest shows 100% pass rate",
+        "failure_modes": [
+          "Worker branch conflicts preventing merge",
+          "Missing checkpoint files causing skipped workers",
+          "Test suite failures post-integration"
+        ],
+        "confidence": 0.65
+      },
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "dispatch_packet",
+      "success": false,
+      "latency_ms": 26246,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "fut": "dispatch bypass_chain",
+      "success": false,
+      "latency_ms": 28252,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "engines list",
+      "success": true,
+      "latency_ms": 19045,
+      "raw_text": "{\n  \"fut\": \"engines list\",\n  \"probe\": \"python -m harness engines list\",\n  \"expected\": \"A list of engines with their status, e.g., 'engine1: healthy' or 'engine2: unhealthy', possibly in table format.\",\n  \"failure_modes\": [\"Engine health state file missing or corrupted\", \"No engines configured or registered\", \"CLI group 'engines' not defined or subcommand 'list' missing\"],\n  \"confidence\": 0.7\n}",
+      "parsed": {
+        "fut": "engines list",
+        "probe": "python -m harness engines list",
+        "expected": "A list of engines with their status, e.g., 'engine1: healthy' or 'engine2: unhealthy', possibly in table format.",
+        "failure_modes": [
+          "Engine health state file missing or corrupted",
+          "No engines configured or registered",
+          "CLI group 'engines' not defined or subcommand 'list' missing"
+        ],
+        "confidence": 0.7
+      },
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "budget summary",
+      "success": true,
+      "latency_ms": 16067,
+      "raw_text": "{\n  \"fut\": \"budget_summary\",\n  \"probe\": \"harness budget summary\",\n  \"expected\": \"Outputs a budget summary with total cost and ledger entry count; count must be > 0 for valid data.\",\n  \"failure_modes\": [\"Ledger file not found at default path.\", \"Ledger contains zero or malformed entries.\", \"Command execution fails due to module import errors.\"],\n  \"confidence\": 0.75\n}",
+      "parsed": {
+        "fut": "budget_summary",
+        "probe": "harness budget summary",
+        "expected": "Outputs a budget summary with total cost and ledger entry count; count must be > 0 for valid data.",
+        "failure_modes": [
+          "Ledger file not found at default path.",
+          "Ledger contains zero or malformed entries.",
+          "Command execution fails due to module import errors."
+        ],
+        "confidence": 0.75
+      },
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "loop start/stop",
+      "success": true,
+      "latency_ms": 17169,
+      "raw_text": "{\n  \"fut\": \"loop start/stop\",\n  \"probe\": \"harness loop status\",\n  \"expected\": \"Outputs a status line indicating the current loop state, e.g., 'Loop is running' or 'No active loop'.\",\n  \"failure_modes\": [\"Command not found due to missing harness installation or incorrect PATH.\", \"Status output missing or empty, indicating state file read failure.\", \"Malformed status line not matching expected format.\"],\n  \"confidence\": 0.6\n}",
+      "parsed": {
+        "fut": "loop start/stop",
+        "probe": "harness loop status",
+        "expected": "Outputs a status line indicating the current loop state, e.g., 'Loop is running' or 'No active loop'.",
+        "failure_modes": [
+          "Command not found due to missing harness installation or incorrect PATH.",
+          "Status output missing or empty, indicating state file read failure.",
+          "Malformed status line not matching expected format."
+        ],
+        "confidence": 0.6
+      },
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "heartbeat",
+      "success": false,
+      "latency_ms": 20012,
+      "raw_text": "",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "fut": "session ok-to-stop --json",
+      "success": false,
+      "latency_ms": 19386,
+      "raw_text": "{\n  \"fut\": \"session ok-to-stop --json\",\n  \"probe\": \"harness session ok-to-stop --json\",\n  \"expected\": \"Outputs JSON with 'ok' (boolean) and 'reason' (string), e.g",
+      "parsed": {},
+      "error": null
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "STATUS.csv schema",
+      "success": true,
+      "latency_ms": 15994,
+      "raw_text": "{\n  \"fut\": \"STATUS.csv schema\",\n  \"probe\": \"python -c \\\"from harness.status.store import read_status; print(len(read_status()))\\\"\",\n  \"expected\": \"An integer representing the number of rows in STATUS.csv (e.g., 127)\",\n  \"failure_modes\": [\n    \"CSV file not found at expected path\",\n    \"Row with invalid status value raises validation error\",\n    \"Row with missing required field 'id' causes exception\"\n  ],\n  \"confidence\": 0.9\n}",
+      "parsed": {
+        "fut": "STATUS.csv schema",
+        "probe": "python -c \"from harness.status.store import read_status; print(len(read_status()))\"",
+        "expected": "An integer representing the number of rows in STATUS.csv (e.g., 127)",
+        "failure_modes": [
+          "CSV file not found at expected path",
+          "Row with invalid status value raises validation error",
+          "Row with missing required field 'id' causes exception"
+        ],
+        "confidence": 0.9
+      },
+      "error": null
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "proxy lifecycle",
+      "success": true,
+      "latency_ms": 11042,
+      "raw_text": "{\n  \"fut\": \"proxy lifecycle\",\n  \"probe\": \"python -m harness proxy --help\",\n  \"expected\": \"Usage: harness proxy [OPTIONS] COMMAND [ARGS]...\\n\\n  Manage the v2 stateful proxy process.\\n\\nOptions:\\n  --help  Show this message and exit.\\n\\nCommands:\\n  start  Start the proxy.\\n  stop   Stop the proxy.\\n  status Check if proxy is listening.\",\n  \"failure_modes\": [\n    \"Module not found or import error (module 'harness.proxy.lifecycle' not available)\",\n    \"Help output lacks 'start', 'stop', or 'status' command\",\n    \"Proxy help shows incorrect default host/port (e.g., 0.0.0.0 instead of 127.0.0.1:7879)\"\n  ],\n  \"confidence\": 0.9\n}",
+      "parsed": {
+        "fut": "proxy lifecycle",
+        "probe": "python -m harness proxy --help",
+        "expected": "Usage: harness proxy [OPTIONS] COMMAND [ARGS]...\n\n  Manage the v2 stateful proxy process.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  start  Start the proxy.\n  stop   Stop the proxy.\n  status Check if proxy is listening.",
+        "failure_modes": [
+          "Module not found or import error (module 'harness.proxy.lifecycle' not available)",
+          "Help output lacks 'start', 'stop', or 'status' command",
+          "Proxy help shows incorrect default host/port (e.g., 0.0.0.0 instead of 127.0.0.1:7879)"
+        ],
+        "confidence": 0.9
+      },
+      "error": null
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "spec lint",
+      "success": true,
+      "latency_ms": 19535,
+      "raw_text": "{\n  \"fut\": \"spec lint\",\n  \"probe\": \"python -m harness lint-spec --spec spec/samples/hello-world.md\",\n  \"expected\": \"Exit code 0; no error findings; optionally a single warn (W_NO_ACCEPTANCE) if spec lacks acceptance criteria.\",\n  \"failure_modes\": [\n    \"Spec file not found -> E_NOT_FOUND error, exit non-zero\",\n    \"Spec with fewer than 3 non-blank lines -> E_TOO_SHORT error, exit non-zero\",\n    \"Spec containing unresolved placeholder {{...}} -> E_UNRESOLVED_PLACEHOLDER error, exit non-zero\"\n  ],\n  \"confidence\": 0.8\n}",
+      "parsed": {
+        "fut": "spec lint",
+        "probe": "python -m harness lint-spec --spec spec/samples/hello-world.md",
+        "expected": "Exit code 0; no error findings; optionally a single warn (W_NO_ACCEPTANCE) if spec lacks acceptance criteria.",
+        "failure_modes": [
+          "Spec file not found -> E_NOT_FOUND error, exit non-zero",
+          "Spec with fewer than 3 non-blank lines -> E_TOO_SHORT error, exit non-zero",
+          "Spec containing unresolved placeholder {{...}} -> E_UNRESOLVED_PLACEHOLDER error, exit non-zero"
+        ],
+        "confidence": 0.8
+      },
+      "error": null
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "panic-dump",
+      "success": true,
+      "latency_ms": 5946,
+      "raw_text": "{\n  \"fut\": \"panic-dump\",\n  \"probe\": \"python -m harness panic-dump --target-dir tmp_panic\",\n  \"expected\": \"Creates a gzipped tarball (e.g., panic-<timestamp>.tar.gz) in tmp_panic with scrubbed state files (git.txt, status.csv, etc.) or empty entries if missing.\",\n  \"failure_modes\": [\n    \"Tarball not created due to permission error or missing target directory\",\n    \"Tarball contains unredacted secrets (e.g., API keys leaked in scrubbed files)\",\n    \"Tarball is empty or missing expected entries due to silent failures in file reading\"\n  ],\n  \"confidence\": 0.8\n}",
+      "parsed": {
+        "fut": "panic-dump",
+        "probe": "python -m harness panic-dump --target-dir tmp_panic",
+        "expected": "Creates a gzipped tarball (e.g., panic-<timestamp>.tar.gz) in tmp_panic with scrubbed state files (git.txt, status.csv, etc.) or empty entries if missing.",
+        "failure_modes": [
+          "Tarball not created due to permission error or missing target directory",
+          "Tarball contains unredacted secrets (e.g., API keys leaked in scrubbed files)",
+          "Tarball is empty or missing expected entries due to silent failures in file reading"
+        ],
+        "confidence": 0.8
+      },
+      "error": null
+    },
+    {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "fut": "observer flags",
+      "success": true,
+      "latency_ms": 20107,
+      "raw_text": "{\n  \"fut\": \"observer flags\",\n  \"probe\": \"harness observer flags\",\n  \"expected\": \"Prints a JSON array of flag objects (each with fields like flag_id, raised_at, acknowledged, etc.) or a plain-text list. If no flags raised, output may be empty array or 'No flags'.\",\n  \"failure_modes\": [\n    \"State file missing: command returns empty list instead of error, masking actual state\",\n    \"Corrupt observer-state.json: command raises `_StateFileCorruptError` but consumer may not handle path-only message\",\n    \"Flags not cleared after acknowledgment: command shows stale flags due to missing sync between read and write\"\n  ],\n  \"confidence\": 0.7\n}",
+      "parsed": {
+        "fut": "observer flags",
+        "probe": "harness observer flags",
+        "expected": "Prints a JSON array of flag objects (each with fields like flag_id, raised_at, acknowledged, etc.) or a plain-text list. If no flags raised, output may be empty array or 'No flags'.",
+        "failure_modes": [
+          "State file missing: command returns empty list instead of error, masking actual state",
+          "Corrupt observer-state.json: command raises `_StateFileCorruptError` but consumer may not handle path-only message",
+          "Flags not cleared after acknowledgment: command shows stale flags due to missing sync between read and write"
+        ],
+        "confidence": 0.7
+      },
+      "error": null
+    }
+  ]
+}
