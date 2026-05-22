@@ -1964,12 +1964,24 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
             import time as _time
             from harness.coord.integrator import integrate as _integrate
             from harness.coord.run_state import write_run_state, read_run_state as _read_run_state
-            from harness.coord.schemas import RunStateLiteral
+            from harness.coord.schemas import RunStateLiteral, WavePlan
+            from harness.coord.telemetry import compute_telemetry, format_tick_line
 
             terminal_states = {"completed", "failed", "done", "aborted"}
-            deadline = _time.monotonic() + watch_max_seconds
+            watch_start = _time.monotonic()
+            deadline = watch_start + watch_max_seconds
             last_state = report.state.value
             integrate_fired = False
+
+            # Load plan once for telemetry (per-worker step counts)
+            try:
+                _plan_obj = WavePlan.model_validate_json(
+                    (run_dir / "plan.json").read_text(encoding="utf-8")
+                )
+                _plan_tasks = [t.model_dump() for t in _plan_obj.tasks]
+            except Exception:
+                _plan_tasks = []
+            _watch_start_iso = datetime.now(timezone.utc).isoformat()
 
             while last_state not in terminal_states:
                 if _time.monotonic() > deadline:
@@ -2010,6 +2022,20 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
                 _time.sleep(max(1, watch_interval))
                 coord = Coordinator(run_id=rid, run_dir=run_dir, label=label)
                 report = coord.tick(spec, in_flight_limit=limit, engine=engine)
+
+                # --- Path 3 telemetry: per-tick one-liner --------------
+                if _plan_tasks:
+                    elapsed = int(_time.monotonic() - watch_start)
+                    try:
+                        tel = compute_telemetry(
+                            run_dir, _plan_tasks,
+                            started_at_iso=_watch_start_iso,
+                            elapsed_seconds=elapsed,
+                        )
+                        click.echo("  " + format_tick_line(tel))
+                    except Exception:
+                        pass  # telemetry is best-effort
+
                 if report.state.value != last_state:
                     click.echo(
                         f"run {report.run_id}: {last_state} -> "
