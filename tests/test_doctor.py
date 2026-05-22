@@ -12,6 +12,7 @@ from harness.cli import cli
 from harness.doctor import (
     Diagnosis, overall_severity, run_all,
     _check_python_version, _check_coord_writable, _check_secrets,
+    _check_env_var_inventory,
 )
 
 
@@ -74,6 +75,44 @@ def test_cli_doctor_exits_1_on_fail(tmp_path, monkeypatch) -> None:
         result = runner.invoke(cli, ["doctor"])
     assert result.exit_code == 1
     assert "fix: run harness install" in result.output
+
+
+def test_env_var_inventory_all_set_is_ok(monkeypatch) -> None:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]:
+        monkeypatch.setenv(k, "secret")
+    d = _check_env_var_inventory()
+    assert d.severity == "ok"
+
+
+def test_env_var_inventory_mixed_is_ok(monkeypatch) -> None:
+    monkeypatch.setenv("KIMI_API_KEY", "secret")
+    for k in ["DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    d = _check_env_var_inventory()
+    assert d.severity == "ok"
+
+
+def test_env_var_inventory_all_unset_is_warn(monkeypatch) -> None:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    d = _check_env_var_inventory()
+    assert d.severity == "warn"
+
+
+def test_env_var_inventory_message_format(monkeypatch) -> None:
+    monkeypatch.setenv("KIMI_API_KEY", "secret_value")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "another_secret")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    d = _check_env_var_inventory()
+    parts = d.message.split(", ")
+    keys = [p.split(":")[0] for p in parts]
+    assert keys == ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]
+    for p in parts:
+        assert p.endswith(":SET") or p.endswith(":UNSET")
+    assert "secret_value" not in d.message
+    assert "another_secret" not in d.message
 
 
 def test_cli_doctor_json_format(tmp_path, monkeypatch) -> None:
