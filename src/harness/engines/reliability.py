@@ -60,7 +60,16 @@ def aggregate_campaigns(
             notes="no coverage directory found; ranking empty",
         )
 
-    campaigns = sorted(coverage_dir.glob("multi_agent_campaign_*.json"))
+    # Glob both W4-G campaigns AND W5-F source-laden verifications.  Both
+    # have the same `results` array shape ({engine, model, success,
+    # latency_ms, ...}) so they aggregate cleanly.  The verification runs
+    # include budget context that updates the empirical picture as new
+    # data lands (e.g. MiMo Pro at 8192-token budget = 3/3, not the W4-G
+    # 2/5).
+    campaigns = sorted(
+        list(coverage_dir.glob("multi_agent_campaign_*.json"))
+        + list(coverage_dir.glob("verify_source_laden_*.json"))
+    )
     if not campaigns:
         return ReliabilityDigest(
             generated_at=datetime.now(timezone.utc).isoformat(),

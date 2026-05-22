@@ -245,22 +245,62 @@ def _apply_file_edits(edits: list[tuple[str, str, str]], base_path: Path) -> lis
         if not file_path.exists():
             # Create parent dirs if needed
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(replace, encoding="utf-8")
+            # W5-J 2026-05-22: write_bytes preserves engine's LF.
+            # write_text on Windows converts \n -> \r\n by default
+            # (universal-newlines), which silently mis-represents the
+            # engine's output.
+            file_path.write_bytes(replace.encode("utf-8"))
             modified.append(rel_path)
             continue
-        content = file_path.read_text(encoding="utf-8")
+        # Read in binary first so we can detect line endings before
+        # Python's universal-newlines decoding (which silently converts
+        # \r\n -> \n).
+        raw_bytes = file_path.read_bytes()
+        is_crlf = b"\r\n" in raw_bytes
+        content = raw_bytes.decode("utf-8")  # keeps \r\n intact
         if not search.strip():
             # Empty SEARCH on existing file → append idiom
             sep = "" if content.endswith("\n") else "\n"
-            file_path.write_text(content + sep + replace, encoding="utf-8")
+            new_content = content + sep + replace
+            file_path.write_bytes(_match_line_endings(new_content, is_crlf))
             modified.append(rel_path)
             continue
-        if search not in content:
-            continue
-        new_content = content.replace(search, replace, 1)
-        file_path.write_text(new_content, encoding="utf-8")
+
+        # W5-J 2026-05-22: CRLF-tolerant matching.
+        # DeepSeek/Kimi/MiMo all emit \n line endings.  Windows files often
+        # have \r\n.  Byte-exact `search in content` then fails even when
+        # the engine produced the right text.  Path 2 pilot caught this on
+        # CHANGELOG.md (smoking gun: valid FILE/REPLACE block from
+        # DeepSeek, but file is CRLF -> silent_no_op).  Strategy:
+        #   1. Try byte-exact (preserves existing behaviour)
+        #   2. If miss, normalise both to LF and retry — apply replace in
+        #      LF space, then re-emit with original line endings
+        if search in content:
+            new_content = content.replace(search, replace, 1)
+        else:
+            content_lf = content.replace("\r\n", "\n")
+            search_lf = search.replace("\r\n", "\n")
+            if search_lf not in content_lf:
+                continue  # truly absent — not a line-ending issue
+            replace_lf = replace.replace("\r\n", "\n")
+            new_content = content_lf.replace(search_lf, replace_lf, 1)
+
+        file_path.write_bytes(_match_line_endings(new_content, is_crlf))
         modified.append(rel_path)
     return modified
+
+
+def _match_line_endings(text: str, want_crlf: bool) -> bytes:
+    """Re-emit text with the originally-detected line ending convention.
+
+    Avoids smuggling \\n into a CRLF file (and vice versa), which would
+    leave the file with mixed line endings on disk.
+    """
+    if want_crlf:
+        # Normalise to LF first so we don't accidentally double-up on
+        # already-CRLF chunks, then emit as CRLF.
+        text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+    return text.encode("utf-8")
 
 
 def _git_commit(wt_path: Path, message: str) -> str | None:

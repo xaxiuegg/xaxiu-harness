@@ -1,17 +1,20 @@
 {
-  "generated_at": "2026-05-22T15:11:08.817019+00:00",
+  "generated_at": "2026-05-22T16:05:02.979092+00:00",
   "source_campaigns": [
-    "multi_agent_campaign_20260522T130924Z.json"
+    "multi_agent_campaign_20260522T130924Z.json",
+    "verify_source_laden_20260522T153904Z.json",
+    "verify_source_laden_20260522T154413Z.json",
+    "verify_source_laden_20260522T155741Z.json"
   ],
-  "notes": "aggregated 1 campaign(s); 20 total dispatches",
+  "notes": "aggregated 4 campaign(s); 47 total dispatches",
   "ranking": [
     {
       "engine": "deepseek",
       "model": "deepseek-v4-flash",
-      "ok": 5,
-      "fail": 0,
-      "parseable_rate": 1.0,
-      "avg_latency_ms": 14524
+      "ok": 13,
+      "fail": 1,
+      "parseable_rate": 0.929,
+      "avg_latency_ms": 10418
     },
     {
       "engine": "mimo",
@@ -24,18 +27,18 @@
     {
       "engine": "mimo",
       "model": "mimo-v2.5-pro",
-      "ok": 2,
-      "fail": 3,
-      "parseable_rate": 0.4,
-      "avg_latency_ms": 23136
+      "ok": 7,
+      "fail": 7,
+      "parseable_rate": 0.5,
+      "avg_latency_ms": 23754
     },
     {
       "engine": "kimi",
       "model": "kimi-for-coding",
       "ok": 0,
-      "fail": 5,
+      "fail": 14,
       "parseable_rate": 0.0,
-      "avg_latency_ms": 41253
+      "avg_latency_ms": 45784
     }
   ]
 }

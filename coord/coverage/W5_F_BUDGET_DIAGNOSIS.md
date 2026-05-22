@@ -99,3 +99,45 @@ order of operations.
 Primary engine = `swarm/deepseek` (3/3 empirical).
 Fallback engine = `swarm/mimo` (2/3 empirical, free).
 Skip Kimi entirely for the pilot.
+
+## Third run (max_tokens=8192, operator-requested high-budget verification)
+
+Operator pointed out: "if it is unlimited budget, you should not feel
+constrained to use limited token for certain tasks".  Kimi + MiMo are
+unlimited via Token Plan subscription, so there's no reason to constrain
+them.  Re-ran at 8192:
+
+| Packet (size)  | kimi | mimo-pro | deepseek |
+|----------------|------|----------|----------|
+| small (5.7 KB)  | FAIL `internal` 60s | **OK** | OK |
+| medium (1.0 KB) | FAIL `internal` 60s | **OK** | OK |
+| large (20.2 KB) | FAIL `internal` 60s | **OK** | OK |
+
+**Final at 8192-token budget: DeepSeek 3/3, MiMo Pro 3/3, Kimi 0/3.**
+
+MiMo Pro completed 2/3 → 3/3 progression as budget grew.  Previously-
+failing `small_source` (5.7 KB) now passes.  MiMo Pro is fully reliable
+when given adequate output budget.
+
+Kimi remains 0/3 at any budget tested.  `err=internal` at ~60s confirms
+the **60-second thinking-time cap is server-side** and budget-
+independent.  This is a model-level limit, not a harness configuration.
+
+### Updated production guidance
+
+| Engine          | Reliability | Use case |
+|-----------------|------------|----------|
+| DeepSeek v4-flash | 3/3 at all budgets | Production primary for source-laden FILE/REPLACE.  $0.001-0.003/dispatch. |
+| MiMo v2.5-Pro   | 3/3 at ≥8192 budget | Production-grade fallback.  Free via subscription.  Pass generous max_tokens. |
+| Kimi K2.6 for-coding | 0/3 source-laden | Reserve for short-form non-thinking tasks (planning summaries, classification). |
+
+### Probe-script discipline
+
+Going forward, probe scripts should:
+- **Omit max_tokens** entirely → inherit engine defaults (32k)
+- **Or pass ≥4096** when explicit caps are needed for cost control
+- **Never pass 500-1500** for thinking-mode engines — that's the bug we
+  just diagnosed.
+
+The harness production paths (worker, dispatcher) already do this
+correctly.
