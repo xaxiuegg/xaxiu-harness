@@ -56,6 +56,34 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
         )
 
     backend = engine.split("/", 1)[1] if "/" in engine else engine
+
+    # WIRE-SWARM-DIRECT-HTTP (2026-05-22): xaxiu-swarm doesn't know about
+    # every harness backend.  For REST-only engines that the swarm CLI
+    # never registered (currently just ``mimo`` — Xiaomi MiMo Open
+    # Platform), bypass the subprocess wrapper and call dispatch_packet
+    # directly.  Operator-facing identifier (``swarm/mimo``) stays
+    # uniform across plans + configs even though no swarm CLI is involved
+    # under the hood.  The integrating supervisor still parses the
+    # returned text for FILE/REPLACE blocks, just like swarm/kimi-api.
+    _DIRECT_HTTP_BACKENDS = {"mimo"}
+    if backend in _DIRECT_HTTP_BACKENDS:
+        from harness.engines.dispatcher import dispatch_packet
+        result = dispatch_packet(
+            project="harness-worker",
+            packet_path=str(packet_path),
+            force_engine=backend,
+        )
+        # Normalise to the SimpleNamespace shape the rest of run_worker
+        # consumes.  dispatch_packet returns a DispatchResult with
+        # success/text/error/tokens_used/cost_usd — they match 1:1.
+        return SimpleNamespace(
+            success=result.success,
+            text=result.text or "",
+            error=result.error,
+            tokens_used=int(getattr(result, "tokens_used", 0) or 0),
+            cost_usd=float(getattr(result, "cost_usd", 0.0) or 0.0),
+        )
+
     # Kimi-CLI applies edits in-place inside the cwd it's invoked from.
     # --add-dir tells the CLI which worktree to scope to.
     cmd = [

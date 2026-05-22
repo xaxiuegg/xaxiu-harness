@@ -42,10 +42,17 @@ DEFAULT_ENGINE_ROUTING: dict[str, str] = {
 # reference_xaxiu_swarm_concurrency_calibration): production observed
 # 6 swarm/kimi workers + 18 concurrent kimi-api dispatches across 3-key
 # pool with zero failures. DeepSeek stays at 1 per cost-on-demand posture.
+#
+# WIRE-MIMO-SLOTS (2026-05-22): MiMo Token Plan flow control is RPM 100 /
+# TPM 10M (Xiaomi docs).  At ~50K input tokens per typical worker packet
+# that's 200 in-flight workers before RPM bites — way above any realistic
+# need.  Capping at 4 keeps us under the rate limit even on bursty waves
+# while leaving room for parallel fan-out comparable to swarm/kimi.
 DEFAULT_ENGINE_SLOTS: dict[str, int] = {
     "swarm/kimi": 6,
     "swarm/kimi-api": 6,
     "swarm/deepseek": 1,
+    "swarm/mimo": 4,
 }
 
 

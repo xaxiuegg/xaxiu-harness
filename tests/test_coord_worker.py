@@ -637,6 +637,69 @@ def test_dispatch_via_swarm_does_not_run_subprocess_when_worktree_missing(tmp_pa
         mock_run.assert_not_called()
 
 
+def test_dispatch_via_swarm_routes_mimo_through_direct_http(tmp_path: Path) -> None:
+    """WIRE-SWARM-DIRECT-HTTP (2026-05-22): swarm/mimo bypasses xaxiu-swarm
+    subprocess and calls dispatch_packet directly because the swarm CLI
+    has no mimo backend.  Operator-facing identifier stays uniform but
+    the runtime path is in-process."""
+    import importlib
+    worker_mod = importlib.import_module("harness.coord.worker")
+    importlib.reload(worker_mod)
+    real_dispatch = worker_mod._dispatch_via_swarm
+
+    packet = tmp_path / "packet.md"
+    packet.write_text("hi", encoding="utf-8")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+
+    fake = SimpleNamespace(
+        success=True, text="FILE/REPLACE\n...\n", error=None,
+        tokens_used=100, cost_usd=0.0,
+    )
+    with patch("harness.engines.dispatcher.dispatch_packet",
+               return_value=fake) as mock_dispatch:
+        with patch.object(worker_mod.subprocess, "run") as mock_subproc:
+            result = real_dispatch(packet, "swarm/mimo", wt)
+            # xaxiu-swarm subprocess MUST NOT be invoked for mimo
+            mock_subproc.assert_not_called()
+            # dispatch_packet was called with force_engine='mimo' (bare backend)
+            mock_dispatch.assert_called_once()
+            kwargs = mock_dispatch.call_args.kwargs
+            assert kwargs["force_engine"] == "mimo"
+            assert kwargs["project"] == "harness-worker"
+
+    assert result.success is True
+    assert result.text.startswith("FILE/REPLACE")
+    assert result.tokens_used == 100
+
+
+def test_dispatch_via_swarm_still_uses_subprocess_for_kimi(tmp_path: Path) -> None:
+    """Regression sentinel: swarm/kimi still routes through xaxiu-swarm
+    subprocess.  Only the explicit direct-HTTP backend list (currently
+    {'mimo'}) gets bypassed."""
+    import importlib
+    worker_mod = importlib.import_module("harness.coord.worker")
+    importlib.reload(worker_mod)
+    real_dispatch = worker_mod._dispatch_via_swarm
+
+    packet = tmp_path / "packet.md"
+    packet.write_text("hi", encoding="utf-8")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+
+    fake_proc = MagicMock(returncode=0, stdout="done", stderr="")
+    with patch.object(worker_mod.subprocess, "run",
+                      return_value=fake_proc) as mock_subproc:
+        with patch("harness.engines.dispatcher.dispatch_packet") as mock_dispatch:
+            real_dispatch(packet, "swarm/kimi", wt)
+            mock_subproc.assert_called_once()
+            mock_dispatch.assert_not_called()
+            # Confirm xaxiu-swarm was the binary invoked
+            args = mock_subproc.call_args.args[0]
+            assert args[0] == "xaxiu-swarm"
+            assert "--backend" in args and "kimi" in args
+
+
 def test_run_worker_handles_worktree_missing_dispatch_failure(tmp_path: Path) -> None:
     """When dispatch raises WorktreeMissing, worker fails cleanly with error_tag set."""
     from harness.errors import WorktreeMissing
