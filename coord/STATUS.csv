@@ -152,3 +152,4 @@ W4-B,Wave 4,Integrator surfaces 0-merged-worker run as silent_no_op (sister fix)
 W4-G,Wave 4,Multi-engine multi-agent functional coverage campaign (20 dispatches),shipped,Claude,~45 min,2026-05-22,"Commit d6e3260+probe-exec; deepseek 5/5 reliability, kimi 0/5 empty"
 W4-H,Wave 5,UX polish: engines list subcommand + lint-spec --spec flag + read_status() default path,shipped,Claude,~30 min,2026-05-22,Surfaced by W4-G campaign; backward-compatible; 10 new tests
 W4-J,Wave 4,Dispatcher silent-empty guard: mimo backend success+empty -> mimo_empty error -> fallback,shipped,Claude,~20 min,2026-05-22,Pairs with W4-K cost-tracking; only re-labels success=True (preserves more-specific failure errors)
+W4-L,Wave 4,E2E coord pipeline validation: W4-A + W4-B both fire on silent no-op,shipped,Claude,~30 min,2026-05-22,Proof in coord/coverage/W4_L_E2E_PROOF.md; harness now blocks silent ship-failures from worker AND integrator layers
