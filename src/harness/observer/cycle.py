@@ -51,6 +51,7 @@ def run_cycle(
     *,
     observer_dir: Path | None = None,
     dispatch_fn: Callable[..., DispatchResult] | None = None,
+    dry_run: bool = False,
 ) -> CycleReport:
     """Run one observer audit cycle.
 
@@ -99,6 +100,33 @@ def run_cycle(
         cycle_id=cycle_id,
         audit_window_minutes=audit_window_minutes,
     )
+
+    # Dry-run: write preview JSON and return without dispatching
+    if dry_run:
+        output_path = str(base / "cycles" / f"cycle_report_{cycle_id}.json")
+        # Compact UTC stamp (no colons) — Windows-safe filename
+        stamp = started_at.strftime("%Y%m%dT%H%M%SZ")
+        dryrun_path = base / f"cycle_dryrun_{stamp}.json"
+        preview = {
+            "prompt_first_200_chars": prompt[:200],
+            "prompt_length_chars": len(prompt),
+            "engine": engine,
+            "output_path": output_path,
+            "recent_event_count": len(recent_log),
+        }
+        dryrun_path.write_text(json.dumps(preview, indent=2), encoding="utf-8")
+        return CycleReport(
+            cycle_id=cycle_id,
+            started_at=started_iso,
+            ended_at=started_iso,
+            engine_used=engine,
+            audit_window_minutes=audit_window_minutes,
+            prompt_size_chars=len(prompt),
+            response_size_chars=0,
+            findings_count=0,
+            flags_raised=[],
+            report_path=dryrun_path,
+        )
 
     # 2. Dispatch audit
     dispatcher = dispatch_fn or dispatch_packet

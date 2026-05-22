@@ -791,3 +791,62 @@ def test_register_tasks_both_ok() -> None:
     assert ok is True
     assert "45 min" in msg
     assert "22:30" in msg
+import json
+from unittest.mock import MagicMock
+
+
+def test_dry_run_writes_expected_json_keys(tmp_path):
+    """--dry-run should write a JSON file with the required keys."""
+    from harness.observer.cycle import run_cycle
+
+    report = run_cycle(
+        observer_dir=tmp_path,
+        dry_run=True,
+    )
+    assert report.report_path is not None
+    data = json.loads(report.report_path.read_text(encoding="utf-8"))
+    assert set(data.keys()) == {
+        "prompt_first_200_chars",
+        "prompt_length_chars",
+        "engine",
+        "output_path",
+        "recent_event_count",
+    }
+
+
+def test_dry_run_does_not_dispatch(tmp_path):
+    """--dry-run must not call the dispatch function."""
+    from harness.observer.cycle import run_cycle
+
+    mock_dispatch = MagicMock()
+    run_cycle(
+        observer_dir=tmp_path,
+        dry_run=True,
+        dispatch_fn=mock_dispatch,
+    )
+    mock_dispatch.assert_not_called()
+
+
+def test_dry_run_prompt_first_200_chars(tmp_path):
+    """prompt_first_200_chars must be exactly the first 200 chars, no ellipsis or folding."""
+    from harness.observer.cycle import run_cycle
+    from harness.observer.audit_prompt import build_audit_prompt
+
+    report = run_cycle(
+        observer_dir=tmp_path,
+        dry_run=True,
+    )
+    data = json.loads(report.report_path.read_text(encoding="utf-8"))
+
+    # Build the same prompt to verify
+    prompt = build_audit_prompt(
+        recent_log=[],
+        status_rows=[],
+        git_log=[],
+        cycle_id=report.cycle_id,
+        audit_window_minutes=60,
+    )
+    expected = prompt[:200]
+    assert data["prompt_first_200_chars"] == expected
+    assert len(data["prompt_first_200_chars"]) == min(200, len(expected))
+    assert "..." not in data["prompt_first_200_chars"]
