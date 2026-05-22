@@ -24,7 +24,23 @@ from harness.coord.schemas import (
     WorkerStateLiteral,
     WorkerStatus,
 )
-from harness.coord.worktree import create_worktree
+from harness.coord.worktree import create_worktree, worker_branch_name
+
+
+def _git_branch_exists(branch: str, repo_root: Path) -> bool:
+    """Return True if *branch* exists as a local ref in *repo_root*.
+
+    Used by WIRE-DEP-BRANCH to decide whether to branch a worker's
+    worktree from its parent (preferred) or fall back to master.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", branch],
+            cwd=repo_root, capture_output=True, text=True, check=False,
+        )
+        return proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 @dataclass
@@ -134,11 +150,26 @@ class Coordinator:
                 skipped.append(task.worker_id)
                 continue
 
-            # Create worktree before spawning worker
+            # Create worktree before spawning worker.
+            #
+            # WIRE-DEP-BRANCH (2026-05-22): when this task depends on
+            # another worker, branch from that worker's branch so the
+            # read_set reflects upstream commits.  Battle-test 2026-05-21
+            # surfaced worker-2 reading the pre-worker-1 file because
+            # every worktree was being branched from master regardless of
+            # depends_on.  Falls back to master when no deps or when the
+            # parent branch is not yet created (e.g. resume path before
+            # the parent worker has committed).
+            base_branch = "master"
+            if task.depends_on:
+                parent_id = task.depends_on[-1]
+                parent_branch = worker_branch_name(self.run_id, parent_id)
+                if _git_branch_exists(parent_branch, self.project_root):
+                    base_branch = parent_branch
             create_worktree(
                 self.run_id,
                 task.worker_id,
-                base_branch="master",
+                base_branch=base_branch,
                 repo_root=self.project_root,
             )
 
@@ -155,11 +186,35 @@ class Coordinator:
             ]
             if engine:
                 cmd.extend(["--engine", engine])
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+
+            # WIRE-WORKER-DETACH (2026-05-22): redirect to per-worker log
+            # and detach on Windows so the child survives parent exit.
+            # Battle-test 2026-05-21 found CliRunner-invoked coord run lost
+            # all workers because Popen children with DEVNULL stdout died
+            # silently when the in-process CLI invocation returned.
+            workers_log_dir = self.run_dir / "workers"
+            workers_log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = workers_log_dir / f"{task.worker_id}.log"
+            log_fh = open(log_path, "ab", buffering=0)
+
+            popen_kwargs: dict[str, Any] = {
+                "stdout": log_fh,
+                "stderr": subprocess.STDOUT,
+                "stdin": subprocess.DEVNULL,
+            }
+            if os.name == "nt":
+                # DETACHED_PROCESS (0x00000008) + CREATE_NEW_PROCESS_GROUP
+                # (0x00000200) → child runs in its own console-less group,
+                # outlives the parent, and is exempt from CTRL+C broadcast.
+                popen_kwargs["creationflags"] = 0x00000008 | 0x00000200
+                popen_kwargs["close_fds"] = False
+            else:
+                popen_kwargs["start_new_session"] = True
+                popen_kwargs["close_fds"] = True
+
+            proc = subprocess.Popen(cmd, **popen_kwargs)
+            # The Popen wrapper retains its own dup of the fd; ours can close.
+            log_fh.close()
             self._procs[task.worker_id] = proc
             launched.append(task.worker_id)
             in_flight += 1

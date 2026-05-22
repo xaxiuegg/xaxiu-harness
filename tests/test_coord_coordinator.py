@@ -193,10 +193,138 @@ def test_launch_workers_creates_worktree_before_spawn(tmp_path: Path) -> None:
             mock_popen.return_value = MagicMock(pid=1234, poll=MagicMock(return_value=None))
             c.launch_workers(plan)
 
+    # Worker-1 has no deps → branches from master.
     mock_wt.assert_called_once_with(
         "20260520T220000-ab12", "worker-1", base_branch="master", repo_root=c.project_root
     )
     mock_popen.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# WIRE-DEP-BRANCH (2026-05-22) — D5
+# ---------------------------------------------------------------------------
+
+def test_launch_workers_branches_from_parent_when_dep_branch_exists(tmp_path: Path) -> None:
+    """If worker-2 depends on worker-1 and wt/<rid>/worker-1 exists, worker-2 branches from there."""
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+
+    # Pretend worker-1 has already completed (checkpoint state=completed)
+    from harness.coord.checkpoint import write_checkpoint, Checkpoint
+    ckpts = tmp_path / "checkpoints"
+    ckpts.mkdir(parents=True, exist_ok=True)
+    write_checkpoint(
+        ckpts / "worker-1.json",
+        Checkpoint(worker_id="worker-1", run_id=c.run_id, state="completed",
+                   commit_sha="abc1234", updated_at="2026-05-22T01:00:00Z"),
+    )
+
+    # _git_branch_exists is patched to claim parent branch exists
+    with patch("harness.coord.coordinator._git_branch_exists", return_value=True):
+        with patch("harness.coord.coordinator.create_worktree") as mock_wt:
+            with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+                mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+                c.launch_workers(plan)
+
+    # worker-2 should be launched (worker-1 deps met) and branched from worker-1
+    worker2_calls = [call for call in mock_wt.call_args_list
+                     if call.args[1] == "worker-2"]
+    assert len(worker2_calls) == 1
+    assert worker2_calls[0].kwargs["base_branch"] == "wt/20260520T220000-ab12/worker-1"
+
+
+def test_launch_workers_falls_back_to_master_when_parent_branch_missing(tmp_path: Path) -> None:
+    """If parent branch hasn't been created yet, worker still launches from master (recover-friendly)."""
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+
+    from harness.coord.checkpoint import write_checkpoint, Checkpoint
+    ckpts = tmp_path / "checkpoints"
+    ckpts.mkdir(parents=True, exist_ok=True)
+    write_checkpoint(
+        ckpts / "worker-1.json",
+        Checkpoint(worker_id="worker-1", run_id=c.run_id, state="completed",
+                   commit_sha="abc1234", updated_at="2026-05-22T01:00:00Z"),
+    )
+
+    with patch("harness.coord.coordinator._git_branch_exists", return_value=False):
+        with patch("harness.coord.coordinator.create_worktree") as mock_wt:
+            with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+                mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+                c.launch_workers(plan)
+
+    worker2_calls = [call for call in mock_wt.call_args_list
+                     if call.args[1] == "worker-2"]
+    assert len(worker2_calls) == 1
+    assert worker2_calls[0].kwargs["base_branch"] == "master"
+
+
+def test_git_branch_exists_returns_false_for_unknown_branch(tmp_path: Path) -> None:
+    from harness.coord.coordinator import _git_branch_exists
+    # tmp_path is not a git repo, so the call exit-code is non-zero → False
+    assert _git_branch_exists("nonexistent-branch", tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# launch_workers — detachment + per-worker log (WIRE-WORKER-DETACH 2026-05-22)
+# ---------------------------------------------------------------------------
+
+def test_launch_workers_creates_per_worker_log_file(tmp_path: Path) -> None:
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+            c.launch_workers(plan)
+    log_path = tmp_path / "workers" / "worker-1.log"
+    assert log_path.exists(), "per-worker log file should be created"
+
+
+def test_launch_workers_redirects_stdout_to_log_not_devnull(tmp_path: Path) -> None:
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+    import subprocess as _sp
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+            c.launch_workers(plan)
+    _, kwargs = mock_popen.call_args
+    # stdout must NOT be DEVNULL — the battle-test defect was exactly that.
+    assert kwargs["stdout"] is not _sp.DEVNULL
+    # stderr should be folded into stdout so the single log file captures both
+    assert kwargs["stderr"] == _sp.STDOUT
+    # stdin DEVNULL so the detached child can't block on input
+    assert kwargs["stdin"] == _sp.DEVNULL
+
+
+def test_launch_workers_detaches_on_windows(tmp_path: Path) -> None:
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.os") as mock_os:
+            mock_os.name = "nt"
+            mock_os.path = __import__("os").path  # let Path operations still work
+            with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+                mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+                c.launch_workers(plan)
+    _, kwargs = mock_popen.call_args
+    # 0x00000008 DETACHED_PROCESS | 0x00000200 CREATE_NEW_PROCESS_GROUP
+    assert kwargs.get("creationflags") == (0x00000008 | 0x00000200)
+
+
+def test_launch_workers_uses_start_new_session_on_posix(tmp_path: Path) -> None:
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.os") as mock_os:
+            mock_os.name = "posix"
+            mock_os.path = __import__("os").path
+            with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+                mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+                c.launch_workers(plan)
+    _, kwargs = mock_popen.call_args
+    assert kwargs.get("start_new_session") is True
+    assert "creationflags" not in kwargs
 
 
 # ---------------------------------------------------------------------------
