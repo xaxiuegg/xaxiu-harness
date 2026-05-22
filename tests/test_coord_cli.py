@@ -116,6 +116,73 @@ def test_coord_status_missing_run(runner: CliRunner, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# coord status --json
+# ---------------------------------------------------------------------------
+
+@patch("harness.coord.run_state.read_run_state")
+def test_coord_status_json_success(mock_read, runner: CliRunner, tmp_path: Path) -> None:
+    from harness.coord.schemas import IntegratorStatus, RunState, RunStateLiteral, WorkerStateLiteral, WorkerStatus
+    run_state = RunState(
+        schema_version=1,
+        run_id="20260520T220000-ab12",
+        spec_path="spec.md",
+        state=RunStateLiteral.RUNNING,
+        plan_path="plan.json",
+        started_at="2026-05-20T22:00:00Z",
+        last_tick_at="2026-05-20T22:00:00Z",
+        workers={
+            "worker-1": WorkerStatus(worker_id="worker-1", state=WorkerStateLiteral.COMPLETED),
+        },
+        integrator_status=IntegratorStatus(state="pending"),
+        escalations=[],
+    )
+    mock_read.return_value = run_state
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["coord", "status", "--run-id", "20260520T220000-ab12", "--json"])
+    assert result.exit_code == 0
+    # Parse JSON output
+    data = json.loads(result.output)
+    assert data["run_id"] == "20260520T220000-ab12"
+    assert data["state"] == "running"
+
+
+@patch("harness.coord.run_state.read_run_state")
+def test_coord_status_human_output(mock_read, runner: CliRunner, tmp_path: Path) -> None:
+    from harness.coord.schemas import IntegratorStatus, RunState, RunStateLiteral, WorkerStateLiteral, WorkerStatus
+    mock_read.return_value = RunState(
+        schema_version=1,
+        run_id="20260520T220000-ab12",
+        spec_path="spec.md",
+        state=RunStateLiteral.RUNNING,
+        plan_path="plan.json",
+        started_at="2026-05-20T22:00:00Z",
+        last_tick_at="2026-05-20T22:00:00Z",
+        workers={
+            "worker-1": WorkerStatus(worker_id="worker-1", state=WorkerStateLiteral.COMPLETED),
+        },
+        integrator_status=IntegratorStatus(state="pending"),
+        escalations=[],
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["coord", "status", "--run-id", "20260520T220000-ab12"])
+    assert result.exit_code == 0
+    # Check that human-readable output is preserved (format: "run <id>: <state>")
+    assert "run 20260520T220000-ab12: running" in result.output
+    assert "worker-1: completed" in result.output
+
+
+@patch("harness.coord.run_state.read_run_state")
+def test_coord_status_json_not_found(mock_read, runner: CliRunner, tmp_path: Path) -> None:
+    mock_read.return_value = None
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["coord", "status", "--run-id", "NONEXISTENT", "--json"])
+    assert result.exit_code == 1
+    # Should still be valid JSON with an error message
+    data = json.loads(result.output)
+    assert "error" in data
+
+
+# ---------------------------------------------------------------------------
 # coord integrate
 # ---------------------------------------------------------------------------
 

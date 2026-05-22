@@ -1895,21 +1895,30 @@ def coord_list(limit: int, label: str | None) -> None:
 
 @coord_group.command(name="status")
 @click.option("--run-id", required=True)
-def coord_status(run_id: str) -> None:
-    """Show run state summary."""
+@click.option("--json", "json_output", is_flag=True, default=False,
+              help="Output RunState as JSON instead of human-readable summary.")
+def coord_status(run_id: str, json_output: bool) -> None:
+    """Show run state summary. Use --json for machine-readable output."""
+    import json as _json
     from harness.coord.run_state import read_run_state
     run_dir = Path("runs") / run_id
     state = read_run_state(run_dir / "run_state.json")
     if state is None:
-        click.echo("error: run not found")
+        if json_output:
+            click.echo(_json.dumps({"error": f"run {run_id} not found"}))
+        else:
+            click.echo("error: run not found")
         raise SystemExit(1)
-    click.echo(f"run {state.run_id}: {state.state.value}")
-    click.echo(f"  plan: {state.plan_path}")
-    click.echo(f"  workers: {len(state.workers)}")
-    for wid, st in state.workers.items():
-        click.echo(f"    {wid}: {st.state.value}")
-    if state.escalations:
-        click.echo(f"  escalations: {len(state.escalations)}")
+    if json_output:
+        click.echo(state.model_dump_json())
+    else:
+        click.echo(f"run {state.run_id}: {state.state.value}")
+        click.echo(f"  plan: {state.plan_path}")
+        click.echo(f"  workers: {len(state.workers)}")
+        for wid, st in state.workers.items():
+            click.echo(f"    {wid}: {st.state.value}")
+        if state.escalations:
+            click.echo(f"  escalations: {len(state.escalations)}")
 
 
 @coord_group.command(name="watch")
