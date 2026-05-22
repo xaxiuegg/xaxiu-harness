@@ -953,8 +953,9 @@ def observer_ack(flag_id: str) -> None:
 @observer.command(name="cycle-now")
 @click.option("--engine", default="swarm/deepseek", help="Audit engine override.")
 @click.option("--window", "audit_window", type=int, default=60, help="Minutes of history to audit.")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False, help="Preview inputs without dispatching.")
 @click.pass_context
-def observer_cycle_now(ctx: click.Context, engine: str, audit_window: int) -> None:
+def observer_cycle_now(ctx: click.Context, engine: str, audit_window: int, dry_run: bool) -> None:
     """Run one observer cycle immediately."""
     state = read_state()
     if state.status == "uninitialized":
@@ -969,7 +970,11 @@ def observer_cycle_now(ctx: click.Context, engine: str, audit_window: int) -> No
         click.echo("dry-run: would run observer cycle")
         sys.exit(0)
 
-    report = run_cycle(engine=engine, audit_window_minutes=audit_window)
+    report = run_cycle(engine=engine, audit_window_minutes=audit_window, dry_run=dry_run)
+
+    if dry_run:
+        click.echo(str(report.report_path))
+        sys.exit(0)
 
     # Update state
     state.last_cycle_at = report.ended_at
@@ -1364,14 +1369,21 @@ def budget_show(engine: Optional[str], since: Optional[str]) -> None:
 
 
 @budget_group.command(name="summary")
-@click.option("--since", default="this-month")
-def budget_summary_cmd(since: str) -> None:
+@click.option("--since", default=None)
+@click.option("--since-days", type=int, default=None,
+              help="Number of days to look back (mutually exclusive with --since).")
+def budget_summary_cmd(since: str | None, since_days: int | None) -> None:
     """Per-engine totals + grand total."""
-    since_iso = None
-    if since == "this-month":
-        since_iso = datetime.now(timezone.utc).strftime("%Y-%m")
-    else:
+    if since is not None and since_days is not None:
+        raise click.UsageError("--since and --since-days are mutually exclusive")
+    if since_days is not None and since_days < 1:
+        raise click.BadParameter("--since-days must be >= 1", param_hint="'--since-days'")
+    if since_days is not None:
+        since_iso = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
+    elif since is not None:
         since_iso = since
+    else:
+        since_iso = datetime.now(timezone.utc).strftime("%Y-%m")
     agg = budget_summary(DEFAULT_LEDGER_PATH, since_iso=since_iso)
     if not agg:
         click.echo("(no dispatches)")

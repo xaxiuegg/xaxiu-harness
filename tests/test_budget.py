@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -288,6 +289,101 @@ def test_budget_reset_without_force_warns(runner: CliRunner, tmp_path: Path, mon
     result = runner.invoke(cli, ["budget", "reset"])
     assert result.exit_code == 1
     assert "--force" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --since-days tests
+# ---------------------------------------------------------------------------
+
+
+def test_budget_summary_since_days_one(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--since-days 1 should include only entries from the last 24 hours."""
+    ledger = tmp_path / "ledger.jsonl"
+    monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", ledger)
+    monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", ledger)
+
+    # Write two entries directly with controlled timestamps
+    fresh = CostEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        task_id="fresh", engine="kimi-api",
+        input_tokens=1000, output_tokens=0, latency_ms=0, cost_usd=0.15,
+    )
+    old = CostEntry(
+        timestamp=(datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+        task_id="stale", engine="kimi-api",
+        input_tokens=1000, output_tokens=0, latency_ms=0, cost_usd=0.15,
+    )
+    ledger.write_text(
+        fresh.model_dump_json() + "\n" + old.model_dump_json() + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli, ["budget", "summary", "--since-days", "1"])
+    assert result.exit_code == 0
+    assert "kimi-api" in result.output
+    # Only the fresh entry is within the 1-day window
+    assert "dispatches=1" in result.output
+
+
+def test_budget_summary_since_days_thirty(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--since-days 30 should include 29-day-old but exclude 31-day-old entries."""
+    ledger = tmp_path / "ledger.jsonl"
+    monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", ledger)
+    monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", ledger)
+    
+    # Create entries with specific timestamps
+    entry_29_days = CostEntry(
+        timestamp=(datetime.now(timezone.utc) - timedelta(days=29)).isoformat(),
+        task_id="29d",
+        engine="kimi-api",
+        input_tokens=1000,
+        output_tokens=0,
+        latency_ms=0,
+        cost_usd=0.15,
+    )
+    entry_31_days = CostEntry(
+        timestamp=(datetime.now(timezone.utc) - timedelta(days=31)).isoformat(),
+        task_id="31d",
+        engine="kimi-api",
+        input_tokens=1000,
+        output_tokens=0,
+        latency_ms=0,
+        cost_usd=0.15,
+    )
+    
+    ledger.write_text(
+        entry_29_days.model_dump_json() + "\n" +
+        entry_31_days.model_dump_json() + "\n",
+        encoding="utf-8",
+    )
+    
+    result = runner.invoke(cli, ["budget", "summary", "--since-days", "30"])
+    assert result.exit_code == 0
+    # 29-day entry is within window, 31-day is excluded → dispatches=1
+    assert "kimi-api" in result.output
+    assert "dispatches=1" in result.output
+
+
+def test_budget_summary_mutually_exclusive(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both --since and --since-days should exit with usage error."""
+    ledger = tmp_path / "ledger.jsonl"
+    monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", ledger)
+    
+    result = runner.invoke(cli, ["budget", "summary", "--since", "2024-01-01", "--since-days", "7"])
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.output
+
+
+def test_budget_summary_since_days_zero(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--since-days 0 should exit with a usage error (click BadParameter)."""
+    ledger = tmp_path / "ledger.jsonl"
+    monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", ledger)
+
+    result = runner.invoke(cli, ["budget", "summary", "--since-days", "0"])
+    assert result.exit_code == 2
+    # click renders BadParameter as "Invalid value for '--since-days'"
+    assert "--since-days" in result.output
+    assert "must be" in result.output
 
 
 # ---------------------------------------------------------------------------
