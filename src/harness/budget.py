@@ -79,11 +79,39 @@ class CostEntry(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _normalize_engine(engine: str) -> str:
+    """Map wrapper-style engine ids onto the canonical pricing-table key.
+
+    The xaxiu-swarm wrapper exposes ``swarm/kimi``, ``swarm/kimi-api``,
+    ``swarm/deepseek-v4-flash``, etc.  The pricing table keys these
+    backends bare (``kimi``, ``kimi-api``, ``deepseek``).  This helper
+    strips the ``swarm/`` prefix and folds DeepSeek variants
+    (``deepseek-v4-flash``, ``deepseek-v4-pro``) onto their priced rows.
+
+    WIRE-BUDGET-SWARM (2026-05-22): added after battle-test 2026-05-21
+    surfaced "Unknown engine 'swarm/kimi'; recording cost=0" on every
+    real coord-run worker dispatch.
+    """
+    e = engine
+    if e.startswith("swarm/"):
+        e = e[len("swarm/"):]
+    # Fold DeepSeek model-suffix variants onto their priced bucket.
+    if e in ("deepseek-v4-flash", "deepseek-v4-flash-thinking",
+             "deepseek-v4-base", "deepseek-flash"):
+        return "deepseek"
+    if e in ("deepseek-v4-pro", "deepseek-v4-pro-thinking",
+             "deepseek-pro-thinking"):
+        return "deepseek-pro"
+    return e
+
+
 def _compute_cost(engine: str, input_tokens: int, output_tokens: int) -> float:
     pricing = _load_pricing()
-    table = pricing.get(engine)
+    canonical = _normalize_engine(engine)
+    table = pricing.get(canonical)
     if table is None:
-        logger.warning("Unknown engine %r; recording cost=0", engine)
+        logger.warning("Unknown engine %r (normalized %r); recording cost=0",
+                       engine, canonical)
         return 0.0
     input_cost = (input_tokens / 1_000_000) * table.get("input", 0.0)
     output_cost = (output_tokens / 1_000_000) * table.get("output", 0.0)

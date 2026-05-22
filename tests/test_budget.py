@@ -288,3 +288,72 @@ def test_budget_reset_without_force_warns(runner: CliRunner, tmp_path: Path, mon
     result = runner.invoke(cli, ["budget", "reset"])
     assert result.exit_code == 1
     assert "--force" in result.output
+
+
+# ---------------------------------------------------------------------------
+# WIRE-BUDGET-SWARM (2026-05-22) — D3
+# ---------------------------------------------------------------------------
+
+def test_normalize_engine_strips_swarm_prefix() -> None:
+    from harness.budget import _normalize_engine
+    assert _normalize_engine("swarm/kimi") == "kimi"
+    assert _normalize_engine("swarm/kimi-api") == "kimi-api"
+    assert _normalize_engine("kimi") == "kimi"
+
+
+def test_normalize_engine_folds_deepseek_variants() -> None:
+    from harness.budget import _normalize_engine
+    assert _normalize_engine("swarm/deepseek-v4-flash") == "deepseek"
+    assert _normalize_engine("deepseek-v4-flash") == "deepseek"
+    assert _normalize_engine("swarm/deepseek-v4-pro") == "deepseek-pro"
+    assert _normalize_engine("deepseek-v4-pro-thinking") == "deepseek-pro"
+
+
+def test_record_dispatch_swarm_kimi_does_not_warn(tmp_path: Path) -> None:
+    """swarm/kimi must resolve to the kimi (subscription, zero-cost) row, no warning."""
+    ledger = tmp_path / "ledger.jsonl"
+    with patch("harness.budget.logger") as mock_logger:
+        entry = record_dispatch(
+            task_id="t1",
+            engine="swarm/kimi",
+            input_tokens=1_000_000,
+            output_tokens=500_000,
+            ledger_path=ledger,
+        )
+    # kimi is the subscription engine — zero cost — but the WARNING must
+    # not fire because the engine is now recognised.
+    assert entry.cost_usd == 0.0
+    mock_logger.warning.assert_not_called()
+    # The raw engine name is preserved in the ledger entry — only the
+    # cost lookup is normalised.
+    assert entry.engine == "swarm/kimi"
+
+
+def test_record_dispatch_swarm_deepseek_flash_computes_priced_cost(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    with patch("harness.budget.logger") as mock_logger:
+        entry = record_dispatch(
+            task_id="t1",
+            engine="swarm/deepseek-v4-flash",
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            ledger_path=ledger,
+        )
+    expected = round(0.27 + 1.10, 6)  # deepseek flash rates
+    assert entry.cost_usd == expected
+    mock_logger.warning.assert_not_called()
+
+
+def test_record_dispatch_swarm_kimi_api_uses_moonshot_pricing(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    with patch("harness.budget.logger") as mock_logger:
+        entry = record_dispatch(
+            task_id="t1",
+            engine="swarm/kimi-api",
+            input_tokens=1_000_000,
+            output_tokens=200_000,
+            ledger_path=ledger,
+        )
+    expected = round(0.15 + (0.2 * 2.50), 6)
+    assert entry.cost_usd == expected
+    mock_logger.warning.assert_not_called()
