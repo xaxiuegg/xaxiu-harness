@@ -81,6 +81,28 @@ def _check_secrets() -> Diagnosis:
                      "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY env vars")
 
 
+def _check_engine_reachability() -> Diagnosis:
+    required = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"}
+    try:
+        from harness.secrets import dpapi
+        dpapi_count = sum(1 for s in dpapi.list_secrets() if s in required)
+    except Exception:
+        dpapi_count = 0
+    env_hits = [k for k in required if os.environ.get(k)]
+    if dpapi_count == 0 and not env_hits:
+        return Diagnosis(
+            "engine_reachability", "fail",
+            "no engine API keys found (DPAPI or env)",
+            "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY env vars",
+        )
+    parts = []
+    if dpapi_count:
+        parts.append(f"dpapi={dpapi_count}")
+    if env_hits:
+        parts.append(f"env={env_hits[0]}")
+    return Diagnosis("engine_reachability", "ok", " ".join(parts))
+
+
 def _check_env_var_inventory() -> Diagnosis:
     keys = [
         "KIMI_API_KEY",
@@ -144,6 +166,7 @@ def run_all() -> list[Diagnosis]:
         _check_git(),
         _check_dpapi(),
         _check_secrets(),
+        _check_engine_reachability(),
         _check_env_var_inventory(),
         _check_coord_writable(),
         _check_task_scheduler(),

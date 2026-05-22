@@ -12,7 +12,7 @@ from harness.cli import cli
 from harness.doctor import (
     Diagnosis, overall_severity, run_all,
     _check_python_version, _check_coord_writable, _check_secrets,
-    _check_env_var_inventory,
+    _check_env_var_inventory, _check_engine_reachability,
 )
 
 
@@ -113,6 +113,45 @@ def test_env_var_inventory_message_format(monkeypatch) -> None:
         assert p.endswith(":SET") or p.endswith(":UNSET")
     assert "secret_value" not in d.message
     assert "another_secret" not in d.message
+
+
+def test_engine_reachability_both_empty(monkeypatch):
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
+        d = _check_engine_reachability()
+    assert d.severity == "fail"
+    assert "harness install" in d.fix
+
+
+def test_engine_reachability_only_dpapi(monkeypatch):
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    with patch("harness.secrets.dpapi.list_secrets", return_value=["KIMI_API_KEY", "DEEPSEEK_API_KEY"]):
+        d = _check_engine_reachability()
+    assert d.severity == "ok"
+    assert "dpapi=2" in d.message
+
+
+def test_engine_reachability_only_env(monkeypatch):
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
+        d = _check_engine_reachability()
+    assert d.severity == "ok"
+    assert "env=ANTHROPIC_API_KEY" in d.message
+
+
+def test_engine_reachability_both_populated(monkeypatch):
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    with patch("harness.secrets.dpapi.list_secrets", return_value=["KIMI_API_KEY"]):
+        d = _check_engine_reachability()
+    assert d.severity == "ok"
+    assert "dpapi=1" in d.message
+    assert "env=GEMINI_API_KEY" in d.message
 
 
 def test_cli_doctor_json_format(tmp_path, monkeypatch) -> None:
