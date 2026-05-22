@@ -1,0 +1,26 @@
+{
+  "run_at_utc": "2026-05-22T09:53:58.272743+00:00",
+  "results": [
+    {
+      "label": "kimi-k2.6",
+      "ok": false,
+      "latency_ms": 122175,
+      "error": "all_fallbacks_exhausted: internal",
+      "path": "coord\\reviews\\external\\20260522T094752Z_review_kimi-k2.6.md"
+    },
+    {
+      "label": "mimo-pro",
+      "ok": false,
+      "latency_ms": 121885,
+      "error": "all_fallbacks_exhausted: engine_init_failed",
+      "path": "coord\\reviews\\external\\20260522T094752Z_review_mimo-pro.md"
+    },
+    {
+      "label": "deepseek-thinking",
+      "ok": false,
+      "latency_ms": 122010,
+      "error": "all_fallbacks_exhausted: HTTP 400",
+      "path": "coord\\reviews\\external\\20260522T094752Z_review_deepseek-thinking.md"
+    }
+  ]
+}
