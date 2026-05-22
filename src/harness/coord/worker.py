@@ -58,14 +58,21 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
     backend = engine.split("/", 1)[1] if "/" in engine else engine
 
     # WIRE-SWARM-DIRECT-HTTP (2026-05-22): xaxiu-swarm doesn't know about
-    # every harness backend.  For REST-only engines that the swarm CLI
-    # never registered (currently just ``mimo`` — Xiaomi MiMo Open
-    # Platform), bypass the subprocess wrapper and call dispatch_packet
-    # directly.  Operator-facing identifier (``swarm/mimo``) stays
-    # uniform across plans + configs even though no swarm CLI is involved
-    # under the hood.  The integrating supervisor still parses the
-    # returned text for FILE/REPLACE blocks, just like swarm/kimi-api.
-    _DIRECT_HTTP_BACKENDS = {"mimo"}
+    # every harness backend.  For REST-only / in-process engines that the
+    # swarm CLI never registered, bypass the subprocess wrapper and call
+    # dispatch_packet directly.  Operator-facing identifier
+    # (``swarm/mimo`` / ``swarm/mock``) stays uniform across plans +
+    # configs even though no swarm CLI is involved under the hood.  The
+    # integrating supervisor still parses the returned text for
+    # FILE/REPLACE blocks, just like swarm/kimi-api.
+    #
+    # W5-A 2026-05-22: added ``mock`` so the v2 offline smoke test can
+    # drive coord end-to-end via swarm/mock without needing a real
+    # xaxiu-swarm backend for mock (MockEngine emits a valid FILE/REPLACE
+    # block for mock-out-1.txt).  Pre-W5-A, swarm/mock invoked
+    # `xaxiu-swarm dispatch --backend mock` which exited non-zero
+    # because no such backend is registered.
+    _DIRECT_HTTP_BACKENDS = {"mimo", "mock"}
     if backend in _DIRECT_HTTP_BACKENDS:
         from harness.engines.dispatcher import dispatch_packet
         result = dispatch_packet(
