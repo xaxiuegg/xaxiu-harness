@@ -203,6 +203,27 @@ def integrate(
             diagnostic=merge_diag,
         )
 
+    # WIRE-INTEGRATOR-NOOP-DETECT (2026-05-22): if zero workers were merged
+    # AND zero conflicts, the run was a SILENT NO-OP — workers reported
+    # state=completed but had no commit_sha (engine returned non-applying
+    # FILE/REPLACE, or worker.run_worker bug pre-W4-A fix).  Integrator
+    # used to report success=True commit=None pushed=False, which masked
+    # the whole run as shipped.  Now report success=False with diagnostic
+    # so the operator sees that nothing actually moved.
+    if merge_workers and plan_path.exists() and not merged and not conflicted:
+        return IntegrationReport(
+            success=False,
+            workers_merged=merged,
+            workers_skipped=skipped,
+            workers_conflicted=conflicted,
+            diagnostic=(
+                "silent_no_op: 0 workers committed (no merge candidates, no "
+                "conflicts).  Either every worker failed silently (pre-W4-A "
+                "bug) or every worker's checkpoint was missing commit_sha.  "
+                f"skipped={skipped}.  Inspect runs/{state.run_id}/checkpoints/"
+            ),
+        )
+
     # Run pytest and collect summary
     test_summary: dict[str, int] = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
     resolved_timeout = _resolve_pytest_timeout(pytest_timeout)
