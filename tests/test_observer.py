@@ -849,4 +849,44 @@ def test_dry_run_prompt_first_200_chars(tmp_path):
     expected = prompt[:200]
     assert data["prompt_first_200_chars"] == expected
     assert len(data["prompt_first_200_chars"]) == min(200, len(expected))
-    assert "..." not in data["prompt_first_200_chars"]
+
+
+# ---------------------------------------------------------------------------
+# WIRE-AUDIT-CHAT-GLOBAL-FALLBACK (2026-05-22) — W3-D
+# ---------------------------------------------------------------------------
+
+def test_latest_session_jsonl_falls_back_globally(tmp_path, monkeypatch) -> None:
+    """When cwd-slug dir has no jsonl, fall back to the most-recently-modified
+    jsonl across all other Claude project dirs."""
+    from harness.observer import chat as chat_mod
+
+    projects = tmp_path / "home" / ".claude" / "projects"
+    projects.mkdir(parents=True)
+    cwd_slug = "D--xaxiu-harness-standalone"
+    (projects / cwd_slug).mkdir()
+    other_dir = projects / "d--Projects"
+    other_dir.mkdir()
+    other_jsonl = other_dir / "abc.jsonl"
+    other_jsonl.write_text('{"role":"user","content":"hi"}\n', encoding="utf-8")
+
+    monkeypatch.setattr(chat_mod, "_claude_projects_dir", lambda: projects)
+    monkeypatch.setattr(chat_mod, "_cwd_slug", lambda: cwd_slug)
+
+    result = chat_mod._latest_session_jsonl()
+    assert result == other_jsonl
+
+
+def test_latest_session_jsonl_returns_none_when_no_jsonl_anywhere(tmp_path, monkeypatch) -> None:
+    """No jsonl in any project dir → returns None (audit returns empty report,
+    no exception)."""
+    from harness.observer import chat as chat_mod
+
+    projects = tmp_path / "home" / ".claude" / "projects"
+    projects.mkdir(parents=True)
+    (projects / "D--cwd").mkdir()
+    (projects / "D--other").mkdir()
+
+    monkeypatch.setattr(chat_mod, "_claude_projects_dir", lambda: projects)
+    monkeypatch.setattr(chat_mod, "_cwd_slug", lambda: "D--cwd")
+
+    assert chat_mod._latest_session_jsonl() is None

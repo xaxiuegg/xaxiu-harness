@@ -54,11 +54,34 @@ def _claude_projects_dir() -> Path:
 
 
 def _latest_session_jsonl() -> Optional[Path]:
+    """Return the newest session jsonl for audit.
+
+    Resolution order:
+      1. cwd-slug dir contains jsonl(s) → newest one (preserves prior behaviour)
+      2. otherwise → newest jsonl across ALL ~/.claude/projects/*/ dirs
+         (global fallback for newly-created project folders that don't
+         have their own session jsonl yet — typical right after a
+         project-migration; the active Claude Code session lives in the
+         old cwd's slug dir).
+      3. otherwise → None (no transcript anywhere)
+
+    WIRE-AUDIT-CHAT-GLOBAL-FALLBACK (2026-05-22).
+    """
     base = _claude_projects_dir() / _cwd_slug()
-    if not base.exists():
+    if base.exists():
+        candidates = sorted(
+            base.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if candidates:
+            return candidates[0]
+    # Global fallback: scan every project dir for the most recent jsonl
+    root = _claude_projects_dir()
+    if not root.exists():
         return None
-    candidates = sorted(base.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0] if candidates else None
+    all_jsonl = list(root.glob("*/*.jsonl"))
+    if not all_jsonl:
+        return None
+    return max(all_jsonl, key=lambda p: p.stat().st_mtime)
 
 
 _DOT_REPLY_RE = re.compile(r"^\s*\.\s*$")
