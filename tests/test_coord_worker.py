@@ -586,3 +586,86 @@ def test_apply_file_edits_skips_when_search_not_found(tmp_path: Path) -> None:
     modified = _apply_file_edits(edits, tmp_path)
     assert modified == []
     assert f.read_text(encoding="utf-8") == "content\n"
+
+
+# ---------------------------------------------------------------------------
+# WIRE-DISPATCH-HARDFAIL (2026-05-22) — D6
+# ---------------------------------------------------------------------------
+
+def test_dispatch_via_swarm_raises_worktree_missing(tmp_path: Path, monkeypatch) -> None:
+    """_dispatch_via_swarm must hard-fail when the worktree path does not exist."""
+    # The autouse _stub_swarm_dispatch fixture replaces the symbol;
+    # re-import the original via __wrapped__ / module attribute lookup
+    # is unreliable, so resolve the function freshly from the module.
+    import importlib
+    worker_mod = importlib.import_module("harness.coord.worker")
+    # Capture the *real* function before any autouse patch wraps it for
+    # this test by reading it from a fresh module reload.
+    importlib.reload(worker_mod)
+    real_dispatch = worker_mod._dispatch_via_swarm
+
+    from harness.errors import WorktreeMissing
+
+    packet = tmp_path / "packet.md"
+    packet.write_text("hello", encoding="utf-8")
+    nonexistent_wt = tmp_path / "does_not_exist"
+
+    with pytest.raises(WorktreeMissing) as exc_info:
+        real_dispatch(packet, "swarm/kimi", nonexistent_wt)
+
+    err = exc_info.value
+    assert err.tag() == "L4.dispatch.E_MISSING_WORKTREE"
+    assert str(nonexistent_wt) in err.message
+    assert err.context.get("engine") == "swarm/kimi"
+
+
+def test_dispatch_via_swarm_does_not_run_subprocess_when_worktree_missing(tmp_path: Path) -> None:
+    """The most important safety bit: no subprocess.run at all if worktree missing."""
+    import importlib
+    worker_mod = importlib.import_module("harness.coord.worker")
+    importlib.reload(worker_mod)
+    real_dispatch = worker_mod._dispatch_via_swarm
+    from harness.errors import WorktreeMissing
+
+    packet = tmp_path / "packet.md"
+    packet.write_text("hello", encoding="utf-8")
+    nonexistent_wt = tmp_path / "ghost"
+
+    with patch.object(worker_mod.subprocess, "run") as mock_run:
+        with pytest.raises(WorktreeMissing):
+            real_dispatch(packet, "swarm/kimi", nonexistent_wt)
+        mock_run.assert_not_called()
+
+
+def test_run_worker_handles_worktree_missing_dispatch_failure(tmp_path: Path) -> None:
+    """When dispatch raises WorktreeMissing, worker fails cleanly with error_tag set."""
+    from harness.errors import WorktreeMissing
+
+    run_dir = tmp_path / "runs" / "20260520T220000-ab12"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+    src_file = tmp_path / "src" / "foo.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text("old\n", encoding="utf-8")
+
+    def _raise(*_a, **_k):
+        raise WorktreeMissing("worktree not found: ghost",
+                              context={"engine": "swarm/kimi"})
+
+    with patch("harness.coord.worker._dispatch_via_swarm", side_effect=_raise):
+        result = run_worker(task, run_dir, project_root=tmp_path)
+
+    assert result["state"] == "failed"
+    assert result["error_tag"] == "L4.dispatch.E_MISSING_WORKTREE"
+    assert "worktree not found" in result["diagnostic"]
+
+    # Checkpoint must mark state=failed (not in_progress orphan)
+    ckpt = read_checkpoint(run_dir / "checkpoints" / "worker-1.json")
+    assert ckpt is not None
+    assert ckpt.state == "failed"
+
+    # Side-channel error file must exist
+    err_path = run_dir / "checkpoints" / "worker-1.error.json"
+    assert err_path.exists()
+    err = json.loads(err_path.read_text(encoding="utf-8"))
+    assert err["error_tag"] == "L4.dispatch.E_MISSING_WORKTREE"

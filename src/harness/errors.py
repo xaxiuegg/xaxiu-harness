@@ -27,6 +27,7 @@ __all__ = [
     "ConfigCorruption",
     "WavePersistentlyFailing",
     "StateLockTimeout",
+    "WorktreeMissing",
     "ALLOWED_DOMAINS",
     "ALLOWED_LEVELS",
 ]
@@ -137,6 +138,20 @@ class SchemaViolation(HarnessError):
     level = 4
     domain = "schema"
     code = "E_SCHEMA_VIOLATION"
+
+
+class WorktreeMissing(HarnessError):
+    """Worker dispatch attempted against a worktree path that does not exist.
+
+    Surfaces battle-test 2026-05-21 defect: ``_dispatch_via_swarm`` used to
+    silently fall back to ``cwd=None`` when the worktree was missing, which
+    let agentic engines mutate the main repo by accident.  Raising L4 stops
+    the dispatch dead and lets the coord layer recover (create the worktree
+    on retry, or escalate if recovery fails).
+    """
+    level = 4
+    domain = "dispatch"
+    code = "E_MISSING_WORKTREE"
 
 
 # ---------------------------------------------------------------------------

@@ -39,13 +39,25 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
     force_engine against SUPPORTED_BACKENDS which doesn't include the
     `swarm/*` wrapper identifiers — every real worker run would have
     failed with `unsupported_force_engine` before this fix.
+
+    WIRE-DISPATCH-HARDFAIL (2026-05-22): hard-fails with WorktreeMissing
+    (L4) when ``wt_path`` does not exist.  Previously fell back to
+    ``cwd=None``, which let Kimi-CLI mutate the main repo by accident if
+    the agent ignored its --add-dir directive.  The L4 surface keeps the
+    dispatch noisy and recoverable instead of silently corrupting state.
     """
     from types import SimpleNamespace
+    from harness.errors import WorktreeMissing
+
+    if not wt_path.exists():
+        raise WorktreeMissing(
+            f"worktree not found for dispatch: {wt_path}",
+            context={"engine": engine, "wt_path": str(wt_path)},
+        )
+
     backend = engine.split("/", 1)[1] if "/" in engine else engine
     # Kimi-CLI applies edits in-place inside the cwd it's invoked from.
-    # --add-dir tells the CLI which worktree to scope to.  cwd= is the
-    # worktree IFF it exists (tests may invoke before worktree setup);
-    # otherwise we let xaxiu-swarm use its own default cwd.
+    # --add-dir tells the CLI which worktree to scope to.
     cmd = [
         "xaxiu-swarm", "dispatch",
         "--backend", backend,
@@ -53,7 +65,7 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
         "--timeout", "420",
         str(packet_path),
     ]
-    cwd_path = str(wt_path) if wt_path.exists() else None
+    cwd_path = str(wt_path)
     try:
         proc = subprocess.run(
             cmd, cwd=cwd_path, capture_output=True, text=True,
@@ -295,6 +307,53 @@ def run_worker(
                         packet_path=str(packet_path),
                         force_engine=engine,
                     )
+            except Exception as exc:
+                # WIRE-DISPATCH-HARDFAIL (2026-05-22): catch L4 WorktreeMissing
+                # (and any other dispatch-time exception) so the worker fails
+                # cleanly instead of leaving an orphan checkpoint in
+                # in_progress.  The L4 tag is written to a side-channel
+                # error file alongside the checkpoint (the Checkpoint schema
+                # is closed and adding fields would break readers).
+                from harness.errors import HarnessError
+                tag = exc.tag() if isinstance(exc, HarnessError) else "L4.dispatch.E_DISPATCH_UNCAUGHT"
+                diagnostic = str(exc)[:500]
+                ckpt = ckpt.model_copy(update={
+                    "state": "failed",
+                    "tests_summary": f"dispatch_error:{tag}",
+                })
+                write_checkpoint(checkpoint_path, ckpt)
+                err_path = checkpoint_path.with_suffix(".error.json")
+                try:
+                    err_path.write_text(json.dumps({
+                        "worker_id": task_obj.worker_id,
+                        "error_tag": tag,
+                        "diagnostic": diagnostic,
+                        "at": now_iso(),
+                    }, indent=2), encoding="utf-8")
+                except OSError:
+                    pass
+                _append_progress(run_dir, task_obj.worker_id, {
+                    "event": "worker_failed",
+                    "error_tag": tag,
+                    "diagnostic": diagnostic[:200],
+                })
+                return {
+                    "schema_version": 1,
+                    "worker_id": task_obj.worker_id,
+                    "run_id": run_dir.name,
+                    "state": "failed",
+                    "started_at": started_at,
+                    "finished_at": now_iso(),
+                    "steps_completed": [],
+                    "files_modified": list(files_modified),
+                    "test_summary": {"ran": 0, "passed": 0, "failed": 0, "skipped": 0, "duration_seconds": 0.0},
+                    "commit_sha": commit_sha,
+                    "error_tag": tag,
+                    "diagnostic": diagnostic,
+                    "tokens_used": total_tokens,
+                    "cost_usd": total_cost_usd,
+                    "elapsed_seconds": 0,
+                }
             finally:
                 packet_path.unlink(missing_ok=True)
 
