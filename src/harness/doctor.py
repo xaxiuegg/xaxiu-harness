@@ -81,6 +81,31 @@ def _check_secrets() -> Diagnosis:
                      "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY env vars")
 
 
+def _check_env_var_inventory() -> Diagnosis:
+    keys = [
+        "KIMI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+    ]
+    parts = []
+    any_set = False
+    for k in keys:
+        if os.environ.get(k):
+            parts.append(f"{k}:SET")
+            any_set = True
+        else:
+            parts.append(f"{k}:UNSET")
+    severity = "ok" if any_set else "warn"
+    return Diagnosis(
+        "env_var_inventory",
+        severity,
+        ", ".join(parts),
+        "Set at least one engine API key in your environment",
+    )
+
+
 def _check_coord_writable() -> Diagnosis:
     try:
         coord = Path("coord")
@@ -119,6 +144,7 @@ def run_all() -> list[Diagnosis]:
         _check_git(),
         _check_dpapi(),
         _check_secrets(),
+        _check_env_var_inventory(),
         _check_coord_writable(),
         _check_task_scheduler(),
     ]
