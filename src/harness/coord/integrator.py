@@ -74,7 +74,30 @@ def _merge_worker_branches(
             continue
 
         if plan.integration_strategy == "squash":
+            # WIRE-SQUASH-COMMIT-BETWEEN (2026-05-22): the legacy code did
+            # `git merge --squash --no-commit` for every worker in a single
+            # loop, leaving staged changes between iterations.  When two
+            # workers shared any committed lines (typical with WIRE-DEP-BRANCH
+            # — worker-2's worktree is branched from worker-1, so its history
+            # contains worker-1's commits), the second `--squash` failed with
+            # "local changes would be overwritten by merge".  Round-1 battle-
+            # test 2026-05-21 hit this directly.
+            #
+            # Fix: commit the squashed staging after each worker so the next
+            # squash starts from a clean tree.  We lose the single-final-commit
+            # shape — but the operator can still squash the integration
+            # commits afterward if they want one rollup.  Correctness > shape.
             rc, _, err = _git("merge", "--squash", "--no-commit", branch, cwd=project_root)
+            if rc == 0:
+                # Stage everything the squash touched and commit so the next
+                # worker's --squash starts clean.  Allow-empty handles the
+                # idempotent case where the squash actually had nothing new.
+                _git("add", "-A", cwd=project_root)
+                _git(
+                    "commit", "--allow-empty",
+                    "-m", f"integrate({plan.run_id}): {task.worker_id} — {task.title}",
+                    cwd=project_root,
+                )
         else:
             rc, _, err = _git(
                 "merge", "--no-ff", "--no-edit",

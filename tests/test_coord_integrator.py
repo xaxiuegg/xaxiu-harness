@@ -188,11 +188,14 @@ def test_integrate_merges_completed_worker_branches(tmp_path: Path, monkeypatch)
         f"conflicted={report.workers_conflicted} diag={report.diagnostic!r}"
     )
     assert report.workers_conflicted == []
-    # File should now be staged on master (squash strategy stages but does not commit)
-    rc = real_run(
-        ["git", "diff", "--cached", "--name-only"], cwd=repo, capture_output=True, text=True,
+    # WIRE-SQUASH-COMMIT-BETWEEN (2026-05-22): squash strategy now commits
+    # after each worker so the NEXT worker's --squash starts from a clean
+    # tree.  The file ends up in HEAD (not the index) — verify via log.
+    log = real_run(
+        ["git", "log", "--name-only", "-1", "--format="],
+        cwd=repo, capture_output=True, text=True,
     )
-    assert "worker-out.txt" in rc.stdout
+    assert "worker-out.txt" in log.stdout
 
 
 def test_integrate_skips_uncompleted_workers(tmp_path: Path) -> None:
@@ -244,6 +247,98 @@ def test_integrate_skips_uncompleted_workers(tmp_path: Path) -> None:
     assert report.workers_merged == []
     assert report.workers_skipped == ["worker-1"]
     assert report.workers_conflicted == []
+
+
+# ---------------------------------------------------------------------------
+# WIRE-SQUASH-COMMIT-BETWEEN (2026-05-22) — D7 regression sentinel
+# ---------------------------------------------------------------------------
+
+def test_integrate_handles_workers_with_overlapping_commits(tmp_path: Path) -> None:
+    """Two workers whose branches share a commit (typical with dep-aware
+    branching: worker-2's branch is forked from worker-1) used to fail at
+    the second --squash with 'local changes would be overwritten'.  The
+    integrator now commits between squashes so the next iteration starts
+    from a clean working tree."""
+    from harness.coord.checkpoint import Checkpoint, write_checkpoint
+    from harness.coord.schemas import WavePlan, WorkerTask, WorkerStep
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(["init", "-b", "master"], repo)
+    _git(["config", "user.email", "i@test.local"], repo)
+    _git(["config", "user.name", "I"], repo)
+    (repo / "README.md").write_text("# base\n", encoding="utf-8")
+    _git(["add", "README.md"], repo)
+    _git(["commit", "-m", "base"], repo)
+
+    run_id = "20260522T120000-c0de"
+
+    # worker-1 branch — adds shared.py
+    b1 = f"wt/{run_id}/worker-1"
+    _git(["checkout", "-b", b1], repo)
+    (repo / "shared.py").write_text("# shared util\n", encoding="utf-8")
+    _git(["add", "shared.py"], repo)
+    _git(["commit", "-m", "[w1-s1] add shared"], repo)
+    sha1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+    # worker-2 branch — branches FROM worker-1 (dep-aware), adds tests
+    b2 = f"wt/{run_id}/worker-2"
+    _git(["checkout", "-b", b2, b1], repo)
+    (repo / "test_shared.py").write_text("# tests for shared\n", encoding="utf-8")
+    _git(["add", "test_shared.py"], repo)
+    _git(["commit", "-m", "[w2-s1] add tests for shared"], repo)
+    sha2 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    _git(["checkout", "master"], repo)
+
+    run_dir = repo / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    plan = WavePlan(
+        run_id=run_id, spec_path="spec.md",
+        created_at="2026-05-22T12:00:00+00:00", planner_engine="mock",
+        tasks=[
+            WorkerTask(worker_id="worker-1", title="add shared", description="d",
+                       steps=[WorkerStep(step_id="s1", kind="edit", instruction="x",
+                                         target_files=["shared.py"], expected_diff_lines=1)]),
+            WorkerTask(worker_id="worker-2", title="add tests", description="d",
+                       depends_on=["worker-1"],
+                       steps=[WorkerStep(step_id="s1", kind="edit", instruction="x",
+                                         target_files=["test_shared.py"], expected_diff_lines=1)]),
+        ],
+        integration_strategy="squash",
+    )
+    (run_dir / "plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
+    (run_dir / "checkpoints").mkdir()
+    write_checkpoint(run_dir / "checkpoints" / "worker-1.json",
+                     Checkpoint(worker_id="worker-1", run_id=run_id,
+                                state="completed", commit_sha=sha1))
+    write_checkpoint(run_dir / "checkpoints" / "worker-2.json",
+                     Checkpoint(worker_id="worker-2", run_id=run_id,
+                                state="completed", commit_sha=sha2))
+    _make_run_state(run_dir, run_id=run_id)
+
+    real_run = subprocess.run
+
+    def smart(cmd, **kwargs):
+        if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "python" and cmd[1] == "-m":
+            return MagicMock(stdout="1 passed in 0.01s", returncode=0)
+        return real_run(cmd, **kwargs)
+
+    with patch("harness.coord.integrator.subprocess.run", side_effect=smart):
+        report = integrate(run_dir, project_root=repo)
+
+    # Both workers merged successfully — no "local changes overwritten" failure
+    assert report.workers_merged == ["worker-1", "worker-2"], (
+        f"merged={report.workers_merged} conflicted={report.workers_conflicted} "
+        f"diag={report.diagnostic!r}"
+    )
+    assert report.workers_conflicted == []
+    # Both files now in master HEAD history
+    log = real_run(["git", "log", "--name-only", "-2", "--format="],
+                   cwd=repo, capture_output=True, text=True).stdout
+    assert "shared.py" in log
+    assert "test_shared.py" in log
 
 
 # ---------------------------------------------------------------------------
