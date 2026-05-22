@@ -92,8 +92,15 @@ class Coordinator:
     # workers
     # ------------------------------------------------------------------ #
 
-    def launch_workers(self, plan: WavePlan, in_flight_limit: int | None = None) -> dict[str, Any]:
-        """Spawn worker processes up to *in_flight_limit*."""
+    def launch_workers(self, plan: WavePlan, in_flight_limit: int | None = None,
+                       engine: str | None = None) -> dict[str, Any]:
+        """Spawn worker processes up to *in_flight_limit*.
+
+        ``engine`` is threaded to each spawned ``coord work`` subprocess so the
+        operator's choice on ``coord run --engine`` reaches the worker.  When
+        None, the worker subcommand's own default applies (currently
+        ``swarm/kimi-api``).
+        """
         limit = in_flight_limit or 4
         launched: list[str] = []
         skipped: list[str] = []
@@ -135,18 +142,21 @@ class Coordinator:
                 repo_root=self.project_root,
             )
 
+            cmd = [
+                sys.executable,
+                "-m",
+                "harness.cli",
+                "coord",
+                "work",
+                "--run-id",
+                self.run_id,
+                "--worker-id",
+                task.worker_id,
+            ]
+            if engine:
+                cmd.extend(["--engine", engine])
             proc = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "harness.cli",
-                    "coord",
-                    "work",
-                    "--run-id",
-                    self.run_id,
-                    "--worker-id",
-                    task.worker_id,
-                ],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -188,7 +198,8 @@ class Coordinator:
     # tick
     # ------------------------------------------------------------------ #
 
-    def tick(self, spec_path: Path, *, in_flight_limit: int | None = None) -> CoordinationReport:
+    def tick(self, spec_path: Path, *, in_flight_limit: int | None = None,
+             engine: str | None = None) -> CoordinationReport:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         state = read_run_state(self.state_path) or RunState(
@@ -223,7 +234,7 @@ class Coordinator:
         # RUNNING -> check workers
         if state.state == RunStateLiteral.RUNNING:
             plan_obj = WavePlan.model_validate_json(self.plan_path.read_text(encoding="utf-8"))
-            self.launch_workers(plan_obj, in_flight_limit=in_flight_limit)
+            self.launch_workers(plan_obj, in_flight_limit=in_flight_limit, engine=engine)
             statuses = self.poll_workers()
             state.workers = statuses
             state.last_tick_at = now

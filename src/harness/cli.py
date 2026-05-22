@@ -1698,8 +1698,12 @@ def coord_rerun_failed(run_id: str, engine: str, worker_engine: str,
               help="Optional label tag to stamp on the run for grouping/filtering.")
 @click.option("--dry-run", is_flag=True,
               help="Print plan + worker assignments without dispatching engines or creating worktrees.")
+@click.option("--engine", default=None,
+              help="Engine identifier passed to each worker (e.g. swarm/kimi, swarm/kimi-api, swarm/deepseek). "
+                   "When omitted, the worker subcommand default applies.")
 def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
-              proxy: str, label: str | None, dry_run: bool) -> None:
+              proxy: str, label: str | None, dry_run: bool,
+              engine: str | None) -> None:
     """Execute a coordination run (single tick)."""
     from harness.coord.coordinator import Coordinator
     from harness.coord.planner import _new_run_id, plan as run_planner
@@ -1759,7 +1763,7 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
         run_dir = Path("runs") / rid
         run_dir.mkdir(parents=True, exist_ok=True)
         coord = Coordinator(run_id=rid, run_dir=run_dir, label=label)
-        report = coord.tick(spec, in_flight_limit=limit)
+        report = coord.tick(spec, in_flight_limit=limit, engine=engine)
         click.echo(f"run {report.run_id}: {report.state.value}")
         if report.worker_summary:
             for wid, st in report.worker_summary.items():
