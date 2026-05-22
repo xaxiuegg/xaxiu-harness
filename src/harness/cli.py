@@ -1873,10 +1873,14 @@ def coord_rerun_failed(run_id: str, engine: str, worker_engine: str,
               help="Seconds between ticks in --watch mode (default 5).")
 @click.option("--watch-max-seconds", default=3600, type=int,
               help="Hard cap on total --watch duration (default 1h).")
+@click.option("--no-merge", is_flag=True,
+              help="In --watch mode, run the integrator in validate-only "
+                   "mode (W5-H): no worker branches merged to base. Use "
+                   "this for test runs to avoid polluting master.")
 def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
               proxy: str, label: str | None, dry_run: bool,
               engine: str | None, watch: bool, watch_interval: int,
-              watch_max_seconds: int) -> None:
+              watch_max_seconds: int, no_merge: bool) -> None:
     """Execute a coordination run.
 
     By default this performs a single tick of the coordinator state machine
@@ -1977,10 +1981,12 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
                 # Fire integrator exactly once when we reach INTEGRATING
                 if last_state == "integrating" and not integrate_fired:
                     integrate_fired = True
-                    click.echo("watch: firing integrator")
+                    click.echo("watch: firing integrator"
+                               + (" (--no-merge mode)" if no_merge else ""))
                     report_int = _integrate(
                         run_dir=run_dir, project_root=Path("."),
-                        merge_workers=True, auto_commit=False, auto_push=False,
+                        merge_workers=not no_merge,
+                        auto_commit=False, auto_push=False,
                     )
                     click.echo(
                         f"watch: integrator success={report_int.success} "
@@ -2102,18 +2108,35 @@ def coord_retry(run_id: str, worker_id: str, engine: str) -> None:
 @click.option("--project-root", default=".", type=click.Path(path_type=Path))
 @click.option("--commit", is_flag=True)
 @click.option("--push", is_flag=True)
+@click.option("--no-merge", is_flag=True,
+              help="Validate the run without merging worker branches "
+                   "back to master.  Useful for test runs against mock or "
+                   "test specs where you don't want to pollute trunk.")
 @click.option("--pytest-timeout", default=None, type=int,
               help="Seconds before the integrator pytest run is killed. "
                    "Falls back to HARNESS_INTEGRATOR_PYTEST_TIMEOUT env, "
                    "then 600s default.")
 def coord_integrate(run_id: str, project_root: Path, commit: bool, push: bool,
-                    pytest_timeout: int | None) -> None:
-    """Integrate a completed run: tests, commit, push."""
+                    no_merge: bool, pytest_timeout: int | None) -> None:
+    """Integrate a completed run: tests, commit, push.
+
+    W5-H 2026-05-22: ``--no-merge`` lets operators run the integrator
+    in validate-only mode against test specs / mock-engine runs so the
+    worker branches don't merge to master.  Without this flag, every
+    successful coord run would land a commit on trunk — fine in
+    production, but pollution during testing.
+    """
     from harness.coord.integrator import integrate
     run_dir = Path("runs") / run_id
-    report = integrate(run_dir, project_root=project_root, auto_commit=commit,
-                       auto_push=push, pytest_timeout=pytest_timeout)
+    report = integrate(
+        run_dir, project_root=project_root,
+        auto_commit=commit, auto_push=push,
+        merge_workers=not no_merge,
+        pytest_timeout=pytest_timeout,
+    )
     click.echo(f"integrate: success={report.success} commit={report.commit_sha} pushed={report.pushed}")
+    if no_merge:
+        click.echo("  (--no-merge: worker branches NOT merged to base)")
     if report.diagnostic:
         click.echo(f"  diagnostic: {report.diagnostic}")
     if report.test_summary:
