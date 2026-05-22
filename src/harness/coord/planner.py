@@ -171,6 +171,12 @@ def plan(
                 packet_path=tmp_path,
                 force_engine=engine if engine != "claude" else None,
                 force_model=model,
+                # WIRE-TRUSTED-SOURCE (2026-05-22): operator-authored
+                # specs routinely reference DPAPI/env-var APIs by name
+                # in code-fence prose (e.g. spec/samples/env-doctor-*).
+                # The injection filter is for relayed engine output, not
+                # operator ingress — exempt the planner.
+                trusted_source=True,
             )
         finally:
             Path(tmp_path).unlink(missing_ok=True)

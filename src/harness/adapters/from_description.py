@@ -67,6 +67,9 @@ def _dispatch_via_packet(project: str, prompt: str, engine_name: str) -> str:
             project=project,
             packet_path=path,
             force_engine=engine_name,
+            # WIRE-TRUSTED-SOURCE (2026-05-22): operator-authored
+            # natural-language descriptions are not exfiltration vectors.
+            trusted_source=True,
         )
         if result.success:
             return result.text

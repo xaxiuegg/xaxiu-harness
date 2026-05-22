@@ -351,6 +351,7 @@ def dispatch_packet(
     force_engine: str | None = None,
     force_model: str | None = None,
     wave_id: str | None = None,
+    trusted_source: bool = False,
 ) -> DispatchResult:
     """Route *packet_path* to an engine, with automatic fallback on failure.
 
@@ -421,9 +422,23 @@ def dispatch_packet(
 
     # ---- 4.5 PACKET-INJECTION-FILTER (2026-05-21) --------------------------
     # Refuse packets that look like they're trying to exfiltrate secrets
-    # via env vars / DPAPI calls / outbound HTTP.  Operator can bypass by
-    # setting HARNESS_ALLOW_UNSAFE_PACKETS=1 (e.g. for security research).
-    if os.environ.get("HARNESS_ALLOW_UNSAFE_PACKETS", "").lower() != "1":
+    # via env vars / DPAPI calls / outbound HTTP.
+    #
+    # Bypass paths:
+    #   1. HARNESS_ALLOW_UNSAFE_PACKETS=1 env var (operator-set, global)
+    #   2. trusted_source=True kwarg (per-call, used by harness-internal
+    #      callers like the planner that build prompts from operator-
+    #      authored specs)
+    #
+    # WIRE-TRUSTED-SOURCE (2026-05-22): the injection filter was
+    # blocking the planner on any spec that documented DPAPI / env-var
+    # APIs by name (e.g. "list_secrets(", "$env:KIMI_API_KEY") — every
+    # harness-internal spec hit this.  Operator-authored ingress is by
+    # definition not the threat model; the threat is engine-A output
+    # being relayed verbatim as engine-B input, which guards.py covers
+    # post-hoc.
+    if (not trusted_source
+            and os.environ.get("HARNESS_ALLOW_UNSAFE_PACKETS", "").lower() != "1"):
         injections = scan_packet_for_injection(packet_content)
         if injections:
             pattern_names = ",".join(name for name, _ in injections)
