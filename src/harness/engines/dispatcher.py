@@ -17,6 +17,7 @@ Security guarantees
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -33,6 +34,8 @@ from harness.engines.concrete import get_engine
 from harness.state import db as state_db
 from harness.state import files as state_files
 from harness.state import jsonl_log
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -352,6 +355,7 @@ def dispatch_packet(
     force_model: str | None = None,
     wave_id: str | None = None,
     trusted_source: bool = False,
+    bypass_chain: bool = False,
 ) -> DispatchResult:
     """Route *packet_path* to an engine, with automatic fallback on failure.
 
@@ -504,16 +508,38 @@ def dispatch_packet(
 
     model = force_model if force_model is not None else rule_model
 
-    # WIRE-DISPATCH-DEFAULT-MODEL (2026-05-22): when force_engine is set but
-    # neither force_model nor a routing-rule model is available, each engine
-    # gets passed model="" → for DeepSeek that yields HTTP 400 ("model is
-    # required"), which marks the response success=False and triggers the
-    # full fallback chain.  Net effect was silent engine substitution
-    # (force_engine=deepseek silently served by kimi/mimo via fallback).
-    # Both MiMo Pro + DeepSeek reviewers caught this during the
-    # post-migration infra smoke 2026-05-22.
+    # WIRE-LONGFORM-AVOID-KIMI (2026-05-22): Kimi K2.6's thinking mode has
+    # a documented ~60s server-side cap that consistently fails on
+    # long-form-generation tasks (3 review-packet failures observed today
+    # 2026-05-22 at exactly 60s).  When the packet is >4KB AND the
+    # initial engine is kimi AND the caller didn't explicitly force_engine,
+    # silently re-route to mimo (text-default mimo-v2.5-pro).
     #
-    # Fix: supply a per-engine default model when none was resolved.
+    # When force_engine="kimi" is explicit, RESPECT the caller — but log a
+    # WARNING so operators see the risk.  Plumbing in extra_args.long_form
+    # lets callers override the heuristic.
+    _LONGFORM_THRESHOLD = 4096
+    is_longform = (
+        bool(extra_args and extra_args.get("long_form"))
+        or len(packet_content) > _LONGFORM_THRESHOLD
+    )
+    if is_longform and initial_engine == "kimi":
+        if force_engine == "kimi":
+            logger.warning(
+                "force_engine=kimi on a long-form packet (%d chars); Kimi K2.6 has a "
+                "~60s thinking-mode cap that often fails on >4KB packets.  Consider mimo.",
+                len(packet_content),
+            )
+        else:
+            # Auto-route: rule selected kimi but heuristic says it'll fail
+            logger.info(
+                "auto-routing long-form packet (%d chars) kimi → mimo per "
+                "WIRE-LONGFORM-AVOID-KIMI",
+                len(packet_content),
+            )
+            initial_engine = "mimo"
+            model = None  # let per-engine default kick in for mimo
+
     if not model:
         _ENGINE_DEFAULT_MODELS = {
             "kimi":      "kimi-for-coding",
@@ -616,6 +642,17 @@ def dispatch_packet(
 
         # --- 9b. Success path ------------------------------------------------
         if response.success:
+            # WIRE-FORCE-ENGINE-VISIBILITY (2026-05-22): when force_engine
+            # was set but the actual engine_used differs (fallback fired),
+            # emit a WARNING so operators see silent substitution in logs.
+            # Reviewers (MiMo Pro + DeepSeek) both called this out as the
+            # top diagnostic gap.
+            if force_engine is not None and current_engine != force_engine:
+                logger.warning(
+                    "force_engine=%r served by engine_used=%r via fallback chain %r",
+                    force_engine, current_engine, list(tried),
+                )
+
             try:
                 state_db.update_dispatch_status(
                     dispatch_id, "success", latency_ms=response.latency_ms
@@ -648,6 +685,25 @@ def dispatch_packet(
                     )
                 except Exception:
                     pass
+
+            # WIRE-BUDGET-VISIBILITY (2026-05-22): always record successful
+            # dispatch to the budget ledger — including engine, model,
+            # tokens, latency.  Previously only worker.py recorded; ad-hoc
+            # dispatch_packet calls (planner, observer, scripts) were
+            # invisible.  Reviewers (MiMo Pro) ranked this as the top
+            # diagnostic gap.
+            try:
+                from harness.budget import record_dispatch as _record
+                _record(
+                    task_id=dispatch_id,
+                    engine=current_engine,
+                    model=model or "",
+                    input_tokens=int(response.tokens_in or 0),
+                    output_tokens=int(response.tokens_out or 0),
+                    latency_ms=int(response.latency_ms or 0),
+                )
+            except Exception:
+                pass
 
             return DispatchResult(
                 success=True,
@@ -736,6 +792,29 @@ def dispatch_packet(
                 )
 
         # --- 9d. Choose next engine -----------------------------------------
+        # WIRE-BYPASS-CHAIN (2026-05-22): operator can request that a
+        # force_engine call NOT fall through to other engines on failure.
+        # The default-fallback behaviour is preserved for unspecified
+        # callers; opt-in via dispatch_packet(bypass_chain=True) when the
+        # caller wants to know definitively that ONE specific engine
+        # failed (e.g. cost-sensitive runs, A/B comparisons).
+        if bypass_chain and force_engine is not None:
+            try:
+                state_db.update_dispatch_status(
+                    dispatch_id, "force_engine_failed_no_fallback",
+                    latency_ms=response.latency_ms,
+                )
+            except Exception:
+                pass
+            _remove_active_dispatch(dispatch_id)
+            return DispatchResult(
+                success=False,
+                engine_used=current_engine,
+                fallback_chain=list(tried),
+                text=response.text or "",
+                error=f"force_engine_failed_no_fallback: {response.error}",
+                dispatch_id=dispatch_id,
+            )
         remaining = [n for n in _production_backends() if n not in tried]
         if not remaining:
             try:

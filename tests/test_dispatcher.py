@@ -623,6 +623,166 @@ def test_dispatch_no_redispatch_same_engine(
     assert len(result.fallback_chain) == 5
     assert len(set(result.fallback_chain)) == 5  # all unique
 
+
+# ---------------------------------------------------------------------------
+# WIRE-BYPASS-CHAIN (2026-05-22) — force_engine + bypass_chain
+# ---------------------------------------------------------------------------
+
+def test_dispatch_bypass_chain_returns_on_first_failure(
+    tmp_packet: str, mock_db, mock_state_files, mock_jsonl, mock_load_adapter,
+) -> None:
+    """bypass_chain=True + force_engine: do NOT iterate the fallback chain."""
+
+    def _fail(*_args, **_kwargs) -> EngineResponse:
+        return EngineResponse(success=False, text="", latency_ms=7, error="timeout")
+
+    with patch("harness.engines.dispatcher.get_engine",
+               return_value=MagicMock(dispatch=_fail)):
+        result = dispatch_packet(
+            project="valid-project", packet_path=tmp_packet,
+            force_engine="deepseek", bypass_chain=True,
+        )
+
+    assert result.success is False
+    assert result.engine_used == "deepseek"
+    assert result.fallback_chain == ["deepseek"]  # ONLY deepseek tried
+    assert "force_engine_failed_no_fallback" in (result.error or "")
+
+
+def test_dispatch_bypass_chain_off_still_iterates(
+    tmp_packet: str, mock_db, mock_state_files, mock_jsonl, mock_load_adapter,
+) -> None:
+    """Default behaviour preserved: without bypass_chain, the chain fires."""
+
+    def _fail(*_args, **_kwargs) -> EngineResponse:
+        return EngineResponse(success=False, text="", latency_ms=7, error="timeout")
+
+    with patch("harness.engines.dispatcher.get_engine",
+               return_value=MagicMock(dispatch=_fail)):
+        result = dispatch_packet(
+            project="valid-project", packet_path=tmp_packet,
+            force_engine="deepseek",  # bypass_chain default False
+        )
+
+    assert result.success is False
+    # Fell through the full production chain
+    assert len(result.fallback_chain) >= 4
+
+
+def test_dispatch_visible_substitution_warning(
+    tmp_packet: str, mock_db, mock_state_files, mock_jsonl, mock_load_adapter,
+    caplog,
+) -> None:
+    """WIRE-FORCE-ENGINE-VISIBILITY: when force_engine != engine_used (fallback
+    fired and succeeded), emit a WARNING so silent substitution surfaces."""
+    import logging
+    call_count = 0
+
+    def _fail_first_succeed_after(*_args, **_kwargs) -> EngineResponse:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return EngineResponse(success=False, text="", latency_ms=5, error="timeout")
+        return EngineResponse(success=True, text="OK", latency_ms=10, error=None)
+
+    with caplog.at_level(logging.WARNING, logger="harness.engines.dispatcher"):
+        with patch("harness.engines.dispatcher.get_engine",
+                   return_value=MagicMock(dispatch=_fail_first_succeed_after)):
+            result = dispatch_packet(
+                project="valid-project", packet_path=tmp_packet,
+                force_engine="deepseek",
+            )
+
+    assert result.success is True
+    assert result.engine_used != "deepseek"  # fallback served the request
+    assert any("force_engine" in r.message and "deepseek" in r.message
+               for r in caplog.records), (
+        f"expected fallback WARNING in logs; got: {[r.message for r in caplog.records]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# WIRE-LONGFORM-AVOID-KIMI (2026-05-22) — auto-route long packets off Kimi
+# ---------------------------------------------------------------------------
+
+def test_dispatch_longform_auto_reroutes_kimi_to_mimo(
+    mock_db, mock_state_files, mock_jsonl, mock_load_adapter,
+    caplog,
+) -> None:
+    """Packet >4KB on Kimi → silent re-route to mimo + INFO log."""
+    import logging
+    import tempfile, os
+    # Build a >4KB packet
+    fd, big_path = tempfile.mkstemp(suffix=".md", text=True)
+    Path(big_path).write_text("x " * 3000, encoding="utf-8")  # ~6KB
+    os.close(fd)
+
+    try:
+        # Set kimi as HIGH priority so it's the initial engine
+        mock_state_files.read_engine_health.return_value = {
+            "kimi": EngineHealth(priority="HIGH"),
+        }
+        with caplog.at_level(logging.INFO, logger="harness.engines.dispatcher"):
+            with patch("harness.engines.dispatcher.get_engine",
+                       return_value=MagicMock(dispatch=MagicMock(return_value=EngineResponse(
+                           success=True, text="OK", latency_ms=10, error=None,
+                       )))):
+                result = dispatch_packet(project="valid-project", packet_path=big_path)
+
+        # The re-route message should be present
+        assert any("kimi" in r.message and "mimo" in r.message for r in caplog.records), (
+            f"expected reroute log; got: {[r.message for r in caplog.records]}"
+        )
+    finally:
+        Path(big_path).unlink(missing_ok=True)
+
+
+def test_dispatch_longform_respects_explicit_force_engine_kimi(
+    mock_db, mock_state_files, mock_jsonl, mock_load_adapter,
+    caplog,
+) -> None:
+    """force_engine=kimi on long packet → keep kimi + WARNING log."""
+    import logging
+    import tempfile, os
+    fd, big_path = tempfile.mkstemp(suffix=".md", text=True)
+    Path(big_path).write_text("x " * 3000, encoding="utf-8")
+    os.close(fd)
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="harness.engines.dispatcher"):
+            with patch("harness.engines.dispatcher.get_engine",
+                       return_value=MagicMock(dispatch=MagicMock(return_value=EngineResponse(
+                           success=True, text="OK", latency_ms=10, error=None,
+                       )))):
+                result = dispatch_packet(
+                    project="valid-project", packet_path=big_path,
+                    force_engine="kimi",
+                )
+
+        # Operator's force_engine respected; ~60s warning emitted
+        assert result.engine_used == "kimi"
+        assert any("force_engine=kimi" in r.message and "long-form" in r.message
+                   for r in caplog.records)
+    finally:
+        Path(big_path).unlink(missing_ok=True)
+
+
+def test_dispatch_short_packet_no_rerouting(
+    tmp_packet, mock_db, mock_state_files, mock_jsonl, mock_load_adapter,
+    caplog,
+) -> None:
+    """Sub-threshold packet should leave routing untouched."""
+    import logging
+    with caplog.at_level(logging.INFO, logger="harness.engines.dispatcher"):
+        with patch("harness.engines.dispatcher.get_engine",
+                   return_value=MagicMock(dispatch=MagicMock(return_value=EngineResponse(
+                       success=True, text="OK", latency_ms=10, error=None,
+                   )))):
+            dispatch_packet(project="valid-project", packet_path=tmp_packet)
+    # No re-route message for a small packet
+    assert not any("kimi → mimo" in r.message for r in caplog.records)
+
+
 # ── _map_error_to_outcome ────────────────────────────────────────────────
 
 def test_map_error_to_outcome_timeout() -> None:
