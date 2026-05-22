@@ -22,8 +22,8 @@ to `fail` and the wizard hint fires.
 
 Add a new doctor check `engine_reachability` that:
 
-1. Inspects DPAPI-stored engine keys via
-   `harness.secrets.dpapi.list_secrets()` (any non-empty list passes).
+1. Inspects DPAPI-stored engine keys via the
+   `harness.secrets.dpapi.list_secrets` helper (any non-empty list passes).
 2. Inspects env vars `KIMI_API_KEY`, `DEEPSEEK_API_KEY`,
    `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` (any one non-empty passes).
 3. If neither source has any key → severity `"fail"` with a fix line

@@ -280,6 +280,27 @@ def test_launch_workers_creates_per_worker_log_file(tmp_path: Path) -> None:
     assert log_path.exists(), "per-worker log file should be created"
 
 
+def test_launch_workers_uses_python_m_harness_not_harness_cli(tmp_path: Path) -> None:
+    """WIRE-MAIN-ENTRY (2026-05-22): the Popen cmd must invoke `python -m harness`,
+    not `python -m harness.cli`.  The latter loads the module but never runs
+    main(), so the worker subprocess exits 0 instantly — the real reason
+    Round-1 battle-test workers produced no checkpoints."""
+    plan = _valid_plan()
+    c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock(pid=1, poll=MagicMock(return_value=None))
+            c.launch_workers(plan)
+    args, _ = mock_popen.call_args
+    cmd = args[0]
+    # cmd is [sys.executable, "-m", "harness", "coord", "work", ...]
+    assert cmd[1] == "-m"
+    assert cmd[2] == "harness", (
+        f"expected `python -m harness ...`, got `python -m {cmd[2]} ...` — "
+        "this is the WIRE-MAIN-ENTRY regression sentinel"
+    )
+
+
 def test_launch_workers_redirects_stdout_to_log_not_devnull(tmp_path: Path) -> None:
     plan = _valid_plan()
     c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)

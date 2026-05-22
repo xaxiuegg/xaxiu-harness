@@ -173,10 +173,16 @@ class Coordinator:
                 repo_root=self.project_root,
             )
 
+            # WIRE-MAIN-ENTRY (2026-05-22): use `python -m harness` (which
+            # routes through src/harness/__main__.py → cli.main()) instead
+            # of `python -m harness.cli`.  The latter loaded the module
+            # without invoking the click group and exited 0 instantly —
+            # the real reason workers produced zero checkpoints in the
+            # Round-1 battle test, not subprocess detachment.
             cmd = [
                 sys.executable,
                 "-m",
-                "harness.cli",
+                "harness",
                 "coord",
                 "work",
                 "--run-id",
