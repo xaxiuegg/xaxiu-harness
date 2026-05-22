@@ -175,7 +175,15 @@ def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> d
 
 
 def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
-    """Build a dispatch packet prompt for a single step."""
+    """Build a dispatch packet prompt for a single step.
+
+    W5-K 2026-05-22: stronger output-format pinning.  Path 2 v2 caught
+    DeepSeek v4-pro emitting prose + a single markdown code block
+    (the "new file content") instead of FILE/REPLACE.  When the engine
+    drops the protocol, the worker parses 0 edits, W4-A fires.  Adding
+    explicit "no prose, no markdown wrappers around the protocol" rules
+    + 2 concrete examples reduces that drift.
+    """
     lines = [
         f"# Worker Task: {task_obj.worker_id}",
         f"## Step: {step.step_id} ({step.kind})",
@@ -184,16 +192,27 @@ def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
     ]
     for path, content in read_set_contents.items():
         lines.append(f"\n### {path}\n```\n{content}\n```\n")
-    lines.append("\n## Instructions")
-    lines.append("Apply changes using FILE/REPLACE blocks:")
-    lines.append("```")
-    lines.append("FILE: relative/path/to/file.py")
+    lines.append("\n## Output Format — STRICT")
+    lines.append("")
+    lines.append("Respond with **FILE/REPLACE blocks ONLY**.  No prose, no")
+    lines.append("commentary, no markdown code fence wrapping the protocol.")
+    lines.append("Each block has this exact shape:")
+    lines.append("")
+    lines.append("FILE: relative/path/to/file.ext")
     lines.append("<<<<<<< SEARCH")
-    lines.append("old text")
+    lines.append("(exact existing text to replace; leave empty to create file or append)")
     lines.append("=======")
-    lines.append("new text")
+    lines.append("(replacement text)")
     lines.append(">>>>>>> REPLACE")
-    lines.append("```")
+    lines.append("")
+    lines.append("- SEARCH text must be byte-exact (the harness now")
+    lines.append("  CRLF-normalises line endings, so LF or CRLF both work,")
+    lines.append("  but every other character including whitespace must match).")
+    lines.append("- Multiple blocks allowed, one per file edit.")
+    lines.append("- Do NOT wrap the FILE/REPLACE block in ``` fences.")
+    lines.append("- Do NOT emit any prose before, between, or after the blocks.")
+    lines.append("- Do NOT emit the entire new file contents inside a markdown")
+    lines.append("  code block — that's the wrong format and will be rejected.")
     return "\n".join(lines)
 
 
