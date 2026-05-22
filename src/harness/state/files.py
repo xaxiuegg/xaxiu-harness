@@ -74,7 +74,7 @@ class ActiveDispatch(BaseModel):
     dispatch_id: str              # UUID
     project: str
     packet_path: str
-    backend: Literal["deepseek", "kimi", "anthropic", "gemini", "mock"]
+    backend: Literal["deepseek", "kimi", "anthropic", "gemini", "mimo", "mock"]
     model: str | None = None
     started_at: str               # ISO 8601 UTC
     status: Literal["running", "complete", "failed", "fallback"]

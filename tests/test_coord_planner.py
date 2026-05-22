@@ -199,6 +199,57 @@ def test_plan_auto_generates_run_id(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# WIRE-RUN-ID-AUTOGEN (2026-05-22) — D-NEW-4
+# ---------------------------------------------------------------------------
+
+def test_plan_replaces_malformed_run_id_with_autogen(tmp_path: Path, caplog) -> None:
+    """A free-form run_id (e.g. 'my-smoke-1') gets replaced with a conformant
+    auto-generated one + a warning is emitted, rather than failing with a
+    cryptic pydantic pattern-mismatch."""
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Do a thing")
+    # The dispatch stub returns a plan; the planner overwrites data['run_id']
+    # with its sanitised value before validation, so even an arbitrary plan
+    # data run_id won't survive.
+    plan_data = _valid_plan_dict("20260520T220000-ab12")
+
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        return_value=_make_dispatch_result(json.dumps(plan_data)),
+    ):
+        import logging
+        with caplog.at_level(logging.WARNING, logger="harness.coord.planner"):
+            result = plan(
+                spec, run_id="my-free-form-label",
+                project_root=tmp_path, skip_lint=True,
+            )
+
+    # result.run_id is the auto-generated conformant one (not the free-form input)
+    assert re.fullmatch(r"\d{8}T\d{6}-[a-z0-9]{4}", result.run_id)
+    assert result.run_id != "my-free-form-label"
+    # operator sees a clear warning that their label was replaced
+    assert any("my-free-form-label" in rec.message for rec in caplog.records)
+
+
+def test_plan_keeps_conformant_run_id_unchanged(tmp_path: Path) -> None:
+    """When the operator passes a properly-formatted run_id, it's preserved."""
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Do a thing")
+    plan_data = _valid_plan_dict("20260520T220000-ab12")
+
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        return_value=_make_dispatch_result(json.dumps(plan_data)),
+    ):
+        result = plan(
+            spec, run_id="20260520T220000-ab12",
+            project_root=tmp_path, skip_lint=True,
+        )
+
+    assert result.run_id == "20260520T220000-ab12"
+
+
+# ---------------------------------------------------------------------------
 # write_plan
 # ---------------------------------------------------------------------------
 

@@ -127,7 +127,23 @@ def plan(
     Raises ValidationError if every retry fails the schema check, or
     ValueError if the spec fails its preflight lint.
     """
-    run_id = run_id or _new_run_id()
+    # WIRE-RUN-ID-AUTOGEN (2026-05-22): the WavePlan schema enforces
+    # ``^\d{8}T\d{6}-[a-z0-9]{4}$`` on run_id (timestamp + 4-char suffix).
+    # Operators occasionally pass a free-form label and get a cryptic
+    # pydantic pattern-mismatch error.  Auto-generate when missing OR
+    # malformed; emit a clear warning so the operator sees the synthesis.
+    import re as _re_run_id
+    _RUN_ID_RE = _re_run_id.compile(r"^\d{8}T\d{6}-[a-z0-9]{4}$")
+    if not run_id or not _RUN_ID_RE.match(run_id):
+        old = run_id
+        run_id = _new_run_id()
+        if old:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "planner: run_id %r does not match required pattern "
+                "^<YYYYMMDDTHHMMSS>-<4 lowercase hex>$; using auto-generated %r instead.",
+                old, run_id,
+            )
     if not skip_lint:
         try:
             from harness.lint import lint_spec, is_plan_ready

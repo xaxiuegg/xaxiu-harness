@@ -62,7 +62,7 @@ class WavePlan(BaseModel):
     run_id: str = Field(pattern=r"^\d{8}T\d{6}-[a-z0-9]{4}$")
     spec_path: str = Field(min_length=1, max_length=512)
     created_at: str
-    planner_engine: Literal["claude", "kimi", "kimi-api", "deepseek", "mock"]
+    planner_engine: Literal["claude", "kimi", "kimi-api", "deepseek", "mimo", "mock"]
     planner_model: str | None = Field(default=None, max_length=128)
     tasks: list[WorkerTask] = Field(min_length=1, max_length=24)
     integration_strategy: Literal["squash", "merge", "rebase"] = "squash"

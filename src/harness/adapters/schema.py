@@ -24,7 +24,7 @@ from pydantic import (
 class RoutingAction(BaseModel):
     """Backend routing action taken when a rule matches."""
 
-    backend: Literal["deepseek", "kimi", "anthropic", "burst"]
+    backend: Literal["deepseek", "kimi", "anthropic", "gemini", "mimo", "burst"]
     model: str | None = Field(default=None, max_length=128)
     extra_args: dict[str, Any] = Field(default_factory=dict)
 
