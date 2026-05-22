@@ -1568,7 +1568,9 @@ def session_arm_crisis_check(cadence: int) -> None:
 
 
 @session_group.command(name="ok-to-stop")
-def session_ok_to_stop() -> None:
+@click.option("--json", "json_output", is_flag=True, default=False,
+              help="Emit decision as structured JSON instead of human text.")
+def session_ok_to_stop(json_output: bool) -> None:
     """Deterministic gate — exit 0 only if the session may legitimately stop now.
 
     The autonomous-loop directive
@@ -1580,10 +1582,18 @@ def session_ok_to_stop() -> None:
     Exit codes:
       0 — stopping is appropriate (reason printed)
       1 — stopping is premature; keep working (reason printed)
+
+    --json emits {ok_to_stop, reason, ...inputs} for programmatic consumers
+    (dashboard, chat observer, wrapper scripts).
     """
-    from harness.session.stop_check import ok_to_stop
-    ok, reason = ok_to_stop()
-    click.echo(("ok-to-stop: " if ok else "NOT-YET: ") + reason)
+    from harness.session.stop_check import ok_to_stop_with_inputs
+    ok, reason, inputs = ok_to_stop_with_inputs()
+    if json_output:
+        import json as _json
+        payload = {"ok_to_stop": ok, "reason": reason, **inputs}
+        click.echo(_json.dumps(payload))
+    else:
+        click.echo(("ok-to-stop: " if ok else "NOT-YET: ") + reason)
     sys.exit(0 if ok else 1)
 
 

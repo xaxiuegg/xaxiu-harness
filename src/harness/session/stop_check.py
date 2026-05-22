@@ -140,32 +140,61 @@ def _session_handoff_recommendation() -> str:
 
 
 def ok_to_stop() -> tuple[bool, str]:
-    """Return (ok, reason) for whether the session may legitimately stop now."""
-    # 1. Session-handoff threshold
+    """Return (ok, reason) — back-compat 2-tuple shape."""
+    ok, reason, _ = ok_to_stop_with_inputs()
+    return ok, reason
+
+
+def ok_to_stop_with_inputs() -> tuple[bool, str, dict]:
+    """Return (ok, reason, inputs) where inputs is the structured decision basis.
+
+    inputs schema:
+      session_handoff_recommendation: str  (NONE|SOFT|STRONGLY|CRITICAL)
+      production_queued: int
+      creativity_fired_within_minutes: int | None  (None = never within window)
+      approval_file_present: bool
+
+    WIRE-OK-TO-STOP-JSON (2026-05-22): added for the --json CLI surface.
+    """
     rec = _session_handoff_recommendation()
+    approval = _OPERATOR_STOP_FLAG.exists()
+    queued = _count_queued_production_rows()
+    # creativity_fired_within_minutes: derive from log mtime
+    creativity_minutes: int | None = None
+    if _CREATIVITY_LOG.exists():
+        age_s = time.time() - _CREATIVITY_LOG.stat().st_mtime
+        if age_s <= _CREATIVITY_WINDOW_SECONDS:
+            creativity_minutes = int(age_s // 60)
+    inputs = {
+        "session_handoff_recommendation": rec,
+        "production_queued": queued,
+        "creativity_fired_within_minutes": creativity_minutes,
+        "approval_file_present": approval,
+    }
+
+    # 1. Session-handoff threshold
     if rec in ("STRONGLY", "CRITICAL"):
-        return True, f"session-handoff recommendation is {rec} — stop is appropriate"
+        return True, f"session-handoff recommendation is {rec} — stop is appropriate", inputs
 
     # 2. Operator explicit stop flag
-    if _OPERATOR_STOP_FLAG.exists():
-        return True, f"operator stop flag present: {_OPERATOR_STOP_FLAG}"
+    if approval:
+        return True, f"operator stop flag present: {_OPERATOR_STOP_FLAG}", inputs
 
     # 3. Backlog + creativity attempt
-    queued = _count_queued_production_rows()
     if queued == 0:
-        if _creativity_recently_fired():
+        if creativity_minutes is not None:
             return True, (
                 "0 queued production rows AND creativity supervisor "
                 "fired recently — backlog genuinely drained"
-            )
+            ), inputs
         return False, (
             "0 queued production rows but creativity has not fired in "
             f"the last {_CREATIVITY_WINDOW_SECONDS // 60}min — "
             "fire `creativity supervisor` to repopulate backlog before stopping"
-        )
+        ), inputs
 
     return False, (
         f"{queued} queued production rows still pending; "
         f"session-handoff rec is {rec} (well below STRONGLY).  "
         "Continue dispatching work."
-    )
+    ), inputs

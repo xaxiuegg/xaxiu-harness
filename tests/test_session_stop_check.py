@@ -211,3 +211,79 @@ def test_cli_ok_to_stop_exit_1_when_premature(monkeypatch, tmp_path: Path) -> No
             result = runner.invoke(cli, ["session", "ok-to-stop"])
     assert result.exit_code == 1
     assert "NOT-YET:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# WIRE-OK-TO-STOP-JSON (2026-05-22) — W3-F
+# ---------------------------------------------------------------------------
+
+def test_session_ok_to_stop_json_emits_structured_payload(monkeypatch, tmp_path: Path) -> None:
+    """--json emits a JSON object with ok_to_stop + reason + input fields."""
+    import json as _json
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        coord = Path("coord")
+        coord.mkdir()
+        with open(coord / "STATUS.csv", "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["ID", "Category", "Title", "Status", "Owner", "Effort", "Date", "Notes"])
+            w.writerow(["A", "Production", "t", "queued", "", "", "", ""])
+        with patch("harness.session.stop_check._session_handoff_recommendation",
+                   return_value="NONE"):
+            result = runner.invoke(cli, ["session", "ok-to-stop", "--json"])
+    assert result.exit_code == 1
+    data = _json.loads(result.output)
+    assert data["ok_to_stop"] is False
+    assert "reason" in data
+    assert "production_queued" in data
+    assert "creativity_fired_within_minutes" in data
+    assert "approval_file_present" in data
+    assert "session_handoff_recommendation" in data
+    assert data["session_handoff_recommendation"] == "NONE"
+    assert data["production_queued"] == 1
+
+
+def test_session_ok_to_stop_json_happy_path(monkeypatch, tmp_path: Path) -> None:
+    """--json on STRONGLY recommendation → ok_to_stop=true exit 0."""
+    import json as _json
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("harness.session.stop_check._session_handoff_recommendation",
+                   return_value="STRONGLY"):
+            result = runner.invoke(cli, ["session", "ok-to-stop", "--json"])
+    assert result.exit_code == 0
+    data = _json.loads(result.output)
+    assert data["ok_to_stop"] is True
+    assert "STRONGLY" in data["reason"]
+
+
+def test_session_ok_to_stop_text_mode_unchanged(monkeypatch, tmp_path: Path) -> None:
+    """Without --json, the original ok-to-stop:/NOT-YET: text format is preserved."""
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("harness.session.stop_check._session_handoff_recommendation",
+                   return_value="STRONGLY"):
+            result = runner.invoke(cli, ["session", "ok-to-stop"])
+    assert result.exit_code == 0
+    assert "ok-to-stop:" in result.output
+    # JSON shouldn't leak into text mode
+    assert "{" not in result.output
+
+
+def test_ok_to_stop_with_inputs_returns_three_tuple(monkeypatch) -> None:
+    """The new ok_to_stop_with_inputs() returns (ok, reason, inputs_dict)."""
+    from harness.session.stop_check import ok_to_stop_with_inputs
+    with patch("harness.session.stop_check._session_handoff_recommendation",
+               return_value="NONE"):
+        result = ok_to_stop_with_inputs()
+    assert isinstance(result, tuple) and len(result) == 3
+    ok, reason, inputs = result
+    assert isinstance(ok, bool)
+    assert isinstance(reason, str)
+    assert isinstance(inputs, dict)
+    assert set(inputs.keys()) >= {
+        "session_handoff_recommendation",
+        "production_queued",
+        "creativity_fired_within_minutes",
+        "approval_file_present",
+    }
