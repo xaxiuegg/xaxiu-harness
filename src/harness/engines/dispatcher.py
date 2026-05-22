@@ -541,12 +541,18 @@ def dispatch_packet(
             model = None  # let per-engine default kick in for mimo
 
     if not model:
+        # WIRE-MIMO-AUTO-DETECT-PRESERVED (2026-05-22): for mimo, pass the
+        # 'auto' sentinel so MiMoConcrete.dispatch invokes
+        # detect_mimo_model() against the packet content + switches to
+        # mimo-v2.5 (Standard / multimodal) when image/video/audio
+        # markers are present.  Hardcoding mimo-v2.5-pro here would
+        # dead-code the auto-routing shipped in b795857.
         _ENGINE_DEFAULT_MODELS = {
             "kimi":      "kimi-for-coding",
             "deepseek":  "deepseek-v4-flash",
             "anthropic": "claude-sonnet-4-5-20250929",
             "gemini":    "gemini-2.0-flash",
-            "mimo":      "mimo-v2.5-pro",   # text default; multimodal auto-detected in MiMoConcrete.dispatch
+            "mimo":      "auto",            # sentinel → MiMoConcrete picks Pro or Std
             "mock":      "mock-model",
         }
         model = _ENGINE_DEFAULT_MODELS.get(initial_engine, "")
