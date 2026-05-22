@@ -226,7 +226,22 @@ class DeepSeekConcrete(Engine):
         model: str,
         extra: dict[str, Any],
     ) -> dict:
-        no_thinking = extra.get("--no-thinking", False) or model.endswith("-flash")
+        # WIRE-DEEPSEEK-THINKING (2026-05-22): operator preference is
+        # deepseek-v4-flash with thinking ON.  DeepSeek's chat-completions
+        # API does NOT accept a ``thinking`` JSON field — thinking is
+        # implicit per model + CLI flag (``--no-thinking`` is a swarm CLI
+        # convention, not an API parameter).  Sending ``thinking: False``
+        # caused HTTP 400 in the 2026-05-22 benchmark.
+        #
+        # Default: don't send the field (= thinking ON).
+        # Operator opt-out: pass ``no_thinking=True`` in extra_args; we
+        # still don't send a JSON field, but switch temperature to 0.0
+        # so output is deterministic (matches swarm's --no-thinking
+        # convention for surgical FIND/REPLACE patches).
+        no_thinking = bool(
+            extra.get("no_thinking")
+            or extra.get("--no-thinking")
+        )
         temperature = 0.0 if no_thinking else 0.6
         # WIRE-MAX-TOKENS (2026-05-22): explicit max_tokens unblocks the
         # server-side default cap (DeepSeek/Kimi both top out around
@@ -234,15 +249,12 @@ class DeepSeekConcrete(Engine):
         # truncated mid-edit.  Default 32768 gives ~2x typical worker
         # output without burning the full 131K cap.
         max_tokens = int(extra.get("max_tokens", 32768))
-        payload: dict = {
+        return {
             "model": model,
             "messages": [{"role": "user", "content": content}],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if no_thinking:
-            payload["thinking"] = False
-        return payload
 
 
 class KimiConcrete(Engine):
@@ -440,17 +452,24 @@ class AnthropicConcrete(Engine):
 def _resolve_mimo_upstream(api_key: str) -> str:
     """Pick the MiMo endpoint based on key prefix + region + env overrides.
 
-    Xiaomi runs the Token Plan against TWO regional gateways
-    (verified 2026-05-22 from platform.xiaomimimo.com/docs/tokenplan):
-      - ``token-plan-ams.xiaomimimo.com`` — Amsterdam (international, default)
+    Xiaomi runs the Token Plan against THREE regional gateways
+    (verified 2026-05-22 against operator's actual dashboard):
+      - ``token-plan-sgp.xiaomimimo.com`` — Singapore (international, **default**)
+      - ``token-plan-ams.xiaomimimo.com`` — Amsterdam (Europe)
       - ``token-plan-cn.xiaomimimo.com``  — China
 
     Pay-as-you-go is unified at ``api.xiaomimimo.com``.
 
+    WIRE-MIMO-SGP (2026-05-22): Singapore is the default for international
+    accounts.  An earlier default (``ams``) was wrong against the
+    operator's tp- key — server returned 401 invalid_key from ams + cn
+    endpoints, 200 from sgp.  The key itself is bound to a specific
+    regional gateway when provisioned.
+
     Resolution order:
       1. ``MIMO_BASE_URL`` env var (full URL override)
-      2. ``MIMO_REGION`` env var: ``cn`` → cn gateway; anything else → ams
-      3. Key prefix: ``tp-`` → Token Plan; ``sk-`` / other → pay-as-you-go
+      2. ``MIMO_REGION`` env var: ``sgp`` | ``ams`` | ``cn`` (default ``sgp``)
+      3. Key prefix: ``tp-`` → Token Plan regional; ``sk-`` / other → PAYG
     """
     explicit = os.environ.get("MIMO_BASE_URL", "").strip()
     if explicit:
@@ -458,11 +477,14 @@ def _resolve_mimo_upstream(api_key: str) -> str:
         if not url.endswith("/chat/completions"):
             url = url + "/chat/completions"
         return url
-    region = os.environ.get("MIMO_REGION", "ams").strip().lower()
+    region = os.environ.get("MIMO_REGION", "sgp").strip().lower()
     if api_key.startswith("tp-"):
         if region == "cn":
             return "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
-        return "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+        if region == "ams":
+            return "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+        # default + unrecognized values → SGP (Singapore)
+        return "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"
     return "https://api.xiaomimimo.com/v1/chat/completions"
 
 
@@ -480,6 +502,55 @@ def _make_mimo_user_agent() -> str:
     the same UA there is harmless and keeps one code path.
     """
     return os.environ.get("MIMO_USER_AGENT", "claude-code/0.1.0")
+
+
+# WIRE-MIMO-AUTO-ROUTING (2026-05-22): operator-policy default
+# ----------------------------------------------------------------------
+# Per operator research 2026-05-22: MiMo V2.5-Pro is text-only.
+# Multimodal (image / video / audio understanding) only works on
+# MiMo V2.5 Standard (the "Omni" model).  So when a packet contains
+# multimodal markers we MUST route to ``mimo-v2.5`` regardless of the
+# operator-default preference for Pro.
+#
+# Detection is intentionally simple — any of these surface forms in
+# the packet text triggers Standard:
+#   - markdown image: ``![...](path)``
+#   - HTML img/video/audio tags
+#   - inline image data URLs: ``data:image/``, ``data:video/``
+#   - common media file extensions in the packet: .png .jpg .jpeg
+#     .gif .webp .mp4 .mov .webm .mp3 .wav
+#
+# Override via ``model=`` in extra_args wins over auto-detection.
+# ----------------------------------------------------------------------
+
+DEFAULT_MIMO_MODEL: str = "mimo-v2.5-pro"
+MULTIMODAL_MIMO_MODEL: str = "mimo-v2.5"
+
+import re as _re_mimo  # noqa: E402  (imported here to keep module-level imports stable)
+
+_MULTIMODAL_RE = _re_mimo.compile(
+    r"!\[[^\]]*\]\("                       # markdown image
+    r"|<(?:img|video|audio|source)\b"      # HTML media tags
+    r"|data:(?:image|video|audio)/"        # inline data URLs
+    r"|\.(?:png|jpe?g|gif|webp|mp4|mov|webm|mp3|wav)\b",
+    _re_mimo.IGNORECASE,
+)
+
+
+def detect_mimo_model(packet_content: str,
+                      extra_args: Optional[dict[str, Any]] = None) -> str:
+    """Return the MiMo model name to use for *packet_content*.
+
+    Resolution order:
+      1. explicit ``model`` in extra_args (operator override)
+      2. multimodal marker detected in packet → ``mimo-v2.5`` (Standard)
+      3. default → ``mimo-v2.5-pro`` (text-only, sharper on coding)
+    """
+    if extra_args and extra_args.get("model"):
+        return str(extra_args["model"])
+    if _MULTIMODAL_RE.search(packet_content or ""):
+        return MULTIMODAL_MIMO_MODEL
+    return DEFAULT_MIMO_MODEL
 
 
 class MiMoConcrete(Engine):
@@ -502,6 +573,14 @@ class MiMoConcrete(Engine):
         extra_args: Optional[dict[str, Any]] = None,
     ) -> EngineResponse:
         extra = extra_args or {}
+
+        # WIRE-MIMO-AUTO-ROUTING (2026-05-22): when caller passes a
+        # placeholder model (empty, ``auto``, or ``mimo``), detect from
+        # packet content.  Explicit model strings (``mimo-v2.5``,
+        # ``mimo-v2.5-pro``) pass through untouched so deliberate
+        # routing remains operator-controllable.
+        if not model or model.strip().lower() in {"auto", "mimo", "default"}:
+            model = detect_mimo_model(packet_content, extra)
 
         start = time.monotonic()
         try:

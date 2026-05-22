@@ -93,7 +93,8 @@ def test_env_var_inventory_mixed_is_ok(monkeypatch) -> None:
 
 
 def test_env_var_inventory_all_unset_is_warn(monkeypatch) -> None:
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY", "OPENAI_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     d = _check_env_var_inventory()
     assert d.severity == "warn"
@@ -120,7 +121,8 @@ def test_env_var_inventory_message_format(monkeypatch) -> None:
 
 
 def test_engine_reachability_both_empty(monkeypatch):
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
         d = _check_engine_reachability()
@@ -129,7 +131,8 @@ def test_engine_reachability_both_empty(monkeypatch):
 
 
 def test_engine_reachability_only_dpapi(monkeypatch):
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     with patch("harness.secrets.dpapi.list_secrets", return_value=["KIMI_API_KEY", "DEEPSEEK_API_KEY"]):
         d = _check_engine_reachability()
@@ -138,7 +141,8 @@ def test_engine_reachability_only_dpapi(monkeypatch):
 
 
 def test_engine_reachability_only_env(monkeypatch):
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
@@ -148,7 +152,8 @@ def test_engine_reachability_only_env(monkeypatch):
 
 
 def test_engine_reachability_both_populated(monkeypatch):
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "x")
     with patch("harness.secrets.dpapi.list_secrets", return_value=["KIMI_API_KEY"]):
@@ -177,7 +182,8 @@ def test_cli_doctor_json_format(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 def test_engine_reachability_surfaces_mimo_tokenplan(monkeypatch) -> None:
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("MIMO_API_KEY", "tp-secret")
     with patch("harness.secrets.dpapi.list_secrets", return_value=[]):
@@ -189,7 +195,8 @@ def test_engine_reachability_surfaces_mimo_tokenplan(monkeypatch) -> None:
 
 
 def test_engine_reachability_surfaces_mimo_payg(monkeypatch) -> None:
-    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]:
+    for k in ["KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+              "GEMINI_API_KEY", "MIMO_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("MIMO_API_KEY", "sk-paykey")
     with patch("harness.secrets.dpapi.list_secrets", return_value=[]):

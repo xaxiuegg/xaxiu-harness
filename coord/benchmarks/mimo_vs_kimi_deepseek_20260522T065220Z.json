@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "run_at_utc": "2026-05-22T06:52:20.996570+00:00",
+  "summary": {
+    "deepseek-flash": {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "runs": 5,
+      "successes": 0,
+      "failures": 5,
+      "total_latency_ms": 0,
+      "total_response_chars": 0,
+      "errors": [
+        {
+          "prompt": "p2_code_gen",
+          "error": "HTTP 400"
+        },
+        {
+          "prompt": "p1_simple_text",
+          "error": "HTTP 400"
+        },
+        {
+          "prompt": "p3_reasoning",
+          "error": "HTTP 400"
+        },
+        {
+          "prompt": "p4_structured",
+          "error": "HTTP 400"
+        },
+        {
+          "prompt": "p5_long_context_seed",
+          "error": "HTTP 400"
+        }
+      ],
+      "avg_latency_ms": null,
+      "avg_response_chars": null
+    },
+    "mimo-standard": {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "runs": 5,
+      "successes": 0,
+      "failures": 5,
+      "total_latency_ms": 0,
+      "total_response_chars": 0,
+      "errors": [
+        {
+          "prompt": "p1_simple_text",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p2_code_gen",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p3_reasoning",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p4_structured",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p5_long_context_seed",
+          "error": "HTTP 401"
+        }
+      ],
+      "avg_latency_ms": null,
+      "avg_response_chars": null
+    },
+    "mimo-pro": {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "runs": 5,
+      "successes": 0,
+      "failures": 5,
+      "total_latency_ms": 0,
+      "total_response_chars": 0,
+      "errors": [
+        {
+          "prompt": "p2_code_gen",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p1_simple_text",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p3_reasoning",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p4_structured",
+          "error": "HTTP 401"
+        },
+        {
+          "prompt": "p5_long_context_seed",
+          "error": "HTTP 401"
+        }
+      ],
+      "avg_latency_ms": null,
+      "avg_response_chars": null
+    },
+    "kimi-k2.6": {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "runs": 5,
+      "successes": 3,
+      "failures": 2,
+      "total_latency_ms": 93022,
+      "total_response_chars": 898,
+      "errors": [
+        {
+          "prompt": "p3_reasoning",
+          "error": "internal"
+        },
+        {
+          "prompt": "p5_long_context_seed",
+          "error": "internal"
+        }
+      ],
+      "avg_latency_ms": 31007.3,
+      "avg_response_chars": 299.3
+    }
+  },
+  "results": [
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": false,
+      "latency_ms": 1388,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 400"
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": false,
+      "latency_ms": 1391,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 400"
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": false,
+      "latency_ms": 1776,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": false,
+      "latency_ms": 1780,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": false,
+      "latency_ms": 1796,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": false,
+      "latency_ms": 1803,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": false,
+      "latency_ms": 884,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 400"
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": false,
+      "latency_ms": 817,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": false,
+      "latency_ms": 833,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": false,
+      "latency_ms": 941,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 400"
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": false,
+      "latency_ms": 693,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": false,
+      "latency_ms": 808,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": false,
+      "latency_ms": 689,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": false,
+      "latency_ms": 1011,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 400"
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": false,
+      "latency_ms": 733,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "HTTP 401"
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": true,
+      "latency_ms": 23862,
+      "response_len_chars": 280,
+      "response_excerpt": "A Python list is a mutable sequence enclosed in square brackets, meaning its elements can be modified, added, or removed after creation. A Python tuple is an immutable sequence enclosed in parentheses, meaning its contents are fixed and can",
+      "error": null
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": true,
+      "latency_ms": 28844,
+      "response_len_chars": 215,
+      "response_excerpt": "{\"Mercury\":{\"order\":1,\"moons\":0,\"atmosphere\":\"negligible\"},\"Venus\":{\"order\":2,\"moons\":0,\"atmosphere\":\"thick\"},\"Earth\":{\"order\":3,\"moons\":1,\"atmosphere\":\"breathable\"},\"Mars\":{\"order\":4,\"moons\":2,\"atmosphere\":\"thin\"}}",
+      "error": null
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": true,
+      "latency_ms": 40316,
+      "response_len_chars": 403,
+      "response_excerpt": "```python\ndef is_palindrome(s: str) -> bool:\n    \"\"\"Return True if s is a palindrome, ignoring case and non-alphanumeric characters.\n\n    Example calls:\n    >>> is_palindrome(\"Racecar\")\n    True\n    >>> is_palindrome(\"A man, a plan, a canal",
+      "error": null
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": false,
+      "latency_ms": 60311,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "internal"
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": false,
+      "latency_ms": 60332,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "internal"
+    }
+  ]
+}

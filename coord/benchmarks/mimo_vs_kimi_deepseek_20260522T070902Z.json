@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "run_at_utc": "2026-05-22T07:09:02.955650+00:00",
+  "summary": {
+    "deepseek-flash": {
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "runs": 5,
+      "successes": 5,
+      "failures": 0,
+      "total_latency_ms": 40620,
+      "total_response_chars": 3576,
+      "errors": [],
+      "avg_latency_ms": 8124.0,
+      "avg_response_chars": 715.2
+    },
+    "mimo-standard": {
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "runs": 5,
+      "successes": 5,
+      "failures": 0,
+      "total_latency_ms": 63709,
+      "total_response_chars": 3409,
+      "errors": [],
+      "avg_latency_ms": 12741.8,
+      "avg_response_chars": 681.8
+    },
+    "mimo-pro": {
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "runs": 5,
+      "successes": 5,
+      "failures": 0,
+      "total_latency_ms": 62120,
+      "total_response_chars": 4154,
+      "errors": [],
+      "avg_latency_ms": 12424.0,
+      "avg_response_chars": 830.8
+    },
+    "kimi-k2.6": {
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "runs": 5,
+      "successes": 3,
+      "failures": 2,
+      "total_latency_ms": 81075,
+      "total_response_chars": 1016,
+      "errors": [
+        {
+          "prompt": "p2_code_gen",
+          "error": "internal"
+        },
+        {
+          "prompt": "p5_long_context_seed",
+          "error": "internal"
+        }
+      ],
+      "avg_latency_ms": 27025.0,
+      "avg_response_chars": 338.7
+    }
+  },
+  "results": [
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": true,
+      "latency_ms": 3035,
+      "response_len_chars": 214,
+      "response_excerpt": "A Python list is mutable, meaning its elements can be changed after creation, while a tuple is immutable and cannot be modified. Additionally, lists are defined with square brackets, whereas tuples use parentheses.",
+      "error": null
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": true,
+      "latency_ms": 3668,
+      "response_len_chars": 387,
+      "response_excerpt": "A **Python list** is a mutable, ordered collection of items enclosed in square brackets `[]`, meaning its elements can be added, removed, or changed after creation. A **Python tuple** is an immutable, ordered collection enclosed in parenthe",
+      "error": null
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": true,
+      "latency_ms": 3721,
+      "response_len_chars": 450,
+      "response_excerpt": "```python\ndef is_palindrome(s: str) -> bool:\n    \"\"\"\n    Returns True if s is a palindrome (case-insensitive, ignoring non-alphanumeric characters).\n\n    Examples:\n    >>> is_palindrome(\"A man, a plan, a canal: Panama\")\n    True\n    >>> is_",
+      "error": null
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": true,
+      "latency_ms": 6323,
+      "response_len_chars": 347,
+      "response_excerpt": "A **list** is mutable, meaning you can add, remove, or change its elements after creation, while a **tuple** is immutable, meaning once it's created, its contents cannot be modified. Lists are defined with square brackets `[]` and tuples wi",
+      "error": null
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": true,
+      "latency_ms": 7903,
+      "response_len_chars": 464,
+      "response_excerpt": "```python\nimport re\n\ndef is_palindrome(s: str) -> bool:\n    \"\"\"\n    Determine if a string is a palindrome, ignoring case and non-alphanumeric characters.\n\n    Examples:\n        >>> is_palindrome(\"A man, a plan, a canal: Panama\")\n        Tru",
+      "error": null
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": true,
+      "latency_ms": 11552,
+      "response_len_chars": 433,
+      "response_excerpt": "```python\ndef is_palindrome(s: str) -> bool:\n    \"\"\"\n    Check if a string is a palindrome, case-insensitive and ignoring non-alphanumeric characters.\n\n    Example calls:\n    >>> is_palindrome(\"A man, a plan, a canal: Panama\")\n    True\n    ",
+      "error": null
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": true,
+      "latency_ms": 9244,
+      "response_len_chars": 388,
+      "response_excerpt": "## Solution\n\n**By 10:30 AM**, Train A has already traveled 1.5 hrs \u00d7 60 mph = **90 miles**, leaving 90 miles between the two trains.\n\n**At 10:30**, both trains are now moving toward each other at a combined speed of 60 + 80 = **140 mph**.\n\n",
+      "error": null
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": true,
+      "latency_ms": 6621,
+      "response_len_chars": 258,
+      "response_excerpt": "{\n  \"Mercury\": { \"order\": 1, \"moons\": 0, \"atmosphere\": \"tenuous\" },\n  \"Venus\": { \"order\": 2, \"moons\": 0, \"atmosphere\": \"carbon\" },\n  \"Earth\": { \"order\": 3, \"moons\": 1, \"atmosphere\": \"nitrogen\" },\n  \"Mars\": { \"order\": 4, \"moons\": 2, \"atmosph",
+      "error": null
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": true,
+      "latency_ms": 15524,
+      "response_len_chars": 364,
+      "response_excerpt": "The first train travels for 1.5 hours before the second starts, covering 60 \u00d7 1.5 = 90 miles, leaving 180 - 90 = 90 miles between them. Their combined speed is 60 + 80 = 140 mph, so the time to meet after 10:30 is 90/140 = 9/14 hour = 38 4/",
+      "error": null
+    },
+    {
+      "prompt_id": "p1_simple_text",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": true,
+      "latency_ms": 22382,
+      "response_len_chars": 450,
+      "response_excerpt": "A Python list is a mutable sequence enclosed in square brackets that allows elements to be modified, added, or removed after creation, whereas a tuple is an immutable sequence enclosed in parentheses that cannot be altered once defined. Thi",
+      "error": null
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": true,
+      "latency_ms": 23866,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": null
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": true,
+      "latency_ms": 12725,
+      "response_len_chars": 309,
+      "response_excerpt": "{\n  \"Mercury\": {\n    \"order\": 1,\n    \"moons\": 0,\n    \"atmosphere\": \"thin\"\n  },\n  \"Venus\": {\n    \"order\": 2,\n    \"moons\": 0,\n    \"atmosphere\": \"dense\"\n  },\n  \"Earth\": {\n    \"order\": 3,\n    \"moons\": 1,\n    \"atmosphere\": \"habitable\"\n  },\n  \"Ma",
+      "error": null
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": true,
+      "latency_ms": 23557,
+      "response_len_chars": 212,
+      "response_excerpt": "{\"Mercury\":{\"order\":1,\"moons\":0,\"atmosphere\":\"minimal\"},\"Venus\":{\"order\":2,\"moons\":0,\"atmosphere\":\"thick\"},\"Earth\":{\"order\":3,\"moons\":1,\"atmosphere\":\"breathable\"},\"Mars\":{\"order\":4,\"moons\":2,\"atmosphere\":\"thin\"}}",
+      "error": null
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "label": "deepseek-flash",
+      "success": true,
+      "latency_ms": 11719,
+      "response_len_chars": 2290,
+      "response_excerpt": "- **SQL injection and parameterized queries**: Verify that all user-supplied inputs (e.g., `page`, `limit`, filter parameters) are passed as query parameters or sanitized, and that the underlying database query uses parameterized statements",
+      "error": null
+    },
+    {
+      "prompt_id": "p4_structured",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": true,
+      "latency_ms": 19631,
+      "response_len_chars": 311,
+      "response_excerpt": "{\n  \"Mercury\": {\n    \"order\": 1,\n    \"moons\": 0,\n    \"atmosphere\": \"trace\"\n  },\n  \"Venus\": {\n    \"order\": 2,\n    \"moons\": 0,\n    \"atmosphere\": \"dense\"\n  },\n  \"Earth\": {\n    \"order\": 3,\n    \"moons\": 1,\n    \"atmosphere\": \"breathable\"\n  },\n  \"",
+      "error": null
+    },
+    {
+      "prompt_id": "p3_reasoning",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": true,
+      "latency_ms": 35136,
+      "response_len_chars": 354,
+      "response_excerpt": "From 9:00 to 10:30 the first train covers 1.5 \u00d7 60 = 90 miles, leaving 180 \u2212 90 = 90 miles between them.  \nAfter 10:30 the trains approach each other at 60 + 80 = 140 mph.  \nThey need 90 / 140 = 9/14 hour = 38 4/7 minutes to meet.  \n10:30 p",
+      "error": null
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "mimo",
+      "model": "mimo-v2.5",
+      "label": "mimo-standard",
+      "success": true,
+      "latency_ms": 11898,
+      "response_len_chars": 2280,
+      "response_excerpt": "Here are the five most important concrete checks for this pull request, in order of priority:\n\n*   **Pagination Logic & Edge Cases:** Verify that the `page` and `per_page` (or equivalent) query parameters are validated (e.g., positive integ",
+      "error": null
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "label": "mimo-pro",
+      "success": true,
+      "latency_ms": 19019,
+      "response_len_chars": 2644,
+      "response_excerpt": "# Key Review Focus Areas for `/v2/users` Pagination Endpoint\n\nHere are the five most critical things I'd scrutinize:\n\n---\n\n- **Pagination correctness and consistency.** Verify the implementation handles edge cases: What happens with `?page=",
+      "error": null
+    },
+    {
+      "prompt_id": "p2_code_gen",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": false,
+      "latency_ms": 60761,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "internal"
+    },
+    {
+      "prompt_id": "p5_long_context_seed",
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "label": "kimi-k2.6",
+      "success": false,
+      "latency_ms": 60345,
+      "response_len_chars": 0,
+      "response_excerpt": "",
+      "error": "internal"
+    }
+  ]
+}

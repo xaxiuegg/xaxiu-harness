@@ -589,9 +589,11 @@ def test_resolve_mimo_upstream_tp_key_goes_to_tokenplan(monkeypatch: pytest.Monk
     from harness.engines.concrete import _resolve_mimo_upstream
     monkeypatch.delenv("MIMO_BASE_URL", raising=False)
     monkeypatch.delenv("MIMO_REGION", raising=False)
-    # Default region is Amsterdam (international); cn requires explicit override
+    # WIRE-MIMO-SGP (2026-05-22): default international region is Singapore.
+    # Operator's actual tp- key is provisioned against the SGP gateway —
+    # ams + cn return 401 invalid_key for it.
     assert _resolve_mimo_upstream("tp-abc123") == \
-        "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+        "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"
 
 
 def test_resolve_mimo_upstream_sk_key_goes_to_payg(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -746,13 +748,13 @@ def test_mimo_user_agent_default_and_override(monkeypatch: pytest.MonkeyPatch) -
     assert _make_mimo_user_agent() == "OpenCode/1.2"
 
 
-def test_resolve_mimo_upstream_defaults_to_amsterdam(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Per Xiaomi research 2026-05-22: international users go to Amsterdam by default."""
+def test_resolve_mimo_upstream_defaults_to_singapore(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per operator's actual dashboard 2026-05-22: international keys are SGP-bound."""
     from harness.engines.concrete import _resolve_mimo_upstream
     monkeypatch.delenv("MIMO_BASE_URL", raising=False)
     monkeypatch.delenv("MIMO_REGION", raising=False)
     assert _resolve_mimo_upstream("tp-abc") == \
-        "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+        "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"
 
 
 def test_resolve_mimo_upstream_region_cn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -761,3 +763,138 @@ def test_resolve_mimo_upstream_region_cn(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("MIMO_REGION", "cn")
     assert _resolve_mimo_upstream("tp-abc") == \
         "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+
+
+def test_resolve_mimo_upstream_region_ams(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import _resolve_mimo_upstream
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    monkeypatch.setenv("MIMO_REGION", "ams")
+    assert _resolve_mimo_upstream("tp-abc") == \
+        "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+
+
+# ---------------------------------------------------------------------------
+# WIRE-MIMO-AUTO-ROUTING (2026-05-22) — Pro default, Standard for multimodal
+# ---------------------------------------------------------------------------
+
+def test_detect_mimo_model_defaults_to_pro_for_text_only() -> None:
+    from harness.engines.concrete import detect_mimo_model, DEFAULT_MIMO_MODEL
+    assert DEFAULT_MIMO_MODEL == "mimo-v2.5-pro"
+    assert detect_mimo_model("plain text packet content") == "mimo-v2.5-pro"
+
+
+def test_detect_mimo_model_switches_to_standard_on_markdown_image() -> None:
+    from harness.engines.concrete import detect_mimo_model
+    packet = "Review this screenshot:\n\n![dashboard](./shots/main.png)\n\nWhat's wrong?"
+    assert detect_mimo_model(packet) == "mimo-v2.5"
+
+
+def test_detect_mimo_model_switches_to_standard_on_html_img_tag() -> None:
+    from harness.engines.concrete import detect_mimo_model
+    packet = 'Analyze: <img src="diagram.png" alt="flow">'
+    assert detect_mimo_model(packet) == "mimo-v2.5"
+
+
+def test_detect_mimo_model_switches_on_video_tag() -> None:
+    from harness.engines.concrete import detect_mimo_model
+    assert detect_mimo_model("watch <video src=clip.mp4></video>") == "mimo-v2.5"
+
+
+def test_detect_mimo_model_switches_on_data_url_image() -> None:
+    from harness.engines.concrete import detect_mimo_model
+    packet = "Decode: data:image/png;base64,iVBORw0K..."
+    assert detect_mimo_model(packet) == "mimo-v2.5"
+
+
+def test_detect_mimo_model_switches_on_inline_image_extension() -> None:
+    from harness.engines.concrete import detect_mimo_model
+    packet = "Compare frame1.jpg vs frame2.webp side by side"
+    assert detect_mimo_model(packet) == "mimo-v2.5"
+
+
+def test_detect_mimo_model_explicit_override_wins() -> None:
+    from harness.engines.concrete import detect_mimo_model
+    # Multimodal content but operator explicitly forces Pro → Pro wins
+    assert detect_mimo_model("![x](y.png)", {"model": "mimo-v2.5-pro"}) == "mimo-v2.5-pro"
+    # Plain text but operator forces Standard → Standard wins
+    assert detect_mimo_model("plain", {"model": "mimo-v2.5"}) == "mimo-v2.5"
+
+
+def test_detect_mimo_model_extension_is_word_boundary_aware() -> None:
+    """A bare word ending in 'png' (e.g. 'png-encoding') should NOT trigger."""
+    from harness.engines.concrete import detect_mimo_model
+    # Real extension → triggers
+    assert detect_mimo_model("see file.png in the repo") == "mimo-v2.5"
+    # Text "PNG" without a leading dot or filename context → does NOT trigger
+    assert detect_mimo_model("discuss the PNG-encoding scheme") == "mimo-v2.5-pro"
+
+
+def test_mimo_dispatch_uses_auto_detection_when_model_is_blank(monkeypatch: pytest.MonkeyPatch, mimo_engine) -> None:
+    """When dispatch is called with model='' it auto-picks via detect_mimo_model."""
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    captured: dict = {}
+
+    def _capture_client(**kwargs):
+        original = _ORIGINAL_HTTPX_CLIENT
+        transport = _mock_transport(
+            json_body={"choices": [{"message": {"content": "ok"}}]},
+        )
+        client = original(transport=transport, **kwargs)
+        original_post = client.post
+
+        def _post(url, **post_kwargs):
+            captured["json"] = post_kwargs.get("json", {})
+            return original_post(url, **post_kwargs)
+
+        client.post = _post  # type: ignore[method-assign]
+        return client
+
+    monkeypatch.setattr("harness.engines.concrete.httpx.Client", _capture_client)
+    # Multimodal packet, empty model → MiMo Standard selected
+    mimo_engine.dispatch("![img](x.png)", "", {})
+    assert captured["json"]["model"] == "mimo-v2.5"
+    captured.clear()
+    # Plain text packet, model=auto → MiMo Pro
+    mimo_engine.dispatch("hello world", "auto", {})
+    assert captured["json"]["model"] == "mimo-v2.5-pro"
+    captured.clear()
+    # Explicit model string passes through untouched
+    mimo_engine.dispatch("![img](x.png)", "mimo-v2.5-pro", {})
+    assert captured["json"]["model"] == "mimo-v2.5-pro"
+
+
+# ---------------------------------------------------------------------------
+# WIRE-DEEPSEEK-THINKING (2026-05-22) — preferred config = v4-flash thinking ON
+# ---------------------------------------------------------------------------
+
+def test_deepseek_payload_default_no_thinking_field() -> None:
+    """DeepSeek API does NOT accept a `thinking` JSON field.  Sending one
+    caused HTTP 400 in the 2026-05-22 benchmark.  Default behaviour now
+    omits the field entirely so thinking-ON is implicit (operator preference)."""
+    p = DeepSeekConcrete._build_payload("hi", "deepseek-v4-flash", {})
+    assert "thinking" not in p
+    # temperature stays at the thinking-ON default (0.6)
+    assert p["temperature"] == 0.6
+
+
+def test_deepseek_payload_flash_no_longer_auto_disables_thinking() -> None:
+    """Regression sentinel: previously model.endswith('-flash') forced
+    no_thinking=True, which set the thinking JSON field and broke
+    DeepSeek's API.  That auto-coupling is gone."""
+    p = DeepSeekConcrete._build_payload("hi", "deepseek-v4-flash", {})
+    assert "thinking" not in p
+    assert p["temperature"] == 0.6  # NOT 0.0 — thinking is on
+
+
+def test_deepseek_payload_explicit_no_thinking_lowers_temperature() -> None:
+    p = DeepSeekConcrete._build_payload("hi", "deepseek-v4-flash",
+                                        {"no_thinking": True})
+    assert "thinking" not in p  # still no JSON field — would 400 the API
+    assert p["temperature"] == 0.0  # deterministic for surgical patches
+
+
+def test_deepseek_payload_alternate_no_thinking_alias() -> None:
+    """``--no-thinking`` (swarm CLI alias) is also honoured for backward compat."""
+    p = DeepSeekConcrete._build_payload("hi", "deepseek-v4-flash",
+                                        {"--no-thinking": True})
+    assert p["temperature"] == 0.0
