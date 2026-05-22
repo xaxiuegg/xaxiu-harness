@@ -522,3 +522,242 @@ def test_get_engine_gemini_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RuntimeError) as exc_info:
         get_engine("gemini", prefer_dpapi=False)
     assert "gemini" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# WIRE-ENGINE-TIMEOUT (2026-05-22) — read timeout 120→600s
+# ---------------------------------------------------------------------------
+
+def test_default_read_timeout_is_at_least_600s() -> None:
+    """Bumped from 120 to 600 so DeepSeek V4 Pro (~165s e2e) doesn't time out."""
+    from harness.engines.concrete import _DEFAULT_TIMEOUT
+    assert _DEFAULT_TIMEOUT.read >= 600
+
+
+def test_default_read_timeout_overridable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HARNESS_ENGINE_READ_TIMEOUT_S should be honoured at import time."""
+    monkeypatch.setenv("HARNESS_ENGINE_READ_TIMEOUT_S", "30")
+    import importlib
+    import harness.engines.concrete as mod
+    importlib.reload(mod)
+    try:
+        assert mod._DEFAULT_TIMEOUT.read == 30.0
+    finally:
+        monkeypatch.delenv("HARNESS_ENGINE_READ_TIMEOUT_S")
+        importlib.reload(mod)
+
+
+# ---------------------------------------------------------------------------
+# WIRE-MAX-TOKENS (2026-05-22) — explicit max_tokens on Kimi + DeepSeek
+# ---------------------------------------------------------------------------
+
+def test_kimi_payload_includes_max_tokens_default() -> None:
+    payload = KimiConcrete._build_payload("hello", "kimi-for-coding", {})
+    assert payload["max_tokens"] == 32768
+
+
+def test_kimi_payload_max_tokens_overridable() -> None:
+    payload = KimiConcrete._build_payload("hello", "kimi-for-coding", {"max_tokens": 8192})
+    assert payload["max_tokens"] == 8192
+
+
+def test_deepseek_payload_includes_max_tokens_default() -> None:
+    payload = DeepSeekConcrete._build_payload("hello", "deepseek-v4-flash", {})
+    assert payload["max_tokens"] == 32768
+
+
+def test_deepseek_payload_max_tokens_overridable() -> None:
+    payload = DeepSeekConcrete._build_payload("hello", "deepseek-v4-flash", {"max_tokens": 65536})
+    assert payload["max_tokens"] == 65536
+
+
+# ---------------------------------------------------------------------------
+# WIRE-MIMO (2026-05-22) — Xiaomi MiMo Open Platform engine
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mimo_engine(monkeypatch: pytest.MonkeyPatch):
+    from harness.engines.concrete import MiMoConcrete
+    monkeypatch.setattr(MiMoConcrete, "__abstractmethods__", frozenset())
+    cls = _make_testable(MiMoConcrete, "mimo")
+    monkeypatch.setattr(MiMoConcrete, "__init__", cls.__init__)
+    monkeypatch.setattr(MiMoConcrete, "name", cls.name)
+    return MiMoConcrete("sk-test")  # type: ignore[call-arg]
+
+
+def test_resolve_mimo_upstream_tp_key_goes_to_tokenplan(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import _resolve_mimo_upstream
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    monkeypatch.delenv("MIMO_REGION", raising=False)
+    # Default region is Amsterdam (international); cn requires explicit override
+    assert _resolve_mimo_upstream("tp-abc123") == \
+        "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+
+
+def test_resolve_mimo_upstream_sk_key_goes_to_payg(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import _resolve_mimo_upstream
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    assert _resolve_mimo_upstream("sk-abc123") == \
+        "https://api.xiaomimimo.com/v1/chat/completions"
+
+
+def test_resolve_mimo_upstream_explicit_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import _resolve_mimo_upstream
+    monkeypatch.setenv("MIMO_BASE_URL", "https://my-proxy.local/v1")
+    assert _resolve_mimo_upstream("tp-abc") == \
+        "https://my-proxy.local/v1/chat/completions"
+    monkeypatch.setenv("MIMO_BASE_URL", "https://my-proxy.local/v1/chat/completions")
+    assert _resolve_mimo_upstream("sk-abc") == \
+        "https://my-proxy.local/v1/chat/completions"
+
+
+def test_mimo_payload_shape() -> None:
+    from harness.engines.concrete import MiMoConcrete
+    p = MiMoConcrete._build_payload("hi", "mimo-v2.5-pro", {})
+    assert p["model"] == "mimo-v2.5-pro"
+    assert p["messages"][0]["content"] == "hi"
+    assert p["max_tokens"] == 32768
+    assert "temperature" in p
+    assert "thinking" not in p  # only included when explicitly requested
+
+
+def test_mimo_payload_passes_thinking_when_requested() -> None:
+    from harness.engines.concrete import MiMoConcrete
+    p = MiMoConcrete._build_payload("hi", "mimo-v2.5-pro", {"thinking": True})
+    assert p["thinking"] is True
+
+
+def test_mimo_dispatch_success(monkeypatch: pytest.MonkeyPatch, mimo_engine) -> None:
+    """Mocked happy-path call hits the right URL and returns text."""
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    transport = _mock_transport(
+        json_body={"choices": [{"message": {"content": "ok"}}]},
+    )
+    original = httpx.Client
+    captured = {}
+
+    def _capture_client(**kwargs):
+        client = original(transport=transport, **kwargs)
+        original_post = client.post
+
+        def _post(url, **post_kwargs):
+            captured["url"] = url
+            captured["headers"] = post_kwargs.get("headers", {})
+            captured["json"] = post_kwargs.get("json", {})
+            return original_post(url, **post_kwargs)
+
+        client.post = _post  # type: ignore[method-assign]
+        return client
+
+    monkeypatch.setattr("harness.engines.concrete.httpx.Client", _capture_client)
+    result = mimo_engine.dispatch("hello", "mimo-v2.5", {})
+    assert result.success is True
+    assert result.text == "ok"
+    assert "xiaomimimo.com" in captured["url"]
+    assert captured["headers"]["Authorization"].startswith("Bearer ")
+
+
+def test_get_engine_returns_mimo_concrete(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import MiMoConcrete
+    monkeypatch.setenv("MIMO_API_KEY", "tp-test-key")
+    engine = get_engine("mimo", prefer_dpapi=False)
+    assert isinstance(engine, MiMoConcrete)
+
+
+def test_get_engine_mimo_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MIMO_API_KEY", raising=False)
+    with pytest.raises(RuntimeError) as exc_info:
+        get_engine("mimo", prefer_dpapi=False)
+    assert "mimo" in str(exc_info.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# Budget integration: MiMo subscription pricing
+# ---------------------------------------------------------------------------
+
+def test_budget_normalize_mimo_subscription_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """tp- key → -sub pricing row (free); sk- key → standard pricing."""
+    from harness.budget import _normalize_engine
+    monkeypatch.setenv("MIMO_API_KEY", "tp-abc")
+    assert _normalize_engine("mimo") == "mimo-sub"
+    assert _normalize_engine("mimo-v2.5") == "mimo-sub"
+    assert _normalize_engine("mimo-pro") == "mimo-pro-sub"
+    assert _normalize_engine("swarm/mimo-v2.5-pro") == "mimo-pro-sub"
+
+
+def test_budget_normalize_mimo_payg_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.budget import _normalize_engine
+    monkeypatch.setenv("MIMO_API_KEY", "sk-abc")
+    assert _normalize_engine("mimo") == "mimo"
+    assert _normalize_engine("swarm/mimo-v2.5") == "mimo"
+    assert _normalize_engine("mimo-pro") == "mimo-pro"
+
+
+def test_budget_mimo_subscription_dispatch_is_zero_cost(tmp_path, monkeypatch) -> None:
+    """A tp- key dispatch records cost=0 in the ledger."""
+    from harness.budget import record_dispatch
+    monkeypatch.setenv("MIMO_API_KEY", "tp-xyz")
+    ledger = tmp_path / "ledger.jsonl"
+    entry = record_dispatch(
+        task_id="t1",
+        engine="swarm/mimo-v2.5-pro",
+        input_tokens=1_000_000,
+        output_tokens=500_000,
+        ledger_path=ledger,
+    )
+    assert entry.cost_usd == 0.0
+
+
+def test_budget_mimo_payg_dispatch_uses_priced_row(tmp_path, monkeypatch) -> None:
+    from harness.budget import record_dispatch
+    monkeypatch.setenv("MIMO_API_KEY", "sk-xyz")
+    ledger = tmp_path / "ledger.jsonl"
+    entry = record_dispatch(
+        task_id="t1",
+        engine="mimo-v2.5",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        ledger_path=ledger,
+    )
+    # mimo (≤256K cache-miss): input 0.40 + output 2.00 = 2.40 per 1M
+    assert entry.cost_usd == round(0.40 + 2.00, 6)
+
+
+def test_budget_mimo_pro_payg_dispatch_uses_priced_row(tmp_path, monkeypatch) -> None:
+    from harness.budget import record_dispatch
+    monkeypatch.setenv("MIMO_API_KEY", "sk-xyz")
+    ledger = tmp_path / "ledger.jsonl"
+    entry = record_dispatch(
+        task_id="t1",
+        engine="mimo-v2.5-pro",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        ledger_path=ledger,
+    )
+    # mimo-pro (≤256K cache-miss): input 1.00 + output 3.00 = 4.00 per 1M
+    assert entry.cost_usd == round(1.00 + 3.00, 6)
+
+
+def test_mimo_user_agent_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import _make_mimo_user_agent
+    monkeypatch.delenv("MIMO_USER_AGENT", raising=False)
+    assert _make_mimo_user_agent() == "claude-code/0.1.0"
+    monkeypatch.setenv("MIMO_USER_AGENT", "OpenCode/1.2")
+    assert _make_mimo_user_agent() == "OpenCode/1.2"
+
+
+def test_resolve_mimo_upstream_defaults_to_amsterdam(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per Xiaomi research 2026-05-22: international users go to Amsterdam by default."""
+    from harness.engines.concrete import _resolve_mimo_upstream
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    monkeypatch.delenv("MIMO_REGION", raising=False)
+    assert _resolve_mimo_upstream("tp-abc") == \
+        "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+
+
+def test_resolve_mimo_upstream_region_cn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from harness.engines.concrete import _resolve_mimo_upstream
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    monkeypatch.setenv("MIMO_REGION", "cn")
+    assert _resolve_mimo_upstream("tp-abc") == \
+        "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"

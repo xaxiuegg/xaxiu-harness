@@ -36,8 +36,27 @@ _ENV_VAR_MAP: dict[str, str] = API_KEY_ENV_VARS
 
 # ---------------------------------------------------------------------------
 # Timeout configuration (connect, read, write, pool)
+#
+# WIRE-ENGINE-TIMEOUT (2026-05-22): read=120 was too tight for thinking-heavy
+# models.  Artificial Analysis 2026-05-22 benchmark shows real end-to-end
+# response times:
+#   - Kimi K2.6           63.53s
+#   - DeepSeek V4 Pro Max 165.45s   ← biggest outlier; 120s would have killed it
+#   - DeepSeek V4 Pro Hi   84.60s
+#   - DeepSeek V4 Flash    56.61s
+#   - MiMo-V2.5-Pro        46.94s
+#   - MiMo-V2.5            29.93s
+# 600s gives ~4x headroom over the slowest practical engine.  Operators
+# who want a tighter cap for dev loops can override via the per-call
+# `timeout_s` extra_arg (honoured in each engine below) or by setting
+# HARNESS_ENGINE_READ_TIMEOUT_S in the environment.
 # ---------------------------------------------------------------------------
-_DEFAULT_TIMEOUT = Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+_DEFAULT_READ_TIMEOUT_S: float = float(
+    os.environ.get("HARNESS_ENGINE_READ_TIMEOUT_S", "600")
+)
+_DEFAULT_TIMEOUT = Timeout(
+    connect=10.0, read=_DEFAULT_READ_TIMEOUT_S, write=10.0, pool=10.0,
+)
 
 
 def _make_user_agent() -> str:
@@ -209,10 +228,17 @@ class DeepSeekConcrete(Engine):
     ) -> dict:
         no_thinking = extra.get("--no-thinking", False) or model.endswith("-flash")
         temperature = 0.0 if no_thinking else 0.6
+        # WIRE-MAX-TOKENS (2026-05-22): explicit max_tokens unblocks the
+        # server-side default cap (DeepSeek/Kimi both top out around
+        # 16K-32K when omitted) so long responses aren't silently
+        # truncated mid-edit.  Default 32768 gives ~2x typical worker
+        # output without burning the full 131K cap.
+        max_tokens = int(extra.get("max_tokens", 32768))
         payload: dict = {
             "model": model,
             "messages": [{"role": "user", "content": content}],
             "temperature": temperature,
+            "max_tokens": max_tokens,
         }
         if no_thinking:
             payload["thinking"] = False
@@ -303,10 +329,17 @@ class KimiConcrete(Engine):
         extra: dict[str, Any],
     ) -> dict:
         temperature = extra.get("temperature", 0.6)
+        # WIRE-MAX-TOKENS (2026-05-22): Kimi Code's default output cap is
+        # ~16K when omitted, which silently truncates long worker
+        # outputs.  Explicit 32K gives headroom without bloating the
+        # context budget.  Kimi K2.6 supports up to 256K total context
+        # so this leaves plenty of room for the input prompt.
+        max_tokens = int(extra.get("max_tokens", 32768))
         return {
             "model": model,
             "messages": [{"role": "user", "content": content}],
             "temperature": temperature,
+            "max_tokens": max_tokens,
         }
 
 
@@ -401,6 +434,155 @@ class AnthropicConcrete(Engine):
 
 
 # ---------------------------------------------------------------------------
+# MiMo (Xiaomi)
+# ---------------------------------------------------------------------------
+
+def _resolve_mimo_upstream(api_key: str) -> str:
+    """Pick the MiMo endpoint based on key prefix + region + env overrides.
+
+    Xiaomi runs the Token Plan against TWO regional gateways
+    (verified 2026-05-22 from platform.xiaomimimo.com/docs/tokenplan):
+      - ``token-plan-ams.xiaomimimo.com`` — Amsterdam (international, default)
+      - ``token-plan-cn.xiaomimimo.com``  — China
+
+    Pay-as-you-go is unified at ``api.xiaomimimo.com``.
+
+    Resolution order:
+      1. ``MIMO_BASE_URL`` env var (full URL override)
+      2. ``MIMO_REGION`` env var: ``cn`` → cn gateway; anything else → ams
+      3. Key prefix: ``tp-`` → Token Plan; ``sk-`` / other → pay-as-you-go
+    """
+    explicit = os.environ.get("MIMO_BASE_URL", "").strip()
+    if explicit:
+        url = explicit.rstrip("/")
+        if not url.endswith("/chat/completions"):
+            url = url + "/chat/completions"
+        return url
+    region = os.environ.get("MIMO_REGION", "ams").strip().lower()
+    if api_key.startswith("tp-"):
+        if region == "cn":
+            return "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+        return "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"
+    return "https://api.xiaomimimo.com/v1/chat/completions"
+
+
+def _make_mimo_user_agent() -> str:
+    """User-Agent for MiMo Token Plan TOS compliance.
+
+    Xiaomi's Token Plan terms restrict use to coding harnesses
+    (OpenClaw, OpenCode, Claude Code, KiloCode...).  Like Kimi Coding API,
+    the gate is enforced at the User-Agent level.  Default matches
+    Kimi's working value (``claude-code/0.1.0``); operators can override
+    via ``MIMO_USER_AGENT`` when they're calling from a different
+    approved coding tool.
+
+    The pay-as-you-go endpoint does not enforce the gate, but sending
+    the same UA there is harmless and keeps one code path.
+    """
+    return os.environ.get("MIMO_USER_AGENT", "claude-code/0.1.0")
+
+
+class MiMoConcrete(Engine):
+    """Concrete engine for Xiaomi MiMo Open Platform (V2.5 / V2.5-Pro).
+
+    Endpoint: ``https://api.xiaomimimo.com/v1/chat/completions`` (pay-as-you-go)
+    or ``https://token-plan-cn.xiaomimimo.com/v1/chat/completions`` (Token Plan
+    subscription, auto-selected when the API key starts with ``tp-``).
+
+    Honoured ``extra_args``:
+      - ``temperature`` (float) – defaults to 0.6
+      - ``max_tokens`` (int) – defaults to 32768 (MiMo caps at 131072)
+      - ``thinking`` (bool) – passed through if present
+    """
+
+    def dispatch(
+        self,
+        packet_content: str,
+        model: str,
+        extra_args: Optional[dict[str, Any]] = None,
+    ) -> EngineResponse:
+        extra = extra_args or {}
+
+        start = time.monotonic()
+        try:
+            with httpx.Client(
+                verify=True,
+                timeout=_DEFAULT_TIMEOUT,
+            ) as client:
+                payload = self._build_payload(packet_content, model, extra)
+                response = client.post(
+                    _resolve_mimo_upstream(self._api_key),
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        # MiMo Token Plan TOS gate — see
+                        # _make_mimo_user_agent docstring.
+                        "User-Agent": _make_mimo_user_agent(),
+                    },
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                text = _extract_chat_text(data)
+                latency_ms = int((time.monotonic() - start) * 1000)
+                return EngineResponse(
+                    success=True,
+                    text=text,
+                    latency_ms=latency_ms,
+                    error=None,
+                )
+        except httpx.HTTPStatusError as e:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            return EngineResponse(
+                success=False,
+                text="",
+                latency_ms=latency_ms,
+                error=f"HTTP {e.response.status_code}",
+            )
+        except httpx.TimeoutException:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            return EngineResponse(
+                success=False,
+                text="",
+                latency_ms=latency_ms,
+                error="timeout",
+            )
+        except httpx.ConnectError:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            return EngineResponse(
+                success=False,
+                text="",
+                latency_ms=latency_ms,
+                error="network",
+            )
+        except Exception:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            return EngineResponse(
+                success=False,
+                text="",
+                latency_ms=latency_ms,
+                error="internal",
+            )
+
+    @staticmethod
+    def _build_payload(
+        content: str,
+        model: str,
+        extra: dict[str, Any],
+    ) -> dict:
+        temperature = float(extra.get("temperature", 0.6))
+        max_tokens = int(extra.get("max_tokens", 32768))
+        payload: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if "thinking" in extra:
+            payload["thinking"] = bool(extra["thinking"])
+        return payload
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -456,6 +638,8 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
         cls = AnthropicConcrete
     elif name_lower == "gemini":
         cls = GeminiConcrete
+    elif name_lower == "mimo":
+        cls = MiMoConcrete
     else:
         # Should not happen due to earlier guard, but keep exhaustive.
         raise RuntimeError(f"Unsupported engine: {name_lower}")
