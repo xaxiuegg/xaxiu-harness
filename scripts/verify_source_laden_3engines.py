@@ -118,12 +118,12 @@ def main() -> int:
             eng = get_engine(engine_name, prefer_dpapi=False)
             started = time.monotonic()
             try:
-                # No max_tokens override — let engine defaults apply (32k for
-                # DeepSeek/Kimi/MiMo, 8k for Anthropic per concrete.py).
-                # Probe scripts using {"max_tokens": 500} or 1500 starved
-                # thinking-mode engines and made them look unreliable when
-                # the real issue was budget starvation.
-                resp = eng.dispatch(packet, model, {})
+                # max_tokens=8192: 4x the 2000-token re-run.  Operator
+                # surfaced that kimi+mimo have unlimited subscription budget,
+                # so let's test if higher caps unlock more reliability.
+                # Kimi's 60s thinking-time cap is server-side, so budget
+                # won't help it; MiMo Pro might gain reliability though.
+                resp = eng.dispatch(packet, model, {"max_tokens": 8192})
                 latency = int((time.monotonic() - started) * 1000)
                 ok = bool(resp.success and (resp.text or "").strip())
                 text = resp.text or ""
