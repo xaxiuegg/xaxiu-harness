@@ -1,0 +1,33 @@
+{
+  "run_at_utc": "2026-05-22T09:12:12.698393+00:00",
+  "elapsed_s": 389.4,
+  "results": [
+    {
+      "pack_id": "B",
+      "spec_path": "spec/samples/wave1-budget-since-days.md",
+      "engine_used": "mimo",
+      "success": true,
+      "latency_ms": 53837,
+      "error": null,
+      "response_path": "coord\\dispatches\\20260522T090637Z_pack_B_mimo.md"
+    },
+    {
+      "pack_id": "C",
+      "spec_path": "spec/samples/wave1-session-ok-to-stop-json.md",
+      "engine_used": "deepseek+mimo",
+      "success": false,
+      "latency_ms": 244295,
+      "error": "[mimo] all_fallbacks_exhausted: engine_init_failed",
+      "response_path": "coord\\dispatches\\20260522T091041Z_pack_C_deepseek.md"
+    },
+    {
+      "pack_id": "D",
+      "spec_path": "spec/samples/wave1-observer-cycle-dry-run.md",
+      "engine_used": "kimi",
+      "success": true,
+      "latency_ms": 91210,
+      "error": null,
+      "response_path": "coord\\dispatches\\20260522T091212Z_pack_D_kimi.md"
+    }
+  ]
+}

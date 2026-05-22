@@ -1,0 +1,42 @@
+{
+  "run_at_utc": "2026-05-22T09:02:13.060572+00:00",
+  "elapsed_s": 492.2,
+  "results": [
+    {
+      "pack_id": "A",
+      "spec_path": "spec/samples/wave1-coord-status-json.md",
+      "engine_used": "kimi",
+      "success": true,
+      "latency_ms": 217932,
+      "error": null,
+      "response_path": "coord\\dispatches\\20260522T085738Z_pack_A_kimi.md"
+    },
+    {
+      "pack_id": "B",
+      "spec_path": "spec/samples/wave1-budget-since-days.md",
+      "engine_used": "mimo+deepseek",
+      "success": false,
+      "latency_ms": 247842,
+      "error": "[deepseek] all_fallbacks_exhausted: internal",
+      "response_path": "coord\\dispatches\\20260522T085808Z_pack_B_mimo.md"
+    },
+    {
+      "pack_id": "C",
+      "spec_path": "spec/samples/wave1-session-ok-to-stop-json.md",
+      "engine_used": "deepseek+mimo",
+      "success": false,
+      "latency_ms": 244682,
+      "error": "[mimo] all_fallbacks_exhausted: engine_init_failed",
+      "response_path": "coord\\dispatches\\20260522T090143Z_pack_C_deepseek.md"
+    },
+    {
+      "pack_id": "D",
+      "spec_path": "spec/samples/wave1-observer-cycle-dry-run.md",
+      "engine_used": "kimi+deepseek",
+      "success": false,
+      "latency_ms": 244322,
+      "error": "[deepseek] all_fallbacks_exhausted: internal",
+      "response_path": "coord\\dispatches\\20260522T090213Z_pack_D_kimi.md"
+    }
+  ]
+}

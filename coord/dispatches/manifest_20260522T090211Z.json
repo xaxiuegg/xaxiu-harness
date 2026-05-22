@@ -1,0 +1,15 @@
+{
+  "run_at_utc": "2026-05-22T09:02:11.357103+00:00",
+  "elapsed_s": 246.0,
+  "results": [
+    {
+      "pack_id": "B",
+      "spec_path": "spec/samples/wave1-budget-since-days.md",
+      "engine_used": "mimo+deepseek",
+      "success": false,
+      "latency_ms": 245957,
+      "error": "[deepseek] all_fallbacks_exhausted: internal",
+      "response_path": "coord\\dispatches\\20260522T090211Z_pack_B_mimo.md"
+    }
+  ]
+}
