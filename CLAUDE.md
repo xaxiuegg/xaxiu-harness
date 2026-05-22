@@ -1,6 +1,6 @@
 # CLAUDE.md — xaxiu-harness
 
-You are working in the **xaxiu-harness** project. Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope. Don't update warehouse's STATUS.csv; don't dispatch warehouse work. See `feedback_multi_session_scoping.md`.
+You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone\` (migrated 2026-05-22 from `D:\Projects\xaxiu-harness\` — see MIGRATION.md).  Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope.  This project has its own isolated Claude Code memory directory at `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (43 entries) — warehouse-specific memory is intentionally NOT loaded here.
 
 ## Current state — v0.5 (v2 production-hardened + Phase-5 operator UX layered on top)
 

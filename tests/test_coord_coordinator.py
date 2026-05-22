@@ -126,9 +126,12 @@ def test_tick_running_launches_workers(tmp_path: Path) -> None:
     )
     write_run_state(c.state_path, state)
 
-    with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
-        mock_popen.return_value = MagicMock(pid=1234, poll=MagicMock(return_value=None))
-        report = c.tick(Path("spec.md"), in_flight_limit=2)
+    # FIX-TEST-MIGRATION-BUG (2026-05-22): mock create_worktree too
+    # (see explanation above test_launch_workers_respects_in_flight_limit).
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock(pid=1234, poll=MagicMock(return_value=None))
+            report = c.tick(Path("spec.md"), in_flight_limit=2)
     assert report.state == RunStateLiteral.RUNNING
     mock_popen.assert_called()
 
@@ -176,9 +179,18 @@ def test_launch_workers_respects_in_flight_limit(tmp_path: Path) -> None:
     plan = _valid_plan()
     c = Coordinator(run_id="20260520T220000-ab12", run_dir=tmp_path)
 
-    with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
-        mock_popen.return_value = MagicMock(pid=1234, poll=MagicMock(return_value=None))
-        result = c.launch_workers(plan, in_flight_limit=1)
+    # FIX-TEST-MIGRATION-BUG (2026-05-22): must mock create_worktree.
+    # Without this, the mocked subprocess.Popen leaks into create_worktree's
+    # subprocess.run call (same module-level patch reaches the inner Popen
+    # constructor) — process.communicate then returns a MagicMock that
+    # cannot unpack into (stdout, stderr).  At the original project
+    # location this test passed only because .harness/worktrees/<rid>/...
+    # already existed from prior runs (state pollution), letting
+    # create_worktree's early-return short-circuit subprocess.run.
+    with patch("harness.coord.coordinator.create_worktree"):
+        with patch("harness.coord.coordinator.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock(pid=1234, poll=MagicMock(return_value=None))
+            result = c.launch_workers(plan, in_flight_limit=1)
     # Only worker-1 should launch (worker-2 is blocked by deps)
     assert len(result["launched"]) <= 1
     assert "worker-1" in result["launched"] or "worker-1" in result["skipped"]
