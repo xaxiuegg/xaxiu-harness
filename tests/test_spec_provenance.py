@@ -282,3 +282,59 @@ def test_spec_init_requires_name_when_not_listing(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["spec-init", "--out", str(tmp_path)])
     assert result.exit_code == 1
     assert "NAME is required" in result.output
+
+
+# ---------------------------------------------------------------------------
+# W5-RR morning-brief
+# ---------------------------------------------------------------------------
+
+def test_morning_brief_help_lists_options() -> None:
+    """W5-RR: CLI surface includes since-hours, out, engine, model, dry-run."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["morning-brief", "--help"])
+    assert result.exit_code == 0
+    assert "--since-hours" in result.output
+    assert "--out" in result.output
+    assert "--engine" in result.output
+    assert "--model" in result.output
+    assert "--dry-run" in result.output
+
+
+def test_morning_brief_dry_run_emits_context_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-RR: --dry-run prints the context packet that WOULD be dispatched,
+    no engine call, exit 0."""
+    monkeypatch.chdir(tmp_path)
+    # Seed minimal STATUS.csv so the context isn't empty
+    (tmp_path / "coord").mkdir()
+    status_csv = tmp_path / "coord" / "STATUS.csv"
+    today = "2026-05-23"
+    status_csv.write_text(
+        f"ID,Category,Title,Status,Owner,Effort,Updated,Notes\n"
+        f"W5-TEST,Production,Test row,shipped,Claude,~10 min,{today},Test notes\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["morning-brief", "--dry-run"])
+    assert result.exit_code == 0, f"output={result.output}"
+    assert "DRY RUN" in result.output
+    assert "W5-TEST" in result.output
+    assert "morning brief" in result.output.lower()
+
+
+def test_morning_brief_exits_2_when_no_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-RR: empty cwd → exit 2 with a clear error message."""
+    # Patch list_pending_flags so it doesn't accidentally pick up the
+    # harness repo's own observer state outside the test's tmp_path.
+    monkeypatch.setattr(
+        "harness.observer.flags.list_pending_flags", lambda: {},
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["morning-brief", "--dry-run"])
+    assert result.exit_code == 2, f"output={result.output}"
+    assert "no context found" in result.output.lower()

@@ -148,6 +148,221 @@ def spec_verify_cmd(spec_path: Path) -> None:
     sys.exit(0 if matches else 1)
 
 
+@cli.command(name="morning-brief")
+@click.option("--since-hours", type=int, default=12,
+              help="Look back this many hours when building the brief (default 12).")
+@click.option("--out", "out_path", type=click.Path(path_type=Path),
+              default=None,
+              help="Output markdown path.  Default coord/operator/morning-brief-YYYYMMDD.md.")
+@click.option("--engine", default="deepseek",
+              help="Engine for the synthesis (default deepseek; v4-flash streams 4× faster).")
+@click.option("--model", default="deepseek-v4-flash",
+              help="Model for the synthesis.")
+@click.option("--dry-run", is_flag=True,
+              help="Print the context packet that WOULD be dispatched, then exit.")
+def morning_brief_cmd(since_hours: int, out_path: Path | None,
+                      engine: str, model: str, dry_run: bool) -> None:
+    """W5-RR 2026-05-23: end-of-overnight DeepSeek summary brief.
+
+    Novel idea surfaced in the 20-agent brainstorm (mimo-1): turn the
+    autonomous overnight run into a structured handoff document the
+    operator can read in 60 seconds.  Pulls:
+
+    - Recent STATUS.csv transitions (last N rows, since-hours filter)
+    - Recent runs/<run_id>/ state (worker checkpoints, error_tags)
+    - Pending observer flags
+    - Open queued production rows (what's still to do)
+
+    Dispatches to DeepSeek (v4-flash by default, now streaming via
+    W5-MM — ~30s for a typical context) and writes the synthesis to
+    coord/operator/morning-brief-YYYYMMDD.md.
+
+    Designed to be run by Task Scheduler at 8 AM, or manually anytime.
+
+    Exit codes:
+      0  brief written successfully
+      1  engine dispatch failed (no brief written)
+      2  no context found (likely a fresh repo or wrong cwd)
+    """
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=since_hours)
+
+    # Build context packet
+    sections: list[str] = []
+
+    # 1. Recent STATUS.csv rows
+    status_path = Path("coord/STATUS.csv")
+    if status_path.exists():
+        try:
+            from harness.status.store import read_status
+            rows = read_status(status_path)
+            recent: list[dict] = []
+            for r in rows[-50:]:  # last 50 rows
+                ud = (r.updated or "").strip()
+                # Naive date check: any row with today's or yesterday's date
+                if ud and (now.strftime("%Y-%m-%d") in ud or
+                           (now - timedelta(days=1)).strftime("%Y-%m-%d") in ud):
+                    recent.append({
+                        "id": r.id, "category": r.category, "title": r.title,
+                        "status": r.status, "updated": r.updated,
+                        "notes": (r.notes or "")[:200],
+                    })
+            if recent:
+                lines = ["## Recent STATUS.csv transitions (last 50, filtered to today/yesterday)\n"]
+                for r in recent:
+                    lines.append(
+                        f"- **{r['id']}** [{r['status']}] _{r['updated']}_ "
+                        f"({r['category']}): {r['title']}\n  {r['notes']}\n"
+                    )
+                sections.append("\n".join(lines))
+        except Exception as exc:
+            sections.append(f"## STATUS.csv\n\n(error reading: {exc})\n")
+
+    # 2. Recent runs/
+    runs_dir = Path("runs")
+    if runs_dir.exists():
+        recent_runs = sorted(
+            (p for p in runs_dir.iterdir() if p.is_dir()),
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )[:10]
+        run_lines = ["## Recent coord runs (top 10 by mtime)\n"]
+        for run_dir in recent_runs:
+            ckpt_dir = run_dir / "checkpoints"
+            if not ckpt_dir.exists():
+                continue
+            try:
+                workers = list(ckpt_dir.glob("worker-*.json"))
+                completed = 0
+                failed = 0
+                error_tags: list[str] = []
+                for ck in workers:
+                    try:
+                        d = json.loads(ck.read_text(encoding="utf-8"))
+                        if d.get("state") == "completed":
+                            completed += 1
+                        else:
+                            failed += 1
+                        if d.get("error_tag"):
+                            error_tags.append(d["error_tag"])
+                    except Exception:
+                        pass
+                tag_summary = (
+                    f" tags=[{','.join(error_tags[:3])}]" if error_tags else ""
+                )
+                run_lines.append(
+                    f"- {run_dir.name}: {completed}/{len(workers)} completed, "
+                    f"{failed} failed{tag_summary}"
+                )
+            except OSError:
+                continue
+        if len(run_lines) > 1:
+            sections.append("\n".join(run_lines))
+
+    # 3. Pending observer flags
+    try:
+        from harness.observer.flags import list_pending_flags
+        pending = list_pending_flags()
+        if pending:
+            flag_lines = ["## Pending observer flags\n"]
+            for sev, flags in pending.items():
+                for f in flags:
+                    flag_lines.append(f"- **{sev.value}** {f.code}: {f.message}")
+            sections.append("\n".join(flag_lines))
+    except Exception:
+        pass
+
+    # 4. Open queued production rows
+    if status_path.exists():
+        try:
+            from harness.status.store import read_status
+            rows = read_status(status_path)
+            queued_prod = [
+                r for r in rows
+                if (r.status or "").strip().lower() == "queued"
+                and (r.category or "") in {
+                    "Production", "Operator-UX", "Observability",
+                    "Integration", "Failure-Recovery", "Security",
+                    "Onboarding", "Telemetry", "Multi-Tenancy",
+                    "Failure-Mode", "Dispatch-Quality",
+                }
+            ]
+            if queued_prod:
+                lines = ["## Open queued production rows\n"]
+                for r in queued_prod[:20]:
+                    lines.append(
+                        f"- **{r.id}** ({r.category}): {r.title}"
+                    )
+                sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+    if not sections:
+        click.echo(
+            "ERROR: no context found in coord/STATUS.csv, runs/, observer flags. "
+            "Are you in the harness repo root?", err=True,
+        )
+        sys.exit(2)
+
+    context_packet = "\n\n".join(sections)
+    prompt = (
+        "You are summarizing an autonomous overnight run for the operator.\n"
+        f"Write a one-page morning brief covering the last {since_hours} hours.\n"
+        "Structure (use these exact section headers):\n\n"
+        "## What shipped\n"
+        "## What stalled / failed\n"
+        "## What needs operator attention\n"
+        "## Recommended next moves\n\n"
+        "Be specific.  Cite IDs (W5-XX, run IDs).  Don't summarize generically.\n"
+        "If the context is sparse, say 'low activity' rather than filler.\n\n"
+        "Output markdown only, no preamble or wrapping fence.\n\n"
+        "# Context\n\n"
+        f"{context_packet}\n"
+    )
+
+    if dry_run:
+        click.echo(f"--- DRY RUN — would dispatch {len(prompt)} chars to "
+                   f"{engine}/{model} ---")
+        click.echo(prompt)
+        sys.exit(0)
+
+    # Dispatch
+    click.echo(f"morning-brief: dispatching {len(prompt)} chars to "
+               f"{engine}/{model}...")
+    from harness.engines.concrete import get_engine
+    import time as _time
+    try:
+        eng = get_engine(engine, prefer_dpapi=False)
+    except RuntimeError as exc:
+        click.echo(f"ERROR: engine init failed: {exc}", err=True)
+        sys.exit(1)
+    started = _time.monotonic()
+    resp = eng.dispatch(prompt, model, {})
+    latency = int((_time.monotonic() - started) * 1000)
+
+    if not resp.success or not (resp.text or "").strip():
+        click.echo(f"ERROR: dispatch failed ({latency}ms): {resp.error}",
+                   err=True)
+        sys.exit(1)
+
+    # Write output
+    if out_path is None:
+        stamp = now.strftime("%Y%m%d")
+        out_path = Path("coord/operator") / f"morning-brief-{stamp}.md"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    body = (
+        f"<!-- engine={engine} model={model} latency_ms={latency} "
+        f"tokens_in={resp.tokens_in} tokens_out={resp.tokens_out} "
+        f"since_hours={since_hours} generated_at={now.isoformat()} -->\n\n"
+        f"{resp.text}\n"
+    )
+    out_path.write_text(body, encoding="utf-8")
+    click.echo(f"morning-brief: wrote {out_path} ({latency}ms, "
+               f"{resp.tokens_out} tokens out)")
+    sys.exit(0)
+
+
 def _samples_dir() -> Path:
     """Locate the spec/samples/ directory (the SPECLIB template library).
 
