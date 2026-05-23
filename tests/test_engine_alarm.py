@@ -245,3 +245,81 @@ def test_fire_dead_engine_alarm_prints_L4_to_stderr(
     assert "L4.engines.E_DEAD_ENGINE" in captured.err
     assert "kimi" in captured.err
     assert "7 consecutive" in captured.err
+
+
+def test_end_to_end_alarm_pipeline_5_failures_fires_toast(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end smoke: 5 consecutive kimi failures in a fresh perf log
+    cause check_engine_alarm to return transition=True AND
+    fire_dead_engine_alarm to emit the L4 stderr + invoke
+    fire_windows_toast.  This exercises the full
+    log → streak → alarm → toast pathway in one test (the W6-C2
+    audit's E2E evidence requirement)."""
+    log = tmp_path / "perf.jsonl"
+    alarm = tmp_path / "alarms.json"
+    _write_log(log, [{"backend": "kimi", "outcome": "failure"}] * 5)
+
+    toast_calls: list[dict] = []
+    monkeypatch.setattr(
+        "harness.errors.fire_windows_toast",
+        lambda title, body: toast_calls.append({"title": title, "body": body})
+        or True,
+    )
+
+    # Step 1: streak check
+    is_dead, streak, transition = check_engine_alarm(
+        "kimi", threshold=5, log_path=log, alarm_path=alarm,
+    )
+    assert is_dead is True
+    assert streak == 5
+    assert transition is True
+
+    # Step 2: fire alarm (simulates what dispatcher.py does on transition)
+    engine_alarm.fire_dead_engine_alarm("kimi", streak)
+
+    # Step 3: verify L4 stderr + toast were both invoked
+    captured = capsys.readouterr()
+    assert "L4.engines.E_DEAD_ENGINE" in captured.err
+    assert "kimi" in captured.err
+    assert "5 consecutive" in captured.err
+    assert len(toast_calls) == 1
+    assert "kimi" in toast_calls[0]["title"]
+    assert "engine dead" in toast_calls[0]["title"]
+    assert "5 consecutive failures" in toast_calls[0]["body"]
+
+    # Step 4: subsequent check (without log mutation) does NOT re-fire
+    # — alarm state file debounces.  This is the no-spam guarantee.
+    is_dead_2, streak_2, transition_2 = check_engine_alarm(
+        "kimi", threshold=5, log_path=log, alarm_path=alarm,
+    )
+    assert is_dead_2 is True
+    assert streak_2 == 5
+    assert transition_2 is False, "duplicate-fire debounce broken"
+
+
+def test_dispatcher_integration_hook_visible() -> None:
+    """W6-C2 dispatcher integration: confirm the alarm hook exists at
+    the documented call site so future refactors that move the
+    fallback log entry don't silently drop the alarm.  Source-level
+    sentinel; complements the unit tests by guarding the call-site
+    contract."""
+    from pathlib import Path
+    dispatcher_src = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "harness" / "engines" / "dispatcher.py"
+    ).read_text(encoding="utf-8")
+    assert "check_engine_alarm" in dispatcher_src, (
+        "dispatcher.py no longer references check_engine_alarm — "
+        "W6-C2 hook was removed or moved without test update"
+    )
+    assert "fire_dead_engine_alarm" in dispatcher_src
+    # The hook must be inside the fallback log path so each per-engine
+    # failure triggers the streak check (not just at end of dispatch).
+    fallback_idx = dispatcher_src.find('outcome="fallback"')
+    hook_idx = dispatcher_src.find("check_engine_alarm")
+    assert fallback_idx > 0 and hook_idx > fallback_idx, (
+        "alarm hook should be AFTER the fallback log entry so each "
+        "per-engine failure is counted"
+    )

@@ -76,12 +76,19 @@ def consecutive_failures(
     """Return the number of consecutive failures for *engine* at the tail.
 
     Walks the perf log from the tail backward, counting entries with
-    ``outcome != "success"`` for the given engine.  Stops at the first
-    success entry or when other-engine entries break the streak.
+    ``outcome != "success"`` for the given engine.  Other-engine
+    entries are FILTERED OUT (they neither break the streak nor count
+    toward it) — only this engine's own success entry breaks the run.
 
-    The streak is per-engine: a kimi success between deepseek failures
-    does NOT reset deepseek's streak.  Other-engine entries are
-    ignored for the engine in question.
+    Example: with log [kimi-fail, deepseek-success, kimi-fail,
+    mimo-success, kimi-fail], ``consecutive_failures("kimi")`` returns
+    3, because the deepseek/mimo entries are noise from kimi's
+    perspective and don't reset kimi's streak.
+
+    This per-engine isolation matches operator intent: when kimi is
+    failing, the loop's fallback chain keeps producing successes via
+    deepseek — but those don't mean kimi recovered.  Only an actual
+    kimi-success entry should clear the alarm.
     """
     entries = _load_perf_entries(log_path, max_tail=max_tail)
     streak = 0
