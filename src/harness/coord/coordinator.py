@@ -84,12 +84,14 @@ class Coordinator:
     """Orchestrates a single run from spec → plan → workers → integration."""
 
     def __init__(self, *, run_id: str, run_dir: str | Path, project_root: Path | None = None,
-                 label: str | None = None) -> None:
+                 label: str | None = None,
+                 fallback_engine: str | None = None) -> None:
         self.run_id: str = run_id
         self.run_dir: Path = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.project_root: Path = project_root or Path.cwd()
         self.label: str | None = label
+        self.fallback_engine: str | None = fallback_engine
         self._procs: dict[str, subprocess.Popen] = {}
 
     @property
@@ -238,6 +240,8 @@ class Coordinator:
             ]
             if engine:
                 cmd.extend(["--engine", engine])
+            if self.fallback_engine:
+                cmd.extend(["--fallback-engine", self.fallback_engine])
 
             # WIRE-WORKER-DETACH (2026-05-22): redirect to per-worker log
             # and detach on Windows so the child survives parent exit.

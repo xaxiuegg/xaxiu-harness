@@ -176,3 +176,5 @@ W5-K,Wave 5,Strengthen FILE/REPLACE prompt to prevent prose+markdown drift,shipp
 2026-05-23T021153Z,Dispatch,Dispatch 2026-05-23T021153Z,shipped,Claude,-,2026-05-23,task=9c1d3e1b0f9c478cb9d6d6c58424075d; outcome=success
 W5-M,Wave 5,PID-sentinel prevents duplicate worker spawn across coordinator instances,shipped,Claude,~25 min,2026-05-23,"Path 2 caught worker race: coord run --watch re-instantiated Coordinator each tick, lost in-process _procs map, spawned duplicate workers per tick. Disk-based <worker_id>.pid + os.kill probe prevents."
 W5-PILOT,Wave 5,Real-engine Path 2 pilot SUCCEEDED on attempt 6 with MiMo Pro,shipped,Claude,~2h total,2026-05-23,"Caught 5 ship-blockers (W5-J/K/L/M + v4-pro routing) in 6 attempts. One successful pilot at /usr/bin/bash.00 cost, 50s wall time. Deliverable: CHANGELOG v0.6 section landed cleanly via MiMo Pro."
+2026-05-23T031346Z,Dispatch,Dispatch 2026-05-23T031346Z,shipped,Claude,-,2026-05-23,task=4b8f3cf8646b4da582814c962adf23cd; outcome=success
+2026-05-23T041153Z,Dispatch,Dispatch 2026-05-23T041153Z,shipped,Claude,-,2026-05-23,task=2bc1fc5d24484a1fb738d0ef6eae06c1; outcome=success

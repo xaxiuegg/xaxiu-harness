@@ -1877,10 +1877,17 @@ def coord_rerun_failed(run_id: str, engine: str, worker_engine: str,
               help="In --watch mode, run the integrator in validate-only "
                    "mode (W5-H): no worker branches merged to base. Use "
                    "this for test runs to avoid polluting master.")
+@click.option("--fallback-engine", default=None,
+              help="W5-O: if the primary --engine produces 0 edits on "
+                   "a step (engine compliance drift), retry that step "
+                   "once with this engine before failing.  Pair example: "
+                   "--engine swarm/mimo --fallback-engine swarm/deepseek "
+                   "approaches near-100% reliability.")
 def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
               proxy: str, label: str | None, dry_run: bool,
               engine: str | None, watch: bool, watch_interval: int,
-              watch_max_seconds: int, no_merge: bool) -> None:
+              watch_max_seconds: int, no_merge: bool,
+              fallback_engine: str | None) -> None:
     """Execute a coordination run.
 
     By default this performs a single tick of the coordinator state machine
@@ -1946,7 +1953,8 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
             rid = run_id or _new_run_id()
         run_dir = Path("runs") / rid
         run_dir.mkdir(parents=True, exist_ok=True)
-        coord = Coordinator(run_id=rid, run_dir=run_dir, label=label)
+        coord = Coordinator(run_id=rid, run_dir=run_dir, label=label,
+                            fallback_engine=fallback_engine)
         report = coord.tick(spec, in_flight_limit=limit, engine=engine)
         click.echo(f"run {report.run_id}: {report.state.value}")
         if report.worker_summary:
@@ -2020,7 +2028,8 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
                     break
 
                 _time.sleep(max(1, watch_interval))
-                coord = Coordinator(run_id=rid, run_dir=run_dir, label=label)
+                coord = Coordinator(run_id=rid, run_dir=run_dir, label=label,
+                                    fallback_engine=fallback_engine)
                 report = coord.tick(spec, in_flight_limit=limit, engine=engine)
 
                 # --- Path 3 telemetry: per-tick one-liner --------------
@@ -2062,7 +2071,12 @@ def coord_run(spec: Path, run_id: str | None, resume: bool, limit: int | None,
 @click.option("--run-id", required=True)
 @click.option("--worker-id", required=True)
 @click.option("--engine", default="swarm/kimi-api")
-def coord_work(run_id: str, worker_id: str, engine: str) -> None:
+@click.option("--fallback-engine", default=None,
+              help="W5-O: retry once with this engine when the primary "
+                   "returns a response but produces 0 applicable edits "
+                   "(engine compliance drift).")
+def coord_work(run_id: str, worker_id: str, engine: str,
+               fallback_engine: str | None) -> None:
     """Worker entry-point — load plan, find task, run worker."""
     from harness.coord.worker import run_worker
     from harness.coord.schemas import WavePlan
@@ -2079,7 +2093,8 @@ def coord_work(run_id: str, worker_id: str, engine: str) -> None:
         click.echo(f"error: worker {worker_id} not in plan", err=True)
         sys.exit(1)
 
-    result = run_worker(task.model_dump(), run_dir, engine=engine)
+    result = run_worker(task.model_dump(), run_dir,
+                       engine=engine, fallback_engine=fallback_engine)
     click.echo(f"worker {worker_id}: {result['state']}")
     sys.exit(0 if result["state"] == "completed" else 1)
 

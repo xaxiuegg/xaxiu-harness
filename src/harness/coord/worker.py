@@ -93,6 +93,16 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
 
     # Kimi-CLI applies edits in-place inside the cwd it's invoked from.
     # --add-dir tells the CLI which worktree to scope to.
+    #
+    # W5-N 2026-05-23: force model selection.  xaxiu-swarm's default model
+    # per backend isn't aligned with our memorised production picks:
+    #   - swarm/deepseek defaults to v4-pro (slow thinking model that
+    #     drifts to prose+markdown ~50% in coord runs).  Force v4-flash
+    #     (memory: feedback_default_deepseek_v4_flash).
+    # Other backends keep swarm CLI defaults (e.g. kimi -> kimi-for-coding).
+    _BACKEND_MODEL_OVERRIDES = {
+        "deepseek": "deepseek-v4-flash",
+    }
     cmd = [
         "xaxiu-swarm", "dispatch",
         "--backend", backend,
@@ -100,6 +110,8 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
         "--timeout", "420",
         str(packet_path),
     ]
+    if backend in _BACKEND_MODEL_OVERRIDES:
+        cmd.extend(["--model", _BACKEND_MODEL_OVERRIDES[backend]])
     cwd_path = str(wt_path)
     try:
         proc = subprocess.run(
@@ -309,6 +321,50 @@ def _apply_file_edits(edits: list[tuple[str, str, str]], base_path: Path) -> lis
     return modified
 
 
+def _detect_inplace_edits(wt_path: Path) -> list[str]:
+    """W5-P 2026-05-23: detect files changed in-place by agentic engines.
+
+    Kimi-CLI (xaxiu-swarm --backend kimi) is agentic — it doesn't emit
+    FILE/REPLACE blocks, it opens files and edits them directly via
+    Edit/Write tools.  Same for any future agentic backend.  This
+    function shells out to `git status --porcelain` inside the worktree
+    to find files that changed since the worktree was created, returning
+    relative paths.
+
+    Operates as a fallback: callers should only invoke this when
+    `_parse_file_edits()` returned 0 edits (no FILE/REPLACE protocol
+    output).  Universal across all engines — if an agentic engine
+    landed edits via tools, this picks them up; if a text engine
+    drifted to prose+markdown and made no real edits, this still
+    returns [] so W4-A correctly fires.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(wt_path), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return []
+    if proc.returncode != 0:
+        return []
+    modified: list[str] = []
+    for line in (proc.stdout or "").splitlines():
+        if len(line) < 4:
+            continue
+        # `git status --porcelain` format: XY <path>
+        # X = index, Y = worktree; we want any change.
+        path = line[3:].strip()
+        # Handle renames "old -> new" by taking the new path
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        # Strip surrounding quotes git uses for paths with spaces
+        if path.startswith('"') and path.endswith('"'):
+            path = path[1:-1]
+        if path:
+            modified.append(path)
+    return modified
+
+
 def _match_line_endings(text: str, want_crlf: bool) -> bytes:
     """Re-emit text with the originally-detected line ending convention.
 
@@ -351,10 +407,20 @@ def run_worker(
     run_dir: Path,
     *,
     engine: str = "swarm/kimi",
+    fallback_engine: str | None = None,
     resume_from: Path | None = None,
     project_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Execute a worker task and produce checkpoint + deliverable."""
+    """Execute a worker task and produce checkpoint + deliverable.
+
+    W5-O 2026-05-23: ``fallback_engine`` is dispatched as a second
+    attempt when the primary returns a response but the FILE/REPLACE
+    parse produces 0 edits (engine compliance drift — observed on
+    DeepSeek v4-pro and v4-flash ~50% of dispatches).  When MiMo Pro
+    + DeepSeek are configured as a pair, the chance both drift on the
+    same step approaches zero, removing the "only one engine works"
+    constraint from production-readiness.
+    """
     from harness.coord.schemas import WorkerTask
     from harness.engines.dispatcher import dispatch_packet
 
@@ -386,6 +452,14 @@ def run_worker(
 
     start_idx = ckpt.last_completed_step_index + 1
     idx = start_idx - 1
+    # W5-O 2026-05-23: log primary + fallback engines once at worker start
+    # so diagnostics show whether fallback was wired through (vs silently
+    # None when CLI plumbing breaks).
+    _append_progress(run_dir, task_obj.worker_id, {
+        "event": "worker_engines",
+        "primary": engine,
+        "fallback": fallback_engine,
+    })
     for idx in range(start_idx, len(task_obj.steps)):
         step = task_obj.steps[idx]
         _heartbeat_touch(run_dir, task_obj.worker_id)
@@ -477,10 +551,20 @@ def run_worker(
             # files_modified, masking silent no-ops where the worker reports
             # state=completed without shipping anything.
             step_modified: list[str] = []
+            engine_used = engine
             if result.success and result.text.strip():
                 edits = _parse_file_edits(result.text)
                 if edits:
                     step_modified = _apply_file_edits(edits, wt_path)
+                else:
+                    # W5-P 2026-05-23: no FILE/REPLACE blocks parsed.
+                    # The engine might be agentic (Kimi-CLI edits files
+                    # in-place via Edit/Write tools — no protocol in the
+                    # response text).  Check worktree for actual changes
+                    # via git status.  Universal across engines.
+                    step_modified = _detect_inplace_edits(wt_path)
+
+                if step_modified:
                     files_modified = list(set(files_modified + step_modified))
                     # Update read_set contents with modified files
                     for rel_path in step_modified:
@@ -488,7 +572,63 @@ def run_worker(
                         if mod_file.exists():
                             read_set_contents[rel_path] = mod_file.read_text(encoding="utf-8")
 
-                # Accumulate token + cost telemetry for budget meter
+            # W5-O 2026-05-23: engine fallback.
+            # If primary engine returned a response but produced 0
+            # applicable edits (e.g. DeepSeek drifted to prose+markdown),
+            # retry with fallback_engine.  Removes the "only one engine
+            # works" production-readiness constraint that the operator
+            # surfaced.  Skipped when primary already produced edits OR
+            # when no fallback is configured OR when primary failed
+            # outright (network/HTTP error — fallback won't help).
+            if (not step_modified
+                    and fallback_engine
+                    and fallback_engine != engine
+                    and result.success
+                    and result.text.strip()):
+                _heartbeat_touch(run_dir, task_obj.worker_id)
+                fb_packet_path = repo / "state" / (
+                    f".tmp_worker_{task_obj.worker_id}_{step.step_id}_fb_"
+                    f"{uuid.uuid4().hex}.md"
+                )
+                fb_packet_path.parent.mkdir(parents=True, exist_ok=True)
+                fb_packet_path.write_text(prompt, encoding="utf-8")
+                try:
+                    if fallback_engine.startswith("swarm/"):
+                        fb_result = _dispatch_via_swarm(
+                            fb_packet_path, fallback_engine, wt_path,
+                        )
+                    else:
+                        fb_result = dispatch_packet(
+                            project="harness-worker",
+                            packet_path=str(fb_packet_path),
+                            force_engine=fallback_engine,
+                        )
+                    if fb_result.success and (fb_result.text or "").strip():
+                        fb_edits = _parse_file_edits(fb_result.text)
+                        if fb_edits:
+                            step_modified = _apply_file_edits(fb_edits, wt_path)
+                            if step_modified:
+                                engine_used = fallback_engine
+                                files_modified = list(set(
+                                    files_modified + step_modified
+                                ))
+                                for rel_path in step_modified:
+                                    mod_file = wt_path / rel_path
+                                    if mod_file.exists():
+                                        read_set_contents[rel_path] = (
+                                            mod_file.read_text(encoding="utf-8")
+                                        )
+                except Exception:
+                    pass  # fallback is best-effort; primary's W4-A guard still fires
+                finally:
+                    fb_packet_path.unlink(missing_ok=True)
+            _append_progress(run_dir, task_obj.worker_id, {
+                "event": "step_engine_used", "step_id": step.step_id,
+                "engine_used": engine_used,
+            })
+
+            # Accumulate token + cost telemetry for budget meter
+            if result.success and result.text.strip():
                 total_tokens += int(getattr(result, "tokens_used", 0) or 0)
                 total_cost_usd += float(getattr(result, "cost_usd", 0.0) or 0.0)
 
