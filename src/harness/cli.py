@@ -148,6 +148,176 @@ def spec_verify_cmd(spec_path: Path) -> None:
     sys.exit(0 if matches else 1)
 
 
+@cli.command(name="start")
+@click.option("--orchestrator", default=None, type=click.Choice(
+    ["claude", "mimo", "deepseek", "kimi"], case_sensitive=False,
+), help="Skip the interactive picker; pin this orchestrator.")
+@click.option("--mode", default=None, type=click.Choice(
+    ["interactive", "autonomous"], case_sensitive=False,
+), help="Skip the mode prompt; pin interactive (you drive) or "
+        "autonomous (Task Scheduler runs the loop).")
+@click.option("--list", "just_list", is_flag=True,
+              help="Print the orchestrator picker + connection status, then exit.")
+@click.option("--interval-minutes", type=int, default=30,
+              help="Task Scheduler tick cadence for autonomous mode (default 30).")
+def start_cmd(orchestrator: str | None, mode: str | None,
+              just_list: bool, interval_minutes: int) -> None:
+    """W5-SS 2026-05-23: pick orchestrator + toggle autonomous loop.
+
+    Operator-facing boot screen.  Interactive picker shows the 4
+    orchestrators (Claude / MiMo / DeepSeek / Kimi) with connection
+    status, lets the operator pick by number, then asks for mode:
+
+      INTERACTIVE — you drive; the harness assists.  Most CLI verbs
+                    use the chosen orchestrator as their default
+                    --engine.
+      AUTONOMOUS  — Task Scheduler runs the loop; you check
+                    `harness morning-brief` for the daily handoff.
+
+    The choice persists in coord/dev_loop/state.json so future verb
+    invocations default to it.
+
+    Skip the prompts via `--orchestrator X --mode Y` for scripted
+    invocation.
+    """
+    from harness.orchestrator_picker import (
+        ORCHESTRATORS, ConnectionStatus, by_key, render_picker,
+    )
+
+    # --list mode: just show the menu + exit
+    if just_list:
+        click.echo(render_picker())
+        sys.exit(0)
+
+    # 1. Orchestrator picker
+    if orchestrator is None:
+        click.echo(render_picker())
+        default_idx = 1  # MiMo (brainstorm-recommended primary)
+        pick = click.prompt(
+            "Pick orchestrator [1-4]",
+            type=click.IntRange(1, len(ORCHESTRATORS)),
+            default=default_idx,
+        )
+        chosen = ORCHESTRATORS[pick - 1]
+    else:
+        chosen = by_key(orchestrator.lower())
+        if chosen is None:
+            click.echo(f"ERROR: unknown orchestrator '{orchestrator}'", err=True)
+            sys.exit(1)
+
+    # 2. Connection probe
+    status = chosen.probe()
+    if status == ConnectionStatus.MISSING_KEY:
+        env = chosen.env_var() or "?"
+        click.echo(
+            f"\n✗ Cannot connect: {chosen.label} requires {env} in env "
+            f"or DPAPI store.\n"
+            f"  Set it and re-run: `harness start`.",
+            err=True,
+        )
+        sys.exit(2)
+    if status == ConnectionStatus.BLOCKED:
+        click.echo(
+            f"\n⚠ {chosen.label} BLOCKED: anti-recursion guard fires when "
+            f"`claude -p` is spawned from inside another Claude Code session.\n"
+            f"  To use Claude autonomously, install the Task Scheduler entry:\n"
+            f"    harness orchestrator install-claude-scheduler\n"
+            f"  Or pick a different orchestrator now.",
+            err=True,
+        )
+        sys.exit(2)
+    if status == ConnectionStatus.NOT_INSTALLED:
+        click.echo(
+            f"\n✗ {chosen.label} not installed: `claude` binary missing from PATH.\n"
+            f"  Install Claude Code, then re-run.",
+            err=True,
+        )
+        sys.exit(2)
+
+    # 3. Mode prompt
+    if mode is None:
+        click.echo()
+        click.echo("Mode:")
+        click.echo("  [I]nteractive (you drive; harness assists)")
+        click.echo("  [A]utonomous (Task Scheduler runs the loop)")
+        mode_input = click.prompt(
+            "Mode", type=click.Choice(["I", "A", "i", "a"]),
+            default="I", show_choices=False,
+        )
+        mode = "interactive" if mode_input.lower() == "i" else "autonomous"
+
+    # 4. Persist choice to state
+    from datetime import datetime, timezone
+    state_path = Path("coord") / "dev_loop" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state: dict = {}
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            state = {}
+    state["active_orchestrator"] = chosen.key
+    state["active_mode"] = mode
+    state["orchestrator_chosen_at"] = datetime.now(timezone.utc).isoformat()
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    click.echo()
+    click.echo(f"✓ Orchestrator: {chosen.label} ({chosen.key})")
+    click.echo(f"✓ Mode:         {mode}")
+    click.echo(f"✓ Engine connected ({status.value}).")
+    click.echo(f"✓ State persisted: {state_path}")
+
+    # 5. Mode-specific next steps
+    click.echo()
+    if mode == "autonomous":
+        click.echo(f"Autonomous mode: arming Task Scheduler at {interval_minutes}min cadence...")
+        if chosen.key == "claude":
+            click.echo("  → using `harness orchestrator install-claude-scheduler` "
+                       "(Task Scheduler-launched claude -p; no parent Claude Code)")
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "harness", "orchestrator",
+                     "install-claude-scheduler",
+                     "--interval-minutes", str(interval_minutes)],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if result.returncode == 0:
+                    click.echo("  ✓ Task Scheduler entry installed.")
+                else:
+                    click.echo(f"  ⚠ install failed: {result.stderr[:200]}")
+            except Exception as exc:
+                click.echo(f"  ⚠ install error: {exc}")
+        else:
+            click.echo(f"  → using `harness orchestrator install-scheduler` "
+                       f"(Python daemon running queue execute)")
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "harness", "orchestrator",
+                     "install-scheduler",
+                     "--interval-minutes", str(interval_minutes)],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if result.returncode == 0:
+                    click.echo("  ✓ Task Scheduler entry installed.")
+                else:
+                    click.echo(f"  ⚠ install failed: {result.stderr[:200]}")
+            except Exception as exc:
+                click.echo(f"  ⚠ install error: {exc}")
+        click.echo()
+        click.echo("Check progress with:")
+        click.echo("  harness morning-brief --since-hours 12   # daily handoff")
+        click.echo("  harness queue list                       # what's in/out of queue")
+        click.echo("  harness observer flags                   # pending escalations")
+    else:
+        click.echo("Interactive mode.  Common next steps:")
+        click.echo(f"  harness spec-init my-feature             # author a spec")
+        click.echo(f"  harness queue execute --once             # process next spec")
+        click.echo(f"  harness coord plan --spec X --engine {chosen.key}")
+        click.echo(f"  harness morning-brief                     # synthesize recent activity")
+
+    sys.exit(0)
+
+
 @cli.command(name="morning-brief")
 @click.option("--since-hours", type=int, default=12,
               help="Look back this many hours when building the brief (default 12).")

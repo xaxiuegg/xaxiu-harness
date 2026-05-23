@@ -17,6 +17,8 @@
 
 ## What's new (Wave 5 closeout, 2026-05-23)
 
+- **`harness start` boot screen (W5-SS)** — interactive orchestrator picker (Claude / MiMo / DeepSeek / Kimi) with connection status, mode toggle (interactive vs autonomous), state persistence. The Claude-Code-style entry point for the harness.
+- **Engine-as-tool architecture (post-brainstorm)** — Claude positioned alongside Kimi/MiMo/DeepSeek as a selectable backend rather than the only orchestrator. 18/20 brainstorm agents endorse MiMo-primary + DeepSeek-fallback for production; Claude best for strategic planning bursts via Task Scheduler.
 - **Kimi wiring fix (W5-V)** — Kimi K2.6 now reliably handles source-laden packets (was silently empty under wiring drift). Two bugs fixed: streaming requirement (`stream=true`) and non-standard SSE prefix (`data:` without space).
 - **Unbounded `max_tokens` for subscription engines (W5-W)** — Kimi default raised 32K → 200K, MiMo 32K → 131K (hardware max). Operator directive: don't artificially cap engines on flat-rate subscriptions.
 - **Autonomous orchestrator (Phase 3)** — `harness orchestrator start` (Path α: STATUS-backlog-driven) and `harness queue execute` (Path β: spec-queue-driven). Both ship and validated end-to-end.
@@ -39,12 +41,21 @@ See [`memory/engine-reliability.md`](memory/engine-reliability.md) for the post-
    ```powershell
    cd xaxiu-harness && python -m venv .venv && .venv\Scripts\activate && pip install -e .
    ```
-3. Create your first project adapter
+3. Start the harness — pick your orchestrator + mode
+   ```powershell
+   harness start
+   ```
+   This walks you through picking one of four orchestrators (Claude / MiMo / DeepSeek / Kimi) with connection status, then asks for interactive vs autonomous mode. Skip the prompts for scripted invocation:
+   ```powershell
+   harness start --orchestrator mimo --mode interactive
+   harness start --orchestrator claude --mode autonomous --interval-minutes 60
+   ```
+4. Create your first project adapter
    ```powershell
    harness init -p my-first-project -t solo-dev
    ```
 
-After step 3 you can dispatch your first packet:
+After step 4 you can dispatch your first packet:
 ```powershell
 harness dispatch -p my-first-project --packet packet.md
 ```
