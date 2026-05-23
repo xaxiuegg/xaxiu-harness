@@ -75,10 +75,20 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
     _DIRECT_HTTP_BACKENDS = {"mimo", "mock"}
     if backend in _DIRECT_HTTP_BACKENDS:
         from harness.engines.dispatcher import dispatch_packet
+        # W6-A1-4 2026-05-23: worker prompts include the full contents of
+        # write_set + read_set files (W6-A1-3) and naming-only references
+        # to harness APIs.  The injection scanner's dpapi_direct rule
+        # (list_secrets/decrypt_secret/read_secret) fires on legitimate
+        # harness source like `dpapi.list_secrets()` in doctor.py.  Mark
+        # the dispatch as trusted_source — operator-authored spec +
+        # repo-on-disk file content + planner-built prompt is by
+        # definition not the cross-engine relay threat the scanner
+        # guards against.
         result = dispatch_packet(
             project="harness-worker",
             packet_path=str(packet_path),
             force_engine=backend,
+            trusted_source=True,
         )
         # Normalise to the SimpleNamespace shape the rest of run_worker
         # consumes.  dispatch_packet returns a DispatchResult with
@@ -682,10 +692,15 @@ def run_worker(
                         packet_path, engine, wt_path,
                     )
                 else:
+                    # W6-A1-4 2026-05-23: see _dispatch_via_swarm note —
+                    # worker prompts are repo-on-disk + operator-authored
+                    # content; trusted_source bypasses the injection
+                    # scanner that fires on legit harness code.
                     result = dispatch_packet(
                         project="harness-worker",
                         packet_path=str(packet_path),
                         force_engine=engine,
+                        trusted_source=True,
                     )
             except Exception as exc:
                 # WIRE-DISPATCH-HARDFAIL (2026-05-22): catch L4 WorktreeMissing
@@ -808,10 +823,13 @@ def run_worker(
                             fb_packet_path, fallback_engine, wt_path,
                         )
                     else:
+                        # W6-A1-4 2026-05-23: trusted_source — same rationale
+                        # as the primary dispatch call above.
                         fb_result = dispatch_packet(
                             project="harness-worker",
                             packet_path=str(fb_packet_path),
                             force_engine=fallback_engine,
+                            trusted_source=True,
                         )
                     fb_success = bool(fb_result.success)
                     fb_text_len = len((fb_result.text or "").strip())

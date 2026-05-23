@@ -76,6 +76,35 @@ Found during W6-A1 run 2: when the primary worker engine returns 0 edits, `worke
 - 2 new tests in tests/test_coord_worker.py pass
 - Future "did fallback actually run?" questions answerable from the progress log alone
 
+#### A1-3 — Pre-load existing write_set files into worker prompt context (~20 min) [DISCOVERED DURING A1]
+
+Found during W6-A1 run 4: kimi-api ONLY edited `tests/test_doctor.py` because the planner emitted `read_set=[]` for the task (the planner treated `write_set` as implying "no read needed"). Without `src/harness/doctor.py` in the prompt context, the engine had no anchors to produce a valid FILE/REPLACE block for it — so it shipped a partial change. Runs 1-3 (mimo) hit the same root cause but presented as `silent_no_op:s1` (engine returned text with 0 parseable blocks).
+
+**Steps**:
+1. After loading `read_set` files, also load existing `write_set` files into `read_set_contents` (deduped, skipping nonexistent paths so the empty-SEARCH create idiom still works for new files)
+2. Add a worker test asserting the existing file's content shows up in the dispatched prompt when `read_set=[]` and `write_set=[existing_file]`
+3. Add a worker test asserting nonexistent write_set files don't break prompt assembly (create-flow path)
+
+**Acceptance**:
+- New worker test confirms existing write_set content embedded in prompt
+- Full pytest stays green (1426+ passed)
+- Future W6-A1 runs no longer hit silent_no_op or partial-edit failure modes for this reason
+
+#### A1-4 — Worker dispatch `trusted_source=True` (~15 min) [DISCOVERED DURING A1]
+
+Found investigating W6-A1 run 5's 9ms MiMo "failure" anomaly. The dispatcher's injection scanner (`scan_packet_for_injection`) blocks packets containing `decrypt_secret|read_secret|list_secrets` patterns. After W6-A1-3 began embedding existing `src/harness/doctor.py` into the worker prompt, the scanner started firing on legitimate harness code like `dpapi.list_secrets()`. Result: mimo (direct-HTTP path) returned `packet_injection_blocked` in 9ms, well before reaching the API.
+
+This affected only the direct-HTTP backends (`mimo`, `mock`). `swarm/kimi-api` and `swarm/deepseek` bypass the dispatcher's injection scan via the xaxiu-swarm CLI subprocess, so they weren't blocked.
+
+**Steps**:
+1. Add `trusted_source=True` to the 3 `dispatch_packet` call sites in `src/harness/coord/worker.py` (primary direct-HTTP path inside `_dispatch_via_swarm`, primary in-process path in `run_worker`, fallback in-process path)
+2. Extend `test_dispatch_via_swarm_routes_mimo_through_direct_http` to assert `trusted_source=True` is passed (the regression sentinel)
+
+**Acceptance**:
+- All 3 `dispatch_packet` calls in worker.py pass `trusted_source=True`
+- Regression test asserts `kwargs["trusted_source"] is True`
+- Full pytest stays green (1426+ passed)
+
 #### A2 — Token tracking real-API validation (~1 hr)
 
 QA + Architect reviewers identified ledger shows `in=0 out=0` despite W4-K wiring. Closes their directives.

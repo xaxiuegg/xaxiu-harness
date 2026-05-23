@@ -696,6 +696,16 @@ def test_dispatch_via_swarm_routes_mimo_through_direct_http(tmp_path: Path) -> N
             kwargs = mock_dispatch.call_args.kwargs
             assert kwargs["force_engine"] == "mimo"
             assert kwargs["project"] == "harness-worker"
+            # W6-A1-4 2026-05-23: worker prompts include legitimate harness
+            # source (W6-A1-3 fix pre-loads write_set files), which can
+            # contain patterns like `list_secrets(` that trip the
+            # dispatch_packet injection scanner.  Worker must mark the
+            # call as trusted_source so the scanner skips it.
+            assert kwargs.get("trusted_source") is True, (
+                "worker.py must pass trusted_source=True to dispatch_packet "
+                "or the injection scanner will block prompts containing "
+                "legitimate harness code patterns"
+            )
 
     assert result.success is True
     assert result.text.startswith("FILE/REPLACE")
