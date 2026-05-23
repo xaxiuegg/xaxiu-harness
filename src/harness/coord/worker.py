@@ -311,14 +311,114 @@ def _apply_file_edits(edits: list[tuple[str, str, str]], base_path: Path) -> lis
         else:
             content_lf = content.replace("\r\n", "\n")
             search_lf = search.replace("\r\n", "\n")
-            if search_lf not in content_lf:
-                continue  # truly absent — not a line-ending issue
-            replace_lf = replace.replace("\r\n", "\n")
-            new_content = content_lf.replace(search_lf, replace_lf, 1)
+            if search_lf in content_lf:
+                replace_lf = replace.replace("\r\n", "\n")
+                new_content = content_lf.replace(search_lf, replace_lf, 1)
+            else:
+                # W5-R 2026-05-23: anchor-fuzzy match.
+                # Engines occasionally drop or normalize whitespace +
+                # punctuation in SEARCH text (Phase B Pilot G2v2 found
+                # DeepSeek emit "def main():" against file content
+                # "def main() -> int:").  Last-resort: collapse runs of
+                # whitespace + trailing whitespace per line, retry match.
+                # Only fires when fuzzy match has EXACTLY ONE candidate
+                # to avoid mis-applying.
+                fuzzy_result = _fuzzy_replace_one(content_lf, search_lf, replace.replace("\r\n", "\n"))
+                if fuzzy_result is None:
+                    continue  # truly absent or ambiguous — safe skip
+                new_content = fuzzy_result
 
         file_path.write_bytes(_match_line_endings(new_content, is_crlf))
         modified.append(rel_path)
     return modified
+
+
+def _collapse_ws(text: str) -> str:
+    """Collapse runs of whitespace within each line, then strip per-line trailing.
+
+    Preserves line structure (newlines kept) but drops cosmetic variation
+    inside a line (e.g. `def main():` vs `def main() -> int:` would still
+    differ, but `foo(a,b)` vs `foo(a, b)` would normalise to the same).
+    """
+    import re
+    out_lines: list[str] = []
+    for line in text.split("\n"):
+        # Collapse all runs of whitespace to single space + rstrip
+        collapsed = re.sub(r"[ \t]+", " ", line).rstrip()
+        out_lines.append(collapsed)
+    return "\n".join(out_lines)
+
+
+def _fuzzy_replace_one(content_lf: str, search_lf: str, replace_lf: str) -> str | None:
+    """W5-R: whitespace-normalised SEARCH match.
+
+    Args:
+        content_lf: file content with LF line endings (already normalized
+            by caller).
+        search_lf: engine's SEARCH text with LF line endings.
+        replace_lf: engine's REPLACE text with LF line endings.
+
+    Returns:
+        Modified content with the replacement applied, OR None if no
+        unambiguous match found.  None covers two cases:
+        - Truly absent: no fuzzy match
+        - Ambiguous: 2+ candidate locations (refuse to mis-apply)
+    """
+    if not search_lf.strip():
+        return None
+    norm_search = _collapse_ws(search_lf)
+    if not norm_search.strip():
+        return None
+
+    # Walk content line-by-line, find candidate starts where the search's
+    # first non-empty line matches (whitespace-collapsed).
+    content_lines = content_lf.split("\n")
+    search_lines = norm_search.split("\n")
+    search_lines = [l for l in search_lines if l.strip()]
+    if not search_lines:
+        return None
+    first_search = search_lines[0]
+
+    candidates: list[tuple[int, int]] = []  # (start_line, end_line) inclusive
+    for start in range(len(content_lines)):
+        # Collapse content_lines[start] and compare to first_search
+        if _collapse_ws(content_lines[start]) != first_search:
+            continue
+        # Try to extend match across the remaining search lines
+        cur = start
+        ok = True
+        for sl in search_lines[1:]:
+            cur += 1
+            # Skip blank lines in content (engine often drops them)
+            while cur < len(content_lines) and not content_lines[cur].strip():
+                cur += 1
+            if cur >= len(content_lines):
+                ok = False
+                break
+            if _collapse_ws(content_lines[cur]) != sl:
+                ok = False
+                break
+        if ok:
+            candidates.append((start, cur))
+
+    if len(candidates) != 1:
+        return None  # ambiguous or absent — refuse to mis-apply
+
+    start, end = candidates[0]
+    # Splice: lines before start, then replace, then lines after end
+    before = "\n".join(content_lines[:start])
+    after = "\n".join(content_lines[end + 1:])
+    parts = []
+    if before:
+        parts.append(before)
+    parts.append(replace_lf.rstrip("\n"))
+    if after:
+        parts.append(after)
+    joined = "\n".join(parts)
+    # Preserve trailing newline if original had one
+    if content_lf.endswith("\n") and not joined.endswith("\n"):
+        joined += "\n"
+    return joined
 
 
 def _detect_inplace_edits(wt_path: Path) -> list[str]:
