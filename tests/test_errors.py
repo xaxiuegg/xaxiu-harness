@@ -213,3 +213,49 @@ def test_handle_l3_does_not_trigger_escalation_marker() -> None:
     assert code == 1
     assert not any("OPERATOR ESCALATION" in w for w in written)
     assert any("L3.engines.E_ENGINE_TIMEOUT" in w for w in written)
+
+
+# ---------------------------------------------------------------------------
+# W5-DD top-level CLI HarnessError handler
+# ---------------------------------------------------------------------------
+
+def test_cli_main_wraps_harness_error_with_escalation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """W5-DD: when a CLI verb raises an unhandled HarnessError, the
+    top-level main() wrapper catches it, fires the L5 banner, and exits
+    with the level-derived code (4 for L5).  Without the wrapper, click
+    would emit a vanilla Python traceback and exit 1."""
+    import sys as _sys
+    import harness.cli as _cli
+
+    # Make `cli` raise an L5 HarnessError unconditionally.
+    def _boom(*args, **kwargs):
+        raise ConfigCorruption("simulated bad state.json")
+
+    exit_codes: list[int] = []
+    monkeypatch.setattr(_cli, "cli", _boom)
+    monkeypatch.setattr(_sys, "exit", lambda c=0: exit_codes.append(c))
+
+    _cli.main()
+
+    captured = capsys.readouterr()
+    assert "*** OPERATOR ESCALATION (L5) ***" in captured.err
+    assert "L5.config.E_CONFIG_CORRUPTION" in captured.err
+    assert exit_codes == [4]
+
+
+def test_cli_main_does_not_intercept_non_harness_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-DD: only HarnessError subclasses route through the wrapper.
+    Generic exceptions (ValueError, RuntimeError, etc.) propagate
+    untouched so the standard click traceback path still works."""
+    import harness.cli as _cli
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("not a HarnessError")
+
+    monkeypatch.setattr(_cli, "cli", _boom)
+    with pytest.raises(RuntimeError, match="not a HarnessError"):
+        _cli.main()

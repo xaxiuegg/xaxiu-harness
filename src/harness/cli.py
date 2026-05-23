@@ -63,7 +63,22 @@ def cli(ctx: click.Context, **operator_overrides: object) -> None:
     )
 
 
-main = cli
+def main(*args, **kwargs):
+    """Entry point that wraps click with W5-DD top-level HarnessError handler.
+
+    Any ``HarnessError`` that escapes the click verb is routed through
+    ``handle_harness_error`` so the operator sees the L5 escalation banner
+    (or the L3/L4 one-line summary) instead of click's vanilla traceback.
+    Exits with the level-derived exit code (0/0/1/3/4).
+
+    Programmatic callers that catch HarnessError themselves can still call
+    ``cli`` directly to bypass this.
+    """
+    from harness.errors import HarnessError, handle_harness_error
+    try:
+        return cli(*args, **kwargs)
+    except HarnessError as exc:
+        handle_harness_error(exc, sys_exit=sys.exit)
 
 
 @cli.command()
