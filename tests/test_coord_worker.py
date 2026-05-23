@@ -828,6 +828,135 @@ def test_build_prompt_no_section_when_no_overlap() -> None:
 
 
 # ---------------------------------------------------------------------------
+# W7-WORKER-BUDGET-HOOK — tokens_in / tokens_out split
+# ---------------------------------------------------------------------------
+
+
+def test_budget_hook_records_split_tokens_when_engine_provides_them(
+    tmp_path: Path,
+) -> None:
+    """W7-WORKER-BUDGET-HOOK 2026-05-23: when the underlying dispatch
+    returns separate tokens_in / tokens_out, the worker's budget hook
+    must record them separately to the ledger.  Pre-fix: input_tokens
+    was hardcoded to 0, so swarm/mimo rows showed in=0/out=N.
+    """
+    run_dir = tmp_path / "runs" / "20260523T000000-budget"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+
+    # Override the autouse stub: success with split tokens
+    stub = SimpleNamespace(
+        success=True,
+        text=(
+            "FILE: src/foo.py\n"
+            "<<<<<<< SEARCH\n"
+            "=======\n"
+            "# applied\n"
+            ">>>>>>> REPLACE\n"
+        ),
+        error=None,
+        tokens_used=137,    # = in + out
+        tokens_in=42,
+        tokens_out=95,
+        cost_usd=0.0,
+    )
+
+    recorded: list[dict] = []
+
+    def _record_spy(**kwargs):
+        recorded.append(kwargs)
+
+    with patch("harness.coord.worker._dispatch_via_swarm", return_value=stub), \
+         patch("harness.coord.worker._run_pytest", return_value={
+             "ran": 0, "passed": 0, "failed": 0, "skipped": 0,
+             "duration_seconds": 0.0,
+         }), \
+         patch("harness.budget.record_dispatch", side_effect=_record_spy):
+        run_worker(task, run_dir, project_root=tmp_path)
+
+    assert recorded, "budget.record_dispatch was never called"
+    call = recorded[-1]
+    assert call["input_tokens"] == 42, (
+        f"input_tokens=42 expected; got {call['input_tokens']} — "
+        "if 0, the input_tokens=0 hardcode regression is back"
+    )
+    assert call["output_tokens"] == 95, call
+
+
+def test_budget_hook_falls_back_to_legacy_aggregate_when_no_split(
+    tmp_path: Path,
+) -> None:
+    """When the engine path can't surface a tokens_in/out split (swarm
+    CLI returns tokens_used=N, in=0, out=0), preserve the legacy
+    "everything to output" behaviour so `harness budget summary`
+    totals don't silently drop."""
+    run_dir = tmp_path / "runs" / "20260523T000000-legacy"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+
+    stub = SimpleNamespace(
+        success=True,
+        text=(
+            "FILE: src/foo.py\n"
+            "<<<<<<< SEARCH\n"
+            "=======\n"
+            "# applied\n"
+            ">>>>>>> REPLACE\n"
+        ),
+        error=None,
+        tokens_used=200,    # only aggregate available
+        tokens_in=0,
+        tokens_out=0,
+        cost_usd=0.0,
+    )
+
+    recorded: list[dict] = []
+
+    def _record_spy(**kwargs):
+        recorded.append(kwargs)
+
+    with patch("harness.coord.worker._dispatch_via_swarm", return_value=stub), \
+         patch("harness.coord.worker._run_pytest", return_value={
+             "ran": 0, "passed": 0, "failed": 0, "skipped": 0,
+             "duration_seconds": 0.0,
+         }), \
+         patch("harness.budget.record_dispatch", side_effect=_record_spy):
+        run_worker(task, run_dir, project_root=tmp_path)
+
+    assert recorded, "budget.record_dispatch was never called"
+    call = recorded[-1]
+    assert call["input_tokens"] == 0
+    assert call["output_tokens"] == 200, (
+        f"legacy aggregate should land in output_tokens; got "
+        f"output_tokens={call['output_tokens']} input_tokens={call['input_tokens']}"
+    )
+
+
+def test_dispatch_result_exposes_split_tokens() -> None:
+    """DispatchResult.tokens_in / tokens_out are exposed (W7-WORKER-
+    BUDGET-HOOK schema change) and tokens_used = in + out remains
+    backward-compatible for legacy callers."""
+    from harness.engines.dispatcher import DispatchResult
+    r = DispatchResult(
+        success=True, engine_used="mimo", fallback_chain=["mimo"],
+        text="", error=None, dispatch_id="abc",
+        tokens_used=15, tokens_in=10, tokens_out=5,
+    )
+    assert r.tokens_in == 10
+    assert r.tokens_out == 5
+    assert r.tokens_used == 15
+    # Default-constructed DispatchResult still defaults to 0/0 (no
+    # regression for callers that don't set the new fields).
+    r2 = DispatchResult(
+        success=True, engine_used="mimo", fallback_chain=["mimo"],
+        text="", error=None, dispatch_id="abc",
+    )
+    assert r2.tokens_in == 0
+    assert r2.tokens_out == 0
+    assert r2.tokens_used == 0
+
+
+# ---------------------------------------------------------------------------
 # W6-A1.2 fallback progress events
 # ---------------------------------------------------------------------------
 

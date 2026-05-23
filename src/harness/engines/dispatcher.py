@@ -70,8 +70,15 @@ class DispatchResult:
     text: str                  # engine response text (empty on total failure)
     error: str | None
     dispatch_id: str           # UUID written to history.db
-    tokens_used: int = 0
+    tokens_used: int = 0       # = tokens_in + tokens_out (legacy aggregate)
     cost_usd: float = 0.0
+    # W7-WORKER-BUDGET-HOOK 2026-05-23: split tokens so callers (e.g.
+    # worker.py's budget recorder) can attribute inputs and outputs
+    # separately to the per-engine ledger.  worker.py:_budget_record
+    # was previously hardcoding input_tokens=0 because the
+    # DispatchResult exposed only the aggregate.
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +727,8 @@ def dispatch_packet(
                 dispatch_id=dispatch_id,
                 tokens_used=response.tokens_in + response.tokens_out,
                 cost_usd=response.cost_usd,
+                tokens_in=int(response.tokens_in or 0),
+                tokens_out=int(response.tokens_out or 0),
             )
 
         # --- 9c. Failure path ------------------------------------------------

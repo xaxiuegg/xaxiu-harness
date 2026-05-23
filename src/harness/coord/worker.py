@@ -93,11 +93,16 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
         # Normalise to the SimpleNamespace shape the rest of run_worker
         # consumes.  dispatch_packet returns a DispatchResult with
         # success/text/error/tokens_used/cost_usd — they match 1:1.
+        # W7-WORKER-BUDGET-HOOK 2026-05-23: also pass tokens_in /
+        # tokens_out so worker.py can record the budget ledger with
+        # the correct in/out split (was hardcoded input_tokens=0).
         return SimpleNamespace(
             success=result.success,
             text=result.text or "",
             error=result.error,
             tokens_used=int(getattr(result, "tokens_used", 0) or 0),
+            tokens_in=int(getattr(result, "tokens_in", 0) or 0),
+            tokens_out=int(getattr(result, "tokens_out", 0) or 0),
             cost_usd=float(getattr(result, "cost_usd", 0.0) or 0.0),
         )
 
@@ -131,24 +136,29 @@ def _dispatch_via_swarm(packet_path: Path, engine: str, wt_path: Path) -> Any:
     except FileNotFoundError:
         return SimpleNamespace(
             success=False, text="", error="xaxiu-swarm not on PATH",
-            tokens_used=0, cost_usd=0.0,
+            tokens_used=0, tokens_in=0, tokens_out=0, cost_usd=0.0,
         )
     except NotADirectoryError:
         return SimpleNamespace(
             success=False, text="", error=f"worktree not found: {wt_path}",
-            tokens_used=0, cost_usd=0.0,
+            tokens_used=0, tokens_in=0, tokens_out=0, cost_usd=0.0,
         )
     except subprocess.TimeoutExpired:
         return SimpleNamespace(
             success=False, text="", error="swarm dispatch timeout (600s)",
-            tokens_used=0, cost_usd=0.0,
+            tokens_used=0, tokens_in=0, tokens_out=0, cost_usd=0.0,
         )
     success = proc.returncode == 0
+    # W7-WORKER-BUDGET-HOOK 2026-05-23: the swarm CLI path doesn't surface
+    # token counts in its stdout protocol — set both in/out to 0 here.
+    # Future improvement would parse xaxiu-swarm's status output for usage.
     return SimpleNamespace(
         success=success,
         text=proc.stdout,  # agentic CLI emits status to stdout; edits land on disk
         error=None if success else (proc.stderr.strip() or f"swarm exit {proc.returncode}"),
         tokens_used=0,
+        tokens_in=0,
+        tokens_out=0,
         cost_usd=0.0,
     )
 
@@ -621,6 +631,12 @@ def run_worker(
     files_modified: list[str] = list(ckpt.files_modified or [])
     commit_sha = ckpt.commit_sha
     total_tokens: int = 0
+    # W7-WORKER-BUDGET-HOOK 2026-05-23: track tokens_in / tokens_out
+    # separately so the budget ledger reflects real usage (the prior
+    # _budget_record call hardcoded input_tokens=0 because the
+    # accumulator didn't split them).
+    total_tokens_in: int = 0
+    total_tokens_out: int = 0
     total_cost_usd: float = 0.0
 
     # Pre-load read_set contents for prompt building
@@ -892,6 +908,13 @@ def run_worker(
             # Accumulate token + cost telemetry for budget meter
             if result.success and result.text.strip():
                 total_tokens += int(getattr(result, "tokens_used", 0) or 0)
+                # W7-WORKER-BUDGET-HOOK: split accumulator.  Engines
+                # that don't surface a split (swarm CLI path) report
+                # tokens_in=tokens_out=0 here — that's truthful
+                # ("we don't know") instead of attributing everything
+                # to output as the old single-accumulator did.
+                total_tokens_in += int(getattr(result, "tokens_in", 0) or 0)
+                total_tokens_out += int(getattr(result, "tokens_out", 0) or 0)
                 total_cost_usd += float(getattr(result, "cost_usd", 0.0) or 0.0)
 
             # WIRE-NOOP-DETECT: if this is an edit step with target_files,
@@ -993,14 +1016,29 @@ def run_worker(
         "tests_passed": tests_ok,
     })
 
-    # Record into per-engine budget ledger (best-effort, no fail-loud)
+    # Record into per-engine budget ledger (best-effort, no fail-loud).
+    # W7-WORKER-BUDGET-HOOK 2026-05-23: thread the real tokens_in /
+    # tokens_out split instead of the prior input_tokens=0 hardcode.
+    # When the underlying engine path can't surface a split (swarm
+    # CLI), both accumulators stay at 0 and we fall back to the legacy
+    # aggregate via the output_tokens slot for backward compatibility
+    # with operators relying on `harness budget summary` totals.
     try:
         from harness.budget import record_dispatch as _budget_record
+        if total_tokens_in == 0 and total_tokens_out == 0 and total_tokens > 0:
+            # Engines that don't split (swarm CLI) — preserve the
+            # legacy "everything to output" behaviour so totals don't
+            # silently drop.
+            input_tokens_to_record = 0
+            output_tokens_to_record = total_tokens
+        else:
+            input_tokens_to_record = total_tokens_in
+            output_tokens_to_record = total_tokens_out
         _budget_record(
             task_id=run_dir.name,
             engine=engine,
-            input_tokens=0,
-            output_tokens=total_tokens,
+            input_tokens=input_tokens_to_record,
+            output_tokens=output_tokens_to_record,
         )
     except Exception:
         pass  # ledger best-effort — never fail a worker for budget I/O
