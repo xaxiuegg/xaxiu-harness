@@ -148,8 +148,26 @@ def spec_verify_cmd(spec_path: Path) -> None:
     sys.exit(0 if matches else 1)
 
 
+def _samples_dir() -> Path:
+    """Locate the spec/samples/ directory (the SPECLIB template library).
+
+    W5-QQ: prefer cwd-relative ``spec/samples`` if it exists (operator
+    is inside their project tree); else fall back to the package's
+    repo-root sibling (the harness's own samples library).  Does NOT
+    walk up the directory tree — operators running from subdirs of
+    unrelated projects shouldn't accidentally see a parent project's
+    samples.
+    """
+    cwd_candidate = Path.cwd() / "spec" / "samples"
+    if cwd_candidate.is_dir():
+        return cwd_candidate
+    # Fall back to the harness package's own samples
+    pkg_candidate = Path(__file__).resolve().parents[2] / "spec" / "samples"
+    return pkg_candidate
+
+
 @cli.command(name="spec-init")
-@click.argument("name")
+@click.argument("name", required=False)
 @click.option("--strict-paths", default=None,
               help="Comma-separated list of relative paths to bind under "
                    "`## Strict Paths` (W5-BB).  Each becomes a bullet entry.")
@@ -159,8 +177,15 @@ def spec_verify_cmd(spec_path: Path) -> None:
                    "autonomous processing via `harness queue execute`.")
 @click.option("--goal", default=None,
               help="One-line goal (auto-prompted if missing).")
-def spec_init_cmd(name: str, strict_paths: str | None,
-                  out_dir: Path, goal: str | None) -> None:
+@click.option("--from-template", "template", default=None,
+              help="W5-QQ: copy from spec/samples/<NAME>.md instead of "
+                   "generating a blank canonical scaffold.  Use "
+                   "--list-templates to see available samples.")
+@click.option("--list-templates", "list_templates", is_flag=True,
+              help="W5-QQ: list available templates in spec/samples/ and exit.")
+def spec_init_cmd(name: str | None, strict_paths: str | None,
+                  out_dir: Path, goal: str | None,
+                  template: str | None, list_templates: bool) -> None:
     """Scaffold a starter spec markdown with canonical sections.
 
     W5-KK 2026-05-23: makes the `## Strict Paths` syntax (W5-BB)
@@ -172,7 +197,38 @@ def spec_init_cmd(name: str, strict_paths: str | None,
     canonical sections (SPEC-ID, Goal, Strict Paths, Acceptance, Why)
     prefilled.  Drop in a goal, customize acceptance criteria, then
     `harness queue execute --once` processes it.
+
+    W5-QQ 2026-05-23: --from-template / --list-templates exposes
+    spec/samples/ as the SPECLIB.  Browse with --list-templates, copy
+    a starter with --from-template NAME.
     """
+    samples = _samples_dir()
+
+    # W5-QQ: --list-templates prints library + exits
+    if list_templates:
+        if not samples.exists():
+            click.echo(f"(no template library found at {samples})")
+            sys.exit(0)
+        templates = sorted(p for p in samples.glob("*.md") if p.is_file())
+        if not templates:
+            click.echo(f"(spec/samples/ exists but contains no *.md templates)")
+            sys.exit(0)
+        click.echo(f"Available templates in {samples}:")
+        for t in templates:
+            # Extract first-line title for a short description
+            try:
+                first = t.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").strip()
+            except OSError:
+                first = "(unreadable)"
+            click.echo(f"  {t.stem:30s}  {first[:60]}")
+        click.echo(f"\nUse: harness spec-init NAME --from-template <stem>")
+        sys.exit(0)
+
+    if not name:
+        click.echo("ERROR: NAME is required unless --list-templates is given",
+                   err=True)
+        sys.exit(1)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     # Slugify the name: replace whitespace + non-safe chars with hyphens
     import re as _re_slug
@@ -186,6 +242,31 @@ def spec_init_cmd(name: str, strict_paths: str | None,
         click.echo(f"ERROR: {spec_path} already exists.  Pick a different "
                    f"--out dir or delete the existing file first.", err=True)
         sys.exit(1)
+
+    # W5-QQ: --from-template copies an existing sample
+    if template:
+        template_path = samples / f"{template}.md"
+        if not template_path.exists():
+            click.echo(f"ERROR: template '{template}' not found at {template_path}.",
+                       err=True)
+            click.echo("Run `harness spec-init --list-templates` to see "
+                       "available templates.", err=True)
+            sys.exit(1)
+        body = template_path.read_text(encoding="utf-8")
+        # Replace the SPEC-ID header with the operator's chosen slug.
+        # First line is canonical: "# SPEC-ID: <whatever> — <title>"
+        import re as _re_hdr
+        body = _re_hdr.sub(
+            r"^# SPEC-ID:\s*[^\n]*",
+            f"# SPEC-ID: {slug} — copied from {template_path.name}",
+            body, count=1, flags=_re_hdr.MULTILINE,
+        )
+        spec_path.write_text(body, encoding="utf-8")
+        click.echo(f"created: {spec_path}")
+        click.echo(f"  from-template: {template_path.name}")
+        click.echo("  edit the spec, then run:")
+        click.echo(f"    harness queue execute --once --planner-engine kimi-api")
+        sys.exit(0)
 
     # Parse strict-paths CSV
     paths: list[str] = []

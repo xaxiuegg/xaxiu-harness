@@ -172,3 +172,113 @@ def test_spec_init_slugifies_name(tmp_path: Path) -> None:
     # Slug is hyphenated, no spaces / punctuation
     assert " " not in files[0].name
     assert "!" not in files[0].name
+
+
+# ---------------------------------------------------------------------------
+# W5-QQ SPECLIB — --from-template / --list-templates
+# ---------------------------------------------------------------------------
+
+def test_spec_init_list_templates_shows_samples(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-QQ: --list-templates lists *.md files in spec/samples/."""
+    samples = tmp_path / "spec" / "samples"
+    samples.mkdir(parents=True)
+    (samples / "demo-a.md").write_text(
+        "# SPEC-ID: demo-a — First Demo\n\nbody\n", encoding="utf-8",
+    )
+    (samples / "demo-b.md").write_text(
+        "# SPEC-ID: demo-b — Second Demo\n\nbody\n", encoding="utf-8",
+    )
+    # Pin _samples_dir to the test fixture so the harness's real samples
+    # dir doesn't take precedence.
+    monkeypatch.setattr("harness.cli._samples_dir", lambda: samples)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["spec-init", "--list-templates"])
+    assert result.exit_code == 0, f"output={result.output}"
+    assert "demo-a" in result.output
+    assert "First Demo" in result.output
+    assert "demo-b" in result.output
+
+
+def test_spec_init_list_templates_handles_missing_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-QQ: --list-templates with no spec/samples/ exits cleanly with
+    an informative message (no crash)."""
+    # Patch _samples_dir to point at an empty tmp path so neither cwd
+    # nor the package's own samples dir resolve.
+    empty = tmp_path / "no-such-dir"
+    monkeypatch.setattr("harness.cli._samples_dir", lambda: empty)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["spec-init", "--list-templates"])
+    assert result.exit_code == 0
+    # Output should at least mention "no template" or the missing path
+    assert "no template" in result.output.lower()
+
+
+def test_spec_init_from_template_copies_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-QQ: --from-template TPL copies spec/samples/TPL.md content,
+    replacing the SPEC-ID header with the new slug."""
+    samples = tmp_path / "spec" / "samples"
+    samples.mkdir(parents=True)
+    template = samples / "my-tpl.md"
+    template.write_text(
+        "# SPEC-ID: my-tpl — Template Title\n\n"
+        "## Goal\nDo something cool.\n\n"
+        "## Strict Paths\n- coord/x.md\n\n"
+        "## Acceptance\n1. X exists.\n\n"
+        "## Why this spec exists\nReason.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("harness.cli._samples_dir", lambda: samples)
+    out_dir = tmp_path / "out"
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["spec-init", "my-instance",
+              "--from-template", "my-tpl",
+              "--out", str(out_dir)],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    spec = out_dir / "my-instance.md"
+    assert spec.exists()
+    body = spec.read_text(encoding="utf-8")
+    # New SPEC-ID, original body preserved
+    assert body.splitlines()[0] == (
+        "# SPEC-ID: my-instance — copied from my-tpl.md"
+    )
+    assert "Do something cool." in body
+    assert "- coord/x.md" in body
+
+
+def test_spec_init_from_template_errors_when_template_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-QQ: --from-template with a name that doesn't exist exits with
+    an error message pointing to --list-templates."""
+    samples = tmp_path / "spec" / "samples"
+    samples.mkdir(parents=True)
+    monkeypatch.setattr("harness.cli._samples_dir", lambda: samples)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["spec-init", "x",
+              "--from-template", "doesnt-exist",
+              "--out", str(tmp_path / "out")],
+    )
+    assert result.exit_code == 1
+    assert "not found" in result.output
+    assert "list-templates" in result.output
+
+
+def test_spec_init_requires_name_when_not_listing(tmp_path: Path) -> None:
+    """W5-QQ: NAME is optional only when --list-templates is given."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["spec-init", "--out", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "NAME is required" in result.output
