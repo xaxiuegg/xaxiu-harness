@@ -93,7 +93,34 @@ Per the W6 plan's explicit exclusion list:
 - ❌ No fix for the worker.py budget hook in/out split (noted as Wave 7 candidate)
 - ❌ No real-assertion test work for the 3 mutation-fail modules (queued as W7-MUTATION-*)
 
-## Operator review hooks
+## Operator decision (recorded 2026-05-23 after 10-reviewer panel)
+
+The operator reviewed the 10-reviewer panel synthesis at
+`coord/reviews/closeout-panel/SYNTHESIS.md` and chose the composite
+move the panel converged on:
+
+1. **W6-C2 accepted as shipped** — 8/10 panel votes confirmed the
+   alarm pipeline works and unit tests cover the contract.  The 2
+   dissents (K3, K5) want operational validation (behavioral / shadow
+   replay), which is Wave 7 work, not a Wave 6 blocker.
+
+2. **W6-A3 conditionally accepted** (the K4/K2/K3 panel-surfaced
+   third path).  Wave 7 kickoff is bound to remediation: the
+   `W7-MUTATION-WORKER` row must hit ≥3 kill rate before any
+   `W7-B1-RETROFIT` (or any other W7 backlog item) is unlocked.
+
+3. **Wave 7 sequencing** — per the panel's 5/10 convergence:
+   warm up with the `worker.py` budget hook fix, then ship
+   `W7-MUTATION-WORKER` real-assertion tests, then re-run the
+   mutation sweep against the now-instrumented module to validate
+   the script itself.  Other W7 rows (`W7-MUTATION-CONCRETE/ORCH`,
+   `W7-KIMI-*`, `W7-SPEC-DRIFT`) stay queued until the lock clears.
+
+Decision rationale lives in the panel synthesis; this section
+records that the operator chose the composite path the panel agreed
+on, not a unilateral Claude override of the audit gate.
+
+## Operator review hooks (now historical — operator decided above)
 
 Two audits STOPped below the 0.7 gate:
 
