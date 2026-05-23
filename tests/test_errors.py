@@ -18,6 +18,7 @@ from harness.errors import (
     PacketTrap,
     SchemaViolation,
     WavePersistentlyFailing,
+    fire_windows_toast,
     format_escalation_banner,
     handle_harness_error,
 )
@@ -259,3 +260,108 @@ def test_cli_main_does_not_intercept_non_harness_errors(
     monkeypatch.setattr(_cli, "cli", _boom)
     with pytest.raises(RuntimeError, match="not a HarnessError"):
         _cli.main()
+
+
+# ---------------------------------------------------------------------------
+# W5-PP Windows Toast on L5 escalation
+# ---------------------------------------------------------------------------
+
+def test_fire_windows_toast_noop_on_non_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fire_windows_toast() returns False (no-op) on non-Windows hosts."""
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    assert fire_windows_toast("title", "body") is False
+
+
+def test_fire_windows_toast_launches_powershell_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On Windows, fire_windows_toast() spawns a hidden PowerShell process
+    with the Windows.UI.Notifications XML payload."""
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    calls: list[list[str]] = []
+
+    class _FakePopen:
+        def __init__(self, args, **kwargs):
+            calls.append(list(args))
+
+    monkeypatch.setattr("subprocess.Popen", _FakePopen)
+    result = fire_windows_toast("test-title", "test-body")
+    assert result is True
+    assert len(calls) == 1
+    args = calls[0]
+    assert args[0] == "powershell"
+    assert "-WindowStyle" in args and args[args.index("-WindowStyle") + 1] == "Hidden"
+    # The PS payload contains the toast title + body
+    ps_payload = " ".join(args)
+    assert "test-title" in ps_payload
+    assert "test-body" in ps_payload
+    assert "ToastNotificationManager" in ps_payload
+
+
+def test_fire_windows_toast_escapes_single_quotes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single quotes in title/body must be escaped for PowerShell so a
+    user-supplied error message can't break out of the PS string."""
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    captured: list[str] = []
+
+    class _FakePopen:
+        def __init__(self, args, **kwargs):
+            captured.append(" ".join(args))
+
+    monkeypatch.setattr("subprocess.Popen", _FakePopen)
+    fire_windows_toast("can't fail", "won't break")
+    assert len(captured) == 1
+    # PowerShell single-quote escape is doubling: ' → ''
+    assert "can''t fail" in captured[0]
+    assert "won''t break" in captured[0]
+
+
+def test_handle_harness_error_fires_toast_only_for_l5(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-PP: handle_harness_error() fires toast for L5 errors but NOT
+    L1-L4 (which are autonomous-handled per memory directive)."""
+    toast_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "harness.errors.fire_windows_toast",
+        lambda title, body: toast_calls.append((title, body)) or True,
+    )
+    written: list[str] = []
+    # L3 — should NOT fire toast
+    handle_harness_error(
+        DispatchExhausted("retry exhausted"),
+        stderr_writer=lambda s: written.append(s) or len(s),
+    )
+    assert toast_calls == [], "L3 should not fire toast"
+    # L5 — should fire toast
+    handle_harness_error(
+        ConfigCorruption("state.json mangled"),
+        stderr_writer=lambda s: written.append(s) or len(s),
+    )
+    assert len(toast_calls) == 1
+    title, body = toast_calls[0]
+    assert "L5" in title
+    assert "E_CONFIG_CORRUPTION" in title
+    assert "state.json mangled" in body
+
+
+def test_handle_harness_error_fire_toast_false_suppresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-PP: fire_toast=False lets callers suppress the popup (tests,
+    background-loop spammy contexts)."""
+    toast_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "harness.errors.fire_windows_toast",
+        lambda title, body: toast_calls.append((title, body)) or True,
+    )
+    handle_harness_error(
+        ConfigCorruption("test"),
+        stderr_writer=lambda s: len(s),
+        fire_toast=False,
+    )
+    assert toast_calls == []

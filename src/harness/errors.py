@@ -32,6 +32,7 @@ __all__ = [
     "ALLOWED_LEVELS",
     "format_escalation_banner",
     "handle_harness_error",
+    "fire_windows_toast",
 ]
 
 Domain = Literal[
@@ -232,11 +233,58 @@ def format_escalation_banner(exc: HarnessError) -> str:
     return f"[{exc.tag()}] {exc.message}"
 
 
+def fire_windows_toast(title: str, body: str) -> bool:
+    """W5-PP 2026-05-23: best-effort Windows toast notification.
+
+    Uses PowerShell's built-in Windows.UI.Notifications API (no extra
+    modules required on Win10/11).  Non-blocking, fire-and-forget.
+    Silently no-ops on non-Windows or when PowerShell isn't available.
+
+    Returns True if the toast process launched successfully, False
+    otherwise.  Failure is intentionally non-fatal — the L5 banner +
+    stderr write are the load-bearing channels; toast is just a UI
+    bonus to catch the operator's attention.
+    """
+    import platform as _platform
+    import subprocess as _subprocess
+    if _platform.system() != "Windows":
+        return False
+    # Sanitize: PowerShell single-quoted strings escape ' as ''
+    safe_title = title.replace("'", "''")
+    safe_body = body.replace("'", "''")
+    # Use Windows.UI.Notifications API directly — works on Win10+ without
+    # third-party modules.  Wrapped in try/catch inside PS so missing
+    # WinRT types don't crash the toast call.
+    ps_script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        "try {"
+        "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
+        "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]|Out-Null;"
+        f"$tpl='<toast><visual><binding template=\"ToastText02\"><text id=\"1\">{safe_title}</text><text id=\"2\">{safe_body}</text></binding></visual></toast>';"
+        "$xml=New-Object Windows.Data.Xml.Dom.XmlDocument;"
+        "$xml.LoadXml($tpl);"
+        "$t=New-Object Windows.UI.Notifications.ToastNotification $xml;"
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('xaxiu-harness').Show($t);"
+        "} catch {}"
+    )
+    try:
+        _subprocess.Popen(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+             "-Command", ps_script],
+            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
+            creationflags=getattr(_subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
 def handle_harness_error(
     exc: HarnessError,
     *,
     stderr_writer: Any = None,
     sys_exit: Any = None,
+    fire_toast: bool = True,
 ) -> int:
     """Print the escalation banner + return the exit code.
 
@@ -244,11 +292,23 @@ def handle_harness_error(
     terminate or recover.  Pass ``sys_exit=sys.exit`` to force
     termination.  ``stderr_writer`` defaults to ``sys.stderr.write``.
 
+    W5-PP 2026-05-23: when ``fire_toast=True`` (the default) AND the
+    error is L5, also fire a Windows Toast notification so the operator
+    sees the alert without staring at stderr.  Pass ``fire_toast=False``
+    to suppress (e.g. tests, or background loops where toasts would be
+    spammy).
+
     Returns the exit code (0 for L1-L2, 1 for L3, 3 for L4, 4 for L5).
     """
     import sys as _sys
     write = stderr_writer or _sys.stderr.write
     write(format_escalation_banner(exc) + "\n")
+    if fire_toast and exc.level >= 5:
+        # Best-effort, non-blocking, swallows all errors.
+        fire_windows_toast(
+            title=f"xaxiu-harness L5: {exc.code}",
+            body=f"{exc.tag()} — {exc.message[:200]}",
+        )
     code = exc.exit_code()
     if sys_exit is not None:
         sys_exit(code)
