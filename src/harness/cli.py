@@ -838,16 +838,34 @@ def orchestrator_install_scheduler(interval_minutes: int, task_name: str) -> Non
         f'set PYTHONPATH=src && '
         f'\"{python_exe}\" -m harness orchestrator start --once"'
     )
+    # W5-Z 2026-05-23: schtasks /SC MINUTE caps /MO at 1439 (one minute
+    # short of 24h).  /SC HOURLY (max /MO 23) is reachable only in that
+    # same range, so it adds no capability over MINUTE — skip it.  For
+    # intervals >= 1440min we fall through to /SC DAILY (round down to
+    # whole days).  Operator can still get hourly cadence via 60/120/…
+    # interval-minutes which the MINUTE branch handles cleanly.
+    if interval_minutes < 1:
+        click.echo("ERROR: --interval-minutes must be >= 1", err=True)
+        sys.exit(1)
+    if interval_minutes <= 1439:
+        sc_flag, mo_value, cadence_desc = (
+            "MINUTE", str(interval_minutes), f"every {interval_minutes} minutes",
+        )
+    else:
+        days = max(1, interval_minutes // (24 * 60))
+        sc_flag, mo_value, cadence_desc = (
+            "DAILY", str(days), f"every {days} days",
+        )
     schtasks_cmd = [
         "schtasks", "/Create",
         "/TN", task_name,
-        "/SC", "MINUTE",
-        "/MO", str(interval_minutes),
+        "/SC", sc_flag,
+        "/MO", mo_value,
         "/TR", cmd,
         "/F",
     ]
     click.echo(f"Installing Task Scheduler entry '{task_name}'...")
-    click.echo(f"  Schedule: every {interval_minutes} minutes")
+    click.echo(f"  Schedule: {cadence_desc} (/SC {sc_flag} /MO {mo_value})")
     click.echo(f"  Command: {cmd}")
     if shutil.which("schtasks") is None:
         click.echo("ERROR: schtasks not on PATH (need Windows)", err=True)

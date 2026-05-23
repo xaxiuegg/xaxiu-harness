@@ -141,6 +141,78 @@ def test_queue_execute_processes_pending_spec(
         f"plan calls should default to kimi-api: {plan_calls}"
 
 
+def _capture_schtasks_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[list[str]]:
+    """Helper: mock subprocess.run + return the list of arg lists captured."""
+    captured: list[list[str]] = []
+
+    class _Proc:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = ""
+            self.stderr = ""
+
+    def _mock_run(args, **kwargs):
+        captured.append(list(args))
+        return _Proc()
+
+    monkeypatch.setattr("subprocess.run", _mock_run)
+    return captured
+
+
+def test_install_scheduler_minute_cadence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-Z: interval <= 1439 maps to /SC MINUTE."""
+    captured = _capture_schtasks_call(monkeypatch)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["orchestrator", "install-scheduler",
+              "--interval-minutes", "30", "--task-name", "t-min"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    schtasks_calls = [c for c in captured if c and c[0] == "schtasks"]
+    assert schtasks_calls, f"no schtasks call: {captured}"
+    cmd = schtasks_calls[0]
+    assert "/SC" in cmd and cmd[cmd.index("/SC") + 1] == "MINUTE"
+    assert "/MO" in cmd and cmd[cmd.index("/MO") + 1] == "30"
+
+
+def test_install_scheduler_daily_cadence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-Z: interval >= 1440 falls through to /SC DAILY (fixes the
+    schtasks `/MO Invalid value` failure on intervals ≥ 24h)."""
+    captured = _capture_schtasks_call(monkeypatch)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["orchestrator", "install-scheduler",
+              "--interval-minutes", "1440", "--task-name", "t-daily"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    schtasks_calls = [c for c in captured if c and c[0] == "schtasks"]
+    assert schtasks_calls
+    cmd = schtasks_calls[0]
+    assert "/SC" in cmd and cmd[cmd.index("/SC") + 1] == "DAILY"
+    assert "/MO" in cmd and cmd[cmd.index("/MO") + 1] == "1"
+
+
+def test_install_scheduler_rejects_zero_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-Z: --interval-minutes 0 is rejected before invoking schtasks."""
+    captured = _capture_schtasks_call(monkeypatch)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["orchestrator", "install-scheduler",
+              "--interval-minutes", "0", "--task-name", "t-zero"],
+    )
+    assert result.exit_code == 1, f"should reject: output={result.output}"
+    schtasks_calls = [c for c in captured if c and c[0] == "schtasks"]
+    assert not schtasks_calls, f"should not invoke schtasks: {schtasks_calls}"
+
+
 def test_queue_execute_planner_engine_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
