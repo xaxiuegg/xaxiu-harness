@@ -640,10 +640,15 @@ def queue_list_cmd() -> None:
               help="Worker engine (default swarm/mimo).")
 @click.option("--fallback-engine", default="swarm/deepseek",
               help="Worker fallback engine.")
+@click.option("--planner-engine", default="kimi-api",
+              help="Engine used for `coord plan` step.  W5-AA default kimi-api "
+                   "(reliable post-W5-V; $0 via tp- subscription).  Other "
+                   "valid: claude | kimi | deepseek | mock.")
 @click.option("--no-merge", is_flag=True,
               help="Run validation only; don't merge to master.")
 def queue_execute_cmd(once: bool, max_specs: int | None,
                       engine: str, fallback_engine: str,
+                      planner_engine: str,
                       no_merge: bool) -> None:
     """Process pending specs from spec/auto/, moving each to spec/auto/done/.
 
@@ -671,11 +676,13 @@ def queue_execute_cmd(once: bool, max_specs: int | None,
     merged_count = 0
     for spec_path in pending[:limit]:
         click.echo(f"\n{'='*60}\n=== Processing: {spec_path.name} ===\n{'='*60}")
-        # Plan
+        # Plan (W5-AA: planner_engine default 'kimi-api' replaces hardcoded
+        # 'claude' — Kimi K2.6 verified reliable on planning packets via
+        # W5-V wiring fix and free via tp- subscription).
         plan_proc = subprocess.run(
             [sys.executable, "-m", "harness", "coord", "plan",
-             "--spec", str(spec_path), "--engine", "claude"],
-            capture_output=True, text=True, timeout=120,
+             "--spec", str(spec_path), "--engine", planner_engine],
+            capture_output=True, text=True, timeout=300,
         )
         if plan_proc.returncode != 0:
             click.echo(f"PLAN FAILED: {plan_proc.stderr[:200]}", err=True)

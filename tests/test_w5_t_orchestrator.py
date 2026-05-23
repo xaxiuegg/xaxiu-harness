@@ -135,6 +135,51 @@ def test_queue_execute_processes_pending_spec(
     assert (auto / "done" / "test-spec.md").exists()
     # At least the plan call should have been made.
     assert any("plan" in c for c in calls), f"calls={calls}"
+    # W5-AA: default planner engine is kimi-api, not claude.
+    plan_calls = [c for c in calls if "plan" in c]
+    assert any("kimi-api" in c for c in plan_calls), \
+        f"plan calls should default to kimi-api: {plan_calls}"
+
+
+def test_queue_execute_planner_engine_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-AA: --planner-engine overrides the default kimi-api."""
+    monkeypatch.chdir(tmp_path)
+    auto = tmp_path / "spec" / "auto"
+    auto.mkdir(parents=True)
+    spec = auto / "p.md"
+    spec.write_text("# SPEC-ID: p\n\n## Goal\nDo.\n", encoding="utf-8")
+
+    class _MockProc:
+        def __init__(self, stdout: str, returncode: int = 0):
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = returncode
+
+    calls: list[list[str]] = []
+
+    def _mock_run(args, **kwargs):
+        calls.append(args)
+        if "plan" in args:
+            rid = "test-run-456"
+            (tmp_path / "runs" / rid).mkdir(parents=True, exist_ok=True)
+            return _MockProc(stdout=f"plan: runs/{rid}/plan.json")
+        return _MockProc(stdout="ok")
+
+    monkeypatch.setattr("subprocess.run", _mock_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["queue", "execute", "--once", "--no-merge",
+              "--planner-engine", "deepseek"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    plan_calls = [c for c in calls if "plan" in c]
+    assert any("deepseek" in c for c in plan_calls), \
+        f"--planner-engine deepseek should land in plan call: {plan_calls}"
+    assert not any("kimi-api" in c for c in plan_calls), \
+        f"override should suppress default: {plan_calls}"
 
 
 # ---------------------------------------------------------------------------
