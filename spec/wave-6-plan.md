@@ -44,6 +44,36 @@ Operator turn-1 objective from the prior session that drifted. Closes the PM + S
 - STATUS.csv row `W6-A1-ENV-DOCTOR-E2E` marked shipped with all 3 run IDs
 - Commit pushed
 
+#### A1.1 — Fix worktree-branching from `depends_on` parent (~2 hr) [DISCOVERED DURING A1]
+
+Found via empirical W6-A1 run 1: worker-2 ran in a worktree that did NOT inherit worker-1's commits, despite a `depends_on=["worker-1"]` declaration in the plan. STATUS row D5 ("Worktree branches from depends_on parent") was marked shipped but is empirically broken.
+
+**Steps**:
+1. Add a diagnostic print or progress event when a worktree is created — log the parent base SHA
+2. Investigate `src/harness/coord/worktree.py::create_worktree` and the call site in `coord/coordinator.py`
+3. Fix so when a task has `depends_on=[X]`, its worktree is branched FROM X's completed worktree (not from master)
+4. Add a regression test that runs a multi-worker plan with dependencies, asserts the dependent worker's worktree contains the parent's edits
+
+**Acceptance**:
+- Multi-worker spec with `depends_on` produces a green run (worker-2's tests see worker-1's source changes)
+- Regression test in `tests/test_coord_worktree.py` reproduces the bug + asserts fix
+
+#### A1.2 — Progress events for fallback attempts (~30 min) [DISCOVERED DURING A1]
+
+Found during W6-A1 run 2: when the primary worker engine returns 0 edits, `worker.py:767-815` attempts a fallback dispatch — but no progress events log the attempt. Operators see only the final `step_engine_used` event with `engine_used=<primary>` even when fallback ran (and silently also failed).
+
+**Steps**:
+1. Emit `fallback_attempted` progress event when entering the fallback block (with primary + fallback engine names)
+2. Emit `fallback_dispatch_result` with success/text_len/error after the dispatch returns
+3. Emit `fallback_edits_applied` with count after edit application
+4. Emit `fallback_exception` if the dispatch itself raises
+5. Add 2 tests covering happy-path fallback and exception-path fallback
+
+**Acceptance**:
+- Worker progress jsonl now contains 3 new event types per fallback attempt
+- 2 new tests in tests/test_coord_worker.py pass
+- Future "did fallback actually run?" questions answerable from the progress log alone
+
 #### A2 — Token tracking real-API validation (~1 hr)
 
 QA + Architect reviewers identified ledger shows `in=0 out=0` despite W4-K wiring. Closes their directives.

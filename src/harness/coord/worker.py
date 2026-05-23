@@ -767,6 +767,18 @@ def run_worker(
             if (not step_modified
                     and fallback_engine
                     and fallback_engine != engine):
+                # W6-A1.2 2026-05-23: emit progress events for every
+                # fallback attempt so operators can verify the W5-O
+                # rescue chain is actually firing (not silently
+                # skipping).  Closes the observability gap surfaced
+                # in W6-A1's silent-fallback investigation.
+                _append_progress(run_dir, task_obj.worker_id, {
+                    "event": "fallback_attempted",
+                    "step_id": step.step_id,
+                    "primary_engine": engine,
+                    "fallback_engine": fallback_engine,
+                    "reason": "primary produced 0 edits",
+                })
                 _heartbeat_touch(run_dir, task_obj.worker_id)
                 fb_packet_path = repo / "state" / (
                     f".tmp_worker_{task_obj.worker_id}_{step.step_id}_fb_"
@@ -785,7 +797,17 @@ def run_worker(
                             packet_path=str(fb_packet_path),
                             force_engine=fallback_engine,
                         )
-                    if fb_result.success and (fb_result.text or "").strip():
+                    fb_success = bool(fb_result.success)
+                    fb_text_len = len((fb_result.text or "").strip())
+                    _append_progress(run_dir, task_obj.worker_id, {
+                        "event": "fallback_dispatch_result",
+                        "step_id": step.step_id,
+                        "fallback_engine": fallback_engine,
+                        "success": fb_success,
+                        "text_len": fb_text_len,
+                        "error": getattr(fb_result, "error", None),
+                    })
+                    if fb_success and fb_text_len > 0:
                         fb_edits = _parse_file_edits(fb_result.text)
                         if fb_edits:
                             step_modified = _apply_file_edits(fb_edits, wt_path)
@@ -798,19 +820,34 @@ def run_worker(
                         # worktree — agentic engines may have applied
                         # edits before the failure.
                         step_modified = _detect_inplace_edits(wt_path)
+                    _append_progress(run_dir, task_obj.worker_id, {
+                        "event": "fallback_edits_applied",
+                        "step_id": step.step_id,
+                        "fallback_engine": fallback_engine,
+                        "edits_applied": len(step_modified or []),
+                        "files": list(step_modified or []),
+                    })
                     if step_modified:
-                                engine_used = fallback_engine
-                                files_modified = list(set(
-                                    files_modified + step_modified
-                                ))
-                                for rel_path in step_modified:
-                                    mod_file = wt_path / rel_path
-                                    if mod_file.exists():
-                                        read_set_contents[rel_path] = (
-                                            mod_file.read_text(encoding="utf-8")
-                                        )
-                except Exception:
-                    pass  # fallback is best-effort; primary's W4-A guard still fires
+                        engine_used = fallback_engine
+                        files_modified = list(set(
+                            files_modified + step_modified
+                        ))
+                        for rel_path in step_modified:
+                            mod_file = wt_path / rel_path
+                            if mod_file.exists():
+                                read_set_contents[rel_path] = (
+                                    mod_file.read_text(encoding="utf-8")
+                                )
+                except Exception as fb_exc:
+                    # W6-A1.2: log the exception too so silent failures
+                    # in the fallback path don't hide the real cause.
+                    _append_progress(run_dir, task_obj.worker_id, {
+                        "event": "fallback_exception",
+                        "step_id": step.step_id,
+                        "fallback_engine": fallback_engine,
+                        "exception": f"{type(fb_exc).__name__}: {fb_exc}",
+                    })
+                    # fallback is best-effort; primary's W4-A guard still fires
                 finally:
                     fb_packet_path.unlink(missing_ok=True)
             _append_progress(run_dir, task_obj.worker_id, {

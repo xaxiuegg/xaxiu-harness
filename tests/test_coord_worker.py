@@ -815,3 +815,124 @@ def test_build_prompt_no_section_when_no_overlap() -> None:
         strict_paths=["coord/totally/other.md"],
     )
     assert "STRICT PATHS" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# W6-A1.2 fallback progress events
+# ---------------------------------------------------------------------------
+
+def test_fallback_emits_progress_events_when_primary_returns_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W6-A1.2: when primary returns 0 edits and a fallback engine is
+    configured, the worker must emit `fallback_attempted`,
+    `fallback_dispatch_result`, and `fallback_edits_applied` progress
+    events.  This closes the observability gap surfaced in W6-A1's
+    silent-fallback investigation."""
+    run_dir = tmp_path / "runs" / "20260523T000000-test"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+
+    # Override the autouse stub: primary returns success=True but EMPTY
+    # text (simulates engine drift — protocol broken, 0 edits parseable).
+    empty_primary = SimpleNamespace(
+        success=True, text="", error=None, tokens_used=0, cost_usd=0.0,
+    )
+    # Fallback returns a valid FILE/REPLACE that creates src/foo.py.
+    fb_response = SimpleNamespace(
+        success=True,
+        text=(
+            "FILE: src/foo.py\n"
+            "<<<<<<< SEARCH\n"
+            "=======\n"
+            "# fallback rescue\n"
+            ">>>>>>> REPLACE\n"
+        ),
+        error=None, tokens_used=0, cost_usd=0.0,
+    )
+
+    call_count = {"n": 0}
+
+    def _alternating(*args, **kwargs):
+        call_count["n"] += 1
+        return empty_primary if call_count["n"] == 1 else fb_response
+
+    with patch("harness.coord.worker._dispatch_via_swarm",
+               side_effect=_alternating), \
+         patch("harness.coord.worker._run_pytest",
+               return_value={"ran": 0, "passed": 0, "failed": 0,
+                             "skipped": 0, "duration_seconds": 0.0}), \
+         patch("harness.coord.worker.worktree_path",
+               return_value=tmp_path), \
+         patch("harness.coord.worker.write_checkpoint"):
+        run_worker(
+            task, run_dir,
+            engine="swarm/mimo",
+            fallback_engine="swarm/deepseek",
+            project_root=tmp_path,
+        )
+
+    # Inspect the progress jsonl for the new events
+    progress_path = run_dir / "checkpoints" / "worker-1.progress.jsonl"
+    assert progress_path.exists(), "progress log missing"
+    events = [
+        json.loads(line) for line in
+        progress_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    event_names = [e.get("event") for e in events]
+    assert "fallback_attempted" in event_names, f"missing fallback_attempted: {event_names}"
+    assert "fallback_dispatch_result" in event_names, f"missing fallback_dispatch_result: {event_names}"
+    assert "fallback_edits_applied" in event_names, f"missing fallback_edits_applied: {event_names}"
+    # The attempted event should name both engines
+    attempted = next(e for e in events if e["event"] == "fallback_attempted")
+    assert attempted["primary_engine"] == "swarm/mimo"
+    assert attempted["fallback_engine"] == "swarm/deepseek"
+
+
+def test_fallback_emits_exception_event_when_fallback_crashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W6-A1.2: if the fallback dispatch itself raises, the worker emits
+    a `fallback_exception` event so the failure is visible (not silently
+    swallowed by the broad except block)."""
+    run_dir = tmp_path / "runs" / "20260523T000000-test"
+    run_dir.mkdir(parents=True)
+    task = _valid_task_dict()
+
+    empty_primary = SimpleNamespace(
+        success=True, text="", error=None, tokens_used=0, cost_usd=0.0,
+    )
+
+    call_count = {"n": 0}
+
+    def _crash_on_fallback(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return empty_primary
+        raise RuntimeError("simulated fallback dispatch crash")
+
+    with patch("harness.coord.worker._dispatch_via_swarm",
+               side_effect=_crash_on_fallback), \
+         patch("harness.coord.worker._run_pytest",
+               return_value={"ran": 0, "passed": 0, "failed": 0,
+                             "skipped": 0, "duration_seconds": 0.0}), \
+         patch("harness.coord.worker.worktree_path",
+               return_value=tmp_path), \
+         patch("harness.coord.worker.write_checkpoint"):
+        run_worker(
+            task, run_dir,
+            engine="swarm/mimo",
+            fallback_engine="swarm/deepseek",
+            project_root=tmp_path,
+        )
+
+    progress_path = run_dir / "checkpoints" / "worker-1.progress.jsonl"
+    events = [
+        json.loads(line) for line in
+        progress_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    event_names = [e.get("event") for e in events]
+    assert "fallback_exception" in event_names, f"missing fallback_exception: {event_names}"
+    exc_event = next(e for e in events if e["event"] == "fallback_exception")
+    assert "RuntimeError" in exc_event["exception"]
+    assert "simulated fallback dispatch crash" in exc_event["exception"]
