@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from harness.coord.checkpoint import Checkpoint, read_checkpoint
-from harness.coord.worker import run_worker, _run_pytest
+from harness.coord.worker import run_worker, _run_pytest, _build_prompt
 from harness.coord.schemas import WorkerTask
 
 
@@ -761,3 +761,57 @@ def test_run_worker_handles_worktree_missing_dispatch_failure(tmp_path: Path) ->
     assert err_path.exists()
     err = json.loads(err_path.read_text(encoding="utf-8"))
     assert err["error_tag"] == "L4.dispatch.E_MISSING_WORKTREE"
+
+
+# ---------------------------------------------------------------------------
+# W5-BB strict-path packet injection
+# ---------------------------------------------------------------------------
+
+def test_build_prompt_omits_strict_paths_section_when_empty() -> None:
+    """No strict_paths → no STRICT PATHS callout in the packet."""
+    task = SimpleNamespace(worker_id="worker-1")
+    step = SimpleNamespace(
+        step_id="s1", kind="edit",
+        instruction="Do a thing.",
+        target_files=["src/foo.py"],
+    )
+    prompt = _build_prompt(task, step, read_set_contents={}, strict_paths=[])
+    assert "STRICT PATHS" not in prompt
+
+
+def test_build_prompt_injects_strict_paths_section_when_overlap() -> None:
+    """W5-BB: when a step's target_files intersect strict_paths, the
+    packet must contain the STRICT PATHS callout listing those paths."""
+    task = SimpleNamespace(worker_id="worker-1")
+    step = SimpleNamespace(
+        step_id="s1", kind="create",
+        instruction="Create the report.",
+        target_files=["coord/operator/report.md"],
+    )
+    prompt = _build_prompt(
+        task, step, read_set_contents={},
+        strict_paths=["coord/operator/report.md", "coord/other.md"],
+    )
+    assert "STRICT PATHS" in prompt
+    assert "coord/operator/report.md" in prompt
+    # The non-overlapping strict path must NOT appear (this step doesn't
+    # own it; another worker will).
+    assert "coord/other.md" not in prompt.split("STRICT PATHS")[1].split(
+        "Context Files"
+    )[0]
+
+
+def test_build_prompt_no_section_when_no_overlap() -> None:
+    """W5-BB: strict_paths declared but none in this step's target_files
+    → don't inject the callout (would be misleading)."""
+    task = SimpleNamespace(worker_id="worker-1")
+    step = SimpleNamespace(
+        step_id="s1", kind="edit",
+        instruction="Touch foo.",
+        target_files=["src/foo.py"],
+    )
+    prompt = _build_prompt(
+        task, step, read_set_contents={},
+        strict_paths=["coord/totally/other.md"],
+    )
+    assert "STRICT PATHS" not in prompt

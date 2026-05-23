@@ -89,6 +89,49 @@ def _new_run_id() -> str:
     return f"{ts}-{salt}"
 
 
+def _extract_strict_paths(spec_text: str) -> list[str]:
+    """Parse a `## Strict Paths` section from the spec markdown.
+
+    W5-BB 2026-05-23: Phase 3 validation showed the worker deviated
+    from a spec's explicit path (asked for ``coord/orchestrator-demo/``,
+    wrote to ``coord/postmortems/``).  When the operator wants
+    deterministic output paths, they declare them in a `## Strict
+    Paths` (or `## STRICT_PATHS`) section as a markdown bullet list:
+
+        ## Strict Paths
+        - coord/orchestrator-demo/2026-05-22T094327Z.md
+        - coord/orchestrator-demo/2026-05-22T094327Z.json
+
+    The planner extracts these and overrides whatever the LLM emits
+    for ``strict_paths``, so the operator's declaration is binding.
+    Returns ``[]`` when no section is present.
+    """
+    # Match the header (case-insensitive, optional underscore variants)
+    header_re = re.compile(
+        r"(?im)^##\s+strict[_\s]*paths\s*$",
+    )
+    m = header_re.search(spec_text)
+    if not m:
+        return []
+    # Slice from end of header to end of section (next `##` header or EOF)
+    section_start = m.end()
+    next_header = re.search(r"(?m)^##\s+", spec_text[section_start:])
+    section_end = (
+        section_start + next_header.start() if next_header else len(spec_text)
+    )
+    section = spec_text[section_start:section_end]
+    # Extract bullet-list items: lines starting with `- ` or `* `
+    paths: list[str] = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m_bullet = re.match(r"^[-*]\s+(.+?)\s*$", stripped)
+        if m_bullet:
+            paths.append(m_bullet.group(1).strip("`\"' "))
+    return paths
+
+
 def _read_repo_tree(root: Path, max_lines: int = 200) -> str:
     """Return a truncated repo file tree for the planner context."""
     lines: list[str] = []
@@ -217,6 +260,11 @@ def plan(
         data["created_at"] = datetime.now(timezone.utc).isoformat()
         data["planner_engine"] = engine if engine != "claude" else "claude"
         data["spec_path"] = str(spec_path)
+        # W5-BB 2026-05-23: operator-declared strict_paths override any
+        # LLM-emitted value.  The spec is the binding source.
+        operator_strict_paths = _extract_strict_paths(spec_text)
+        if operator_strict_paths:
+            data["strict_paths"] = operator_strict_paths
         try:
             return WavePlan.model_validate(data)
         except ValidationError as exc:

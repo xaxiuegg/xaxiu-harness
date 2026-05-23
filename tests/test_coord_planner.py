@@ -11,7 +11,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from harness.coord.planner import _new_run_id, _read_repo_tree, plan, write_plan
+from harness.coord.planner import (
+    _extract_strict_paths,
+    _new_run_id,
+    _read_repo_tree,
+    plan,
+    write_plan,
+)
 from harness.coord.schemas import WavePlan
 
 
@@ -265,3 +271,74 @@ def test_write_plan_atomic(tmp_path: Path) -> None:
     assert restored.run_id == run_id
     # temp file should not linger
     assert not (run_dir / "plan.json.tmp").exists()
+
+
+# ---------------------------------------------------------------------------
+# W5-BB strict-path parsing
+# ---------------------------------------------------------------------------
+
+def test_extract_strict_paths_returns_empty_when_section_missing() -> None:
+    spec = "# Title\n\n## Goal\nDo stuff.\n"
+    assert _extract_strict_paths(spec) == []
+
+
+def test_extract_strict_paths_parses_bullet_list() -> None:
+    spec = (
+        "# Title\n\n"
+        "## Goal\nDo stuff.\n\n"
+        "## Strict Paths\n"
+        "- coord/orchestrator-demo/2026-05-22T094327Z.md\n"
+        "- coord/orchestrator-demo/2026-05-22T094327Z.json\n\n"
+        "## Why\nBecause.\n"
+    )
+    assert _extract_strict_paths(spec) == [
+        "coord/orchestrator-demo/2026-05-22T094327Z.md",
+        "coord/orchestrator-demo/2026-05-22T094327Z.json",
+    ]
+
+
+def test_extract_strict_paths_accepts_underscore_header() -> None:
+    """Operator may write either `Strict Paths` or `STRICT_PATHS`."""
+    spec = (
+        "## STRICT_PATHS\n"
+        "- coord/x.md\n"
+    )
+    assert _extract_strict_paths(spec) == ["coord/x.md"]
+
+
+def test_extract_strict_paths_strips_backticks_and_quotes() -> None:
+    """Operators often wrap paths in `code` or quotes; strip them."""
+    spec = (
+        "## Strict Paths\n"
+        "- `coord/a.md`\n"
+        "- \"coord/b.md\"\n"
+        "- coord/c.md\n"
+    )
+    assert _extract_strict_paths(spec) == [
+        "coord/a.md", "coord/b.md", "coord/c.md",
+    ]
+
+
+def test_plan_strict_paths_override_llm_output(tmp_path: Path) -> None:
+    """W5-BB: operator's spec-declared strict_paths override the LLM's
+    emission of the same field — the spec is the binding source."""
+    spec = tmp_path / "s.md"
+    spec.write_text(
+        "## Goal\nDo it.\n\n"
+        "## Strict Paths\n"
+        "- coord/operator/required.md\n",
+        encoding="utf-8",
+    )
+    plan_data = _valid_plan_dict("20260520T220000-ab12")
+    # LLM emits a different strict_paths value — the planner should
+    # override it with the operator's declaration.
+    plan_data["strict_paths"] = ["llm/whatever.md"]
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        return_value=_make_dispatch_result(json.dumps(plan_data)),
+    ):
+        result = plan(
+            spec, run_id="20260520T220000-ab12",
+            project_root=tmp_path, skip_lint=True,
+        )
+    assert result.strict_paths == ["coord/operator/required.md"]

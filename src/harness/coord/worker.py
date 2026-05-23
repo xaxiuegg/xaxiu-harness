@@ -186,7 +186,10 @@ def _run_pytest(test_set: list[str], cwd: Path, timeout_seconds: int = 300) -> d
     }
 
 
-def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
+def _build_prompt(
+    task_obj, step, read_set_contents: dict[str, str],
+    strict_paths: list[str] | None = None,
+) -> str:
     """Build a dispatch packet prompt for a single step.
 
     W5-K 2026-05-22: stronger output-format pinning.  Path 2 v2 caught
@@ -200,6 +203,12 @@ def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
     at the top of the packet so any engine (MiMo / DeepSeek / Kimi /
     Claude) has the operator's standing decisions, conventions, and
     engine quirks before composing output.  See memory/README.md.
+
+    W5-BB 2026-05-23: when ``strict_paths`` lists operator-declared
+    relative paths intersecting this step's ``target_files``, inject
+    a "MUST be at exact relative path" callout so the engine doesn't
+    exercise judgment on path selection (Phase 3 caught the worker
+    deviating to its own preferred dir).
     """
     from harness.memory import format_for_packet as _memory_packet
 
@@ -212,8 +221,28 @@ def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
         f"# Worker Task: {task_obj.worker_id}",
         f"## Step: {step.step_id} ({step.kind})",
         f"\n{step.instruction}\n",
-        "## Context Files",
     ])
+    # W5-BB strict-path enforcement
+    step_targets = set(getattr(step, "target_files", []) or [])
+    overlap = [p for p in (strict_paths or []) if p in step_targets]
+    if overlap:
+        lines.append("\n## STRICT PATHS — operator-declared, MUST follow")
+        lines.append("")
+        lines.append(
+            "The operator has explicitly required that this step produce "
+            "files at the following exact relative paths.  Do NOT choose "
+            "a different directory, do NOT rename, do NOT add suffixes:"
+        )
+        lines.append("")
+        for p in overlap:
+            lines.append(f"  - {p}")
+        lines.append("")
+        lines.append(
+            "Failure to use these exact paths will fail the worker check "
+            "post-dispatch."
+        )
+        lines.append("")
+    lines.append("## Context Files")
     for path, content in read_set_contents.items():
         lines.append(f"\n### {path}\n```\n{content}\n```\n")
     lines.append("\n## Output Format — STRICT")
@@ -522,6 +551,7 @@ def run_worker(
     fallback_engine: str | None = None,
     resume_from: Path | None = None,
     project_root: Path | None = None,
+    strict_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a worker task and produce checkpoint + deliverable.
 
@@ -532,6 +562,13 @@ def run_worker(
     + DeepSeek are configured as a pair, the chance both drift on the
     same step approaches zero, removing the "only one engine works"
     constraint from production-readiness.
+
+    W5-BB 2026-05-23: ``strict_paths`` (operator-declared in the spec
+    via ``## Strict Paths``) propagates to packet-building so the
+    engine sees the path-enforcement callout.  Auto-loaded from
+    run_dir/plan.json when not explicitly passed; explicit overrides
+    that.  Pre-creates parent directories so the engine just needs to
+    write the file.
     """
     from harness.coord.schemas import WorkerTask
     from harness.engines.dispatcher import dispatch_packet
@@ -539,6 +576,27 @@ def run_worker(
     task_obj = WorkerTask.model_validate(task) if isinstance(task, dict) else task
     repo = project_root or Path.cwd()
     wt_path = worktree_path(run_dir.name, task_obj.worker_id, repo / WORKTREE_ROOT)
+
+    # W5-BB: load strict_paths from plan.json when caller didn't pass them.
+    if strict_paths is None:
+        plan_path = run_dir / "plan.json"
+        if plan_path.exists():
+            try:
+                import json as _json_for_plan
+                plan_data = _json_for_plan.loads(plan_path.read_text(encoding="utf-8"))
+                strict_paths = list(plan_data.get("strict_paths") or [])
+            except (OSError, ValueError):
+                strict_paths = []
+        else:
+            strict_paths = []
+    # Pre-create parent dirs in the worktree so the engine just writes the file.
+    for rel in strict_paths or []:
+        parent = (wt_path / rel).parent
+        if not parent.exists():
+            try:
+                parent.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
 
     checkpoint_path = run_dir / "checkpoints" / f"{task_obj.worker_id}.json"
     ckpt = read_checkpoint(checkpoint_path) if resume_from is None else read_checkpoint(resume_from)
@@ -589,7 +647,9 @@ def run_worker(
         # placeholder).  "create" semantics: SEARCH is empty + REPLACE
         # is the full file content (same as edit's append idiom).
         if step.kind in ("edit", "create") and step.target_files:
-            prompt = _build_prompt(task_obj, step, read_set_contents)
+            prompt = _build_prompt(
+                task_obj, step, read_set_contents, strict_paths=strict_paths,
+            )
             packet_path = repo / "state" / f".tmp_worker_{task_obj.worker_id}_{step.step_id}_{uuid.uuid4().hex}.md"
             packet_path.parent.mkdir(parents=True, exist_ok=True)
             packet_path.write_text(prompt, encoding="utf-8")
@@ -835,17 +895,31 @@ def run_worker(
         files_modified = list(ckpt.files_modified)
 
     tests = _run_pytest(task_obj.test_set, cwd=wt_path)
-    final_state = "completed" if tests["failed"] == 0 else "failed"
+    # W5-BB 2026-05-23: post-validate strict_paths exist in the worktree.
+    # Missing paths flip final_state to failed + emit a structured progress
+    # event so the operator sees exactly which path the worker dropped.
+    strict_missing: list[str] = []
+    for rel in strict_paths or []:
+        if not (wt_path / rel).exists():
+            strict_missing.append(rel)
+    if strict_missing:
+        _append_progress(run_dir, task_obj.worker_id, {
+            "event": "strict_paths_violation",
+            "missing": strict_missing,
+            "declared": list(strict_paths or []),
+        })
+    tests_ok = tests["failed"] == 0 and not strict_missing
+    final_state = "completed" if tests_ok else "failed"
     ckpt = ckpt.model_copy(update={
         "state": final_state,
-        "tests_passed": tests["failed"] == 0,
+        "tests_passed": tests_ok,
         "tests_summary": f"{tests['passed']}p/{tests['failed']}f/{tests['skipped']}s",
         "commit_sha": commit_sha,
     })
     write_checkpoint(checkpoint_path, ckpt)
     _append_progress(run_dir, task_obj.worker_id, {
         "event": "worker_done", "state": final_state,
-        "tests_passed": tests["failed"] == 0,
+        "tests_passed": tests_ok,
     })
 
     # Record into per-engine budget ledger (best-effort, no fail-loud)
@@ -872,7 +946,11 @@ def run_worker(
         "files_modified": files_modified,
         "test_summary": tests,
         "commit_sha": commit_sha,
-        "error_tag": None if final_state == "completed" else "L3.worker.E_TEST_FAILED",
+        "error_tag": (
+            None if final_state == "completed"
+            else ("L3.worker.E_STRICT_PATH_MISSING" if strict_missing
+                  else "L3.worker.E_TEST_FAILED")
+        ),
         "diagnostic": "",
         "tokens_used": total_tokens,
         "cost_usd": total_cost_usd,

@@ -67,6 +67,13 @@ class WavePlan(BaseModel):
     tasks: list[WorkerTask] = Field(min_length=1, max_length=24)
     integration_strategy: Literal["squash", "merge", "rebase"] = "squash"
     notes: str = Field(default="", max_length=2000)
+    # W5-BB 2026-05-23: operator-declared relative paths that the worker
+    # MUST create.  Parsed from a `## Strict Paths` section in the spec
+    # markdown and ALWAYS overridden by the planner (LLM output cannot
+    # drop them).  Empty list = no path enforcement (default behaviour).
+    # Coord layer pre-creates parent dirs + injects packet hints + post-
+    # validates file existence at exact paths.
+    strict_paths: list[str] = Field(default_factory=list, max_length=20)
 
 
 class TestSummary(BaseModel):
