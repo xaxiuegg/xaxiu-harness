@@ -27,6 +27,34 @@ from harness.coord.schemas import (
 from harness.coord.worktree import create_worktree, worker_branch_name
 
 
+def _worker_pid_alive(pid_path: Path) -> bool:
+    """W5-M: read worker pid sentinel + check if process is still alive.
+
+    Returns False when the sentinel is missing, malformed, or points to
+    a pid that's no longer running.  Best-effort — never raises.
+
+    Used by Coordinator.launch_workers to avoid spawning duplicate
+    workers when --watch re-instantiates Coordinator each tick (in-
+    process ``_procs`` map is lost) or when the operator runs multiple
+    `coord run --resume` from different shells.
+    """
+    if not pid_path.exists():
+        return False
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        # os.kill with signal=0 probes liveness without sending a real
+        # signal.  On Windows, this raises OSError if pid is gone.
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
 def _git_branch_exists(branch: str, repo_root: Path) -> bool:
     """Return True if *branch* exists as a local ref in *repo_root*.
 
@@ -139,7 +167,25 @@ class Coordinator:
                 skipped.append(task.worker_id)
                 continue
             if task.worker_id in self._procs and self._procs[task.worker_id].poll() is None:
-                continue  # already running
+                continue  # already running (in-process tracking)
+            # W5-M 2026-05-23: disk-based PID sentinel.
+            # When `coord run --watch` re-instantiates Coordinator each
+            # tick (or operator runs multiple `coord run --resume` from
+            # different shells), in-process `_procs` tracking misses
+            # already-running workers and spawns duplicates that race
+            # on the same worktree.  Each worker reads the same packet,
+            # both dispatch to the engine, one applies the edit first,
+            # the other finds the SEARCH text no longer matches and
+            # W4-A misfires as silent_no_op.
+            #
+            # Disk sentinel: read worker-X.pid before spawn.  If pid
+            # exists AND process is alive, skip.  When worker exits
+            # (success or fail), the launch path here doesn't need to
+            # clean the file — read_checkpoint() will see state in
+            # (completed, failed) on the NEXT tick and trip the
+            # already-finished guard above.
+            if _worker_pid_alive(checkpoints_dir / f"{task.worker_id}.pid"):
+                continue
             ckpt = read_checkpoint(checkpoints_dir / f"{task.worker_id}.json")
             if ckpt and ckpt.state in ("completed", "failed"):
                 continue  # already finished
@@ -222,6 +268,14 @@ class Coordinator:
             # The Popen wrapper retains its own dup of the fd; ours can close.
             log_fh.close()
             self._procs[task.worker_id] = proc
+            # W5-M: write pid sentinel for cross-instance/cross-process
+            # duplicate-spawn detection (see _worker_pid_alive).
+            try:
+                pid_path = checkpoints_dir / f"{task.worker_id}.pid"
+                pid_path.parent.mkdir(parents=True, exist_ok=True)
+                pid_path.write_text(str(proc.pid), encoding="utf-8")
+            except OSError:
+                pass  # sentinel is best-effort; the worker still runs
             launched.append(task.worker_id)
             in_flight += 1
 

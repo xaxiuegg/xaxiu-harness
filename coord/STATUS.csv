@@ -164,4 +164,15 @@ W5-F,Wave 5,"Cross-engine source-laden verification: budget bug diagnosed, DeepS
 W5-I,Wave 5,Path 3 observability: per-tick worker progress + cost + ETA in coord run --watch,shipped,Claude,~30 min,2026-05-22,src/harness/coord/telemetry.py + 12 unit tests; watch loop prints [Ns] w1(2/3 done) cost=$X eta=~Ym per tick
 W5-J,Wave 5,CRLF-tolerant FILE/REPLACE: byte-exact retry in normalised LF space,shipped,Claude,~30 min,2026-05-22,Path 2 caught DeepSeek perfect FILE/REPLACE failing on CRLF; _apply_file_edits + _match_line_endings + write_bytes; +7 tests
 W5-K,Wave 5,Strengthen FILE/REPLACE prompt to prevent prose+markdown drift,shipped,Claude,~10 min,2026-05-22,Path 2 v2 caught DeepSeek emitting prose+markdown instead of FILE/REPLACE; tightened prompt with explicit no-prose / no-markdown / no-full-file-content rules
-W5-PILOT,Wave 5,Real-money DeepSeek pilot: caught W5-J + W5-K bugs in 2 attempts,in_progress,Claude,~90 min so far,2026-05-22,v1: CRLF bug. v2: prompt drift. v3 in flight after both fixes.
+2026-05-22T171153Z,Dispatch,Dispatch 2026-05-22T171153Z,shipped,Claude,-,2026-05-22,task=844b14f3584c4043a59049b945264b71; outcome=success
+2026-05-22T181153Z,Dispatch,Dispatch 2026-05-22T181153Z,shipped,Claude,-,2026-05-22,task=20e12ac784bc4f9e9f87c7039de77fdb; outcome=success
+2026-05-22T191153Z,Dispatch,Dispatch 2026-05-22T191153Z,shipped,Claude,-,2026-05-22,task=6569949494e245ca9ada20346419b58c; outcome=success
+2026-05-22T201153Z,Dispatch,Dispatch 2026-05-22T201153Z,shipped,Claude,-,2026-05-22,task=76916276ce0f4c4eafd118f049974aee; outcome=success
+2026-05-22T211153Z,Dispatch,Dispatch 2026-05-22T211153Z,shipped,Claude,-,2026-05-22,task=7e83f32e536c49918dddc0cae7eec8ab; outcome=success
+2026-05-22T221153Z,Dispatch,Dispatch 2026-05-22T221153Z,shipped,Claude,-,2026-05-22,task=954534bae12f456d9d6de70f7ad771f5; outcome=success
+2026-05-22T231153Z,Dispatch,Dispatch 2026-05-22T231153Z,shipped,Claude,-,2026-05-22,task=7565e7a82476432890c830ef56c0cdf7; outcome=success
+2026-05-23T001153Z,Dispatch,Dispatch 2026-05-23T001153Z,shipped,Claude,-,2026-05-23,task=71d79b03403c4597a69fadd654a82424; outcome=success
+2026-05-23T011153Z,Dispatch,Dispatch 2026-05-23T011153Z,shipped,Claude,-,2026-05-23,task=c1fc6583e21b4c13a8f0674592b68b5d; outcome=success
+2026-05-23T021153Z,Dispatch,Dispatch 2026-05-23T021153Z,shipped,Claude,-,2026-05-23,task=9c1d3e1b0f9c478cb9d6d6c58424075d; outcome=success
+W5-M,Wave 5,PID-sentinel prevents duplicate worker spawn across coordinator instances,shipped,Claude,~25 min,2026-05-23,"Path 2 caught worker race: coord run --watch re-instantiated Coordinator each tick, lost in-process _procs map, spawned duplicate workers per tick. Disk-based <worker_id>.pid + os.kill probe prevents."
+W5-PILOT,Wave 5,Real-engine Path 2 pilot SUCCEEDED on attempt 6 with MiMo Pro,shipped,Claude,~2h total,2026-05-23,"Caught 5 ship-blockers (W5-J/K/L/M + v4-pro routing) in 6 attempts. One successful pilot at /usr/bin/bash.00 cost, 50s wall time. Deliverable: CHANGELOG v0.6 section landed cleanly via MiMo Pro."
