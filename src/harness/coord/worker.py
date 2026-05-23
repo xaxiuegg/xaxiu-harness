@@ -573,18 +573,21 @@ def run_worker(
                             read_set_contents[rel_path] = mod_file.read_text(encoding="utf-8")
 
             # W5-O 2026-05-23: engine fallback.
-            # If primary engine returned a response but produced 0
-            # applicable edits (e.g. DeepSeek drifted to prose+markdown),
-            # retry with fallback_engine.  Removes the "only one engine
-            # works" production-readiness constraint that the operator
-            # surfaced.  Skipped when primary already produced edits OR
-            # when no fallback is configured OR when primary failed
-            # outright (network/HTTP error — fallback won't help).
+            # If primary engine produced 0 applicable edits — whether
+            # because it drifted (success=True but bad protocol) or
+            # because it failed outright (success=False, network/crash)
+            # — retry with fallback_engine.  Removes the "only one engine
+            # works" production-readiness constraint.  Skipped only when
+            # primary already produced edits OR no fallback is configured.
+            #
+            # Fix iteration (Pilot F): originally gated on
+            # `result.success and result.text.strip()` which skipped
+            # fallback when primary failed outright.  Kimi-CLI sometimes
+            # exits non-zero before producing FILE/REPLACE — that's
+            # exactly when fallback should rescue the run.
             if (not step_modified
                     and fallback_engine
-                    and fallback_engine != engine
-                    and result.success
-                    and result.text.strip()):
+                    and fallback_engine != engine):
                 _heartbeat_touch(run_dir, task_obj.worker_id)
                 fb_packet_path = repo / "state" / (
                     f".tmp_worker_{task_obj.worker_id}_{step.step_id}_fb_"
@@ -607,7 +610,16 @@ def run_worker(
                         fb_edits = _parse_file_edits(fb_result.text)
                         if fb_edits:
                             step_modified = _apply_file_edits(fb_edits, wt_path)
-                            if step_modified:
+                        else:
+                            # W5-P fallback path: agentic engine may have
+                            # edited in-place via tools.  Check worktree.
+                            step_modified = _detect_inplace_edits(wt_path)
+                    else:
+                        # Even on fallback dispatch failure, check
+                        # worktree — agentic engines may have applied
+                        # edits before the failure.
+                        step_modified = _detect_inplace_edits(wt_path)
+                    if step_modified:
                                 engine_used = fallback_engine
                                 files_modified = list(set(
                                     files_modified + step_modified
