@@ -44,19 +44,21 @@ Operator turn-1 objective from the prior session that drifted. Closes the PM + S
 - STATUS.csv row `W6-A1-ENV-DOCTOR-E2E` marked shipped with all 3 run IDs
 - Commit pushed
 
-#### A1.1 — Fix worktree-branching from `depends_on` parent (~2 hr) [DISCOVERED DURING A1]
+#### A1.1 — Investigate worktree-branching from `depends_on` parent [DISCOVERED + INVESTIGATED]
 
-Found via empirical W6-A1 run 1: worker-2 ran in a worktree that did NOT inherit worker-1's commits, despite a `depends_on=["worker-1"]` declaration in the plan. STATUS row D5 ("Worktree branches from depends_on parent") was marked shipped but is empirically broken.
+**Outcome**: D5 verified working. Initial diagnosis was wrong.
 
-**Steps**:
-1. Add a diagnostic print or progress event when a worktree is created — log the parent base SHA
-2. Investigate `src/harness/coord/worktree.py::create_worktree` and the call site in `coord/coordinator.py`
-3. Fix so when a task has `depends_on=[X]`, its worktree is branched FROM X's completed worktree (not from master)
-4. Add a regression test that runs a multi-worker plan with dependencies, asserts the dependent worker's worktree contains the parent's edits
+Empirical evidence from `runs/20260523T142354-79ed`:
+- worker-2's branch log shows worker-1's commit `ec7fc51` in its history
+- Re-running worker-2's tests in its still-existing worktree shows 22/22 pass
+- The 3/22 test failures the worker reported at run-time are not reproducible
 
-**Acceptance**:
-- Multi-worker spec with `depends_on` produces a green run (worker-2's tests see worker-1's source changes)
-- Regression test in `tests/test_coord_worktree.py` reproduces the bug + asserts fix
+The actual issue was spec-interpretation drift between independent workers (worker-1 used short labels `KIMI:SET` per the spec example; worker-2's tests expected full names `KIMI_API_KEY:SET`). That's a planner-level concern, not a worktree-branching concern.
+
+**Acceptance** (revised):
+- D5 confirmed working by independent re-execution of worker-2's tests in its worktree
+- No code change needed for W6-A1.1
+- Multi-worker spec-interpretation drift queued as Wave 7 candidate
 
 #### A1.2 — Progress events for fallback attempts (~30 min) [DISCOVERED DURING A1]
 
