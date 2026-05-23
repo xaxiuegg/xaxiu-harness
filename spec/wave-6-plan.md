@@ -44,7 +44,7 @@ Operator turn-1 objective from the prior session that drifted. Closes the PM + S
 - STATUS.csv row `W6-A1-ENV-DOCTOR-E2E` marked shipped with all 3 run IDs
 - Commit pushed
 
-#### A1.1 — Investigate worktree-branching from `depends_on` parent [DISCOVERED + INVESTIGATED]
+#### A1-1 — Investigate worktree-branching from `depends_on` parent [DISCOVERED + INVESTIGATED]
 
 **Outcome**: D5 verified working. Initial diagnosis was wrong.
 
@@ -57,10 +57,10 @@ The actual issue was spec-interpretation drift between independent workers (work
 
 **Acceptance** (revised):
 - D5 confirmed working by independent re-execution of worker-2's tests in its worktree
-- No code change needed for W6-A1.1
+- No code change needed for W6-A1-1
 - Multi-worker spec-interpretation drift queued as Wave 7 candidate
 
-#### A1.2 — Progress events for fallback attempts (~30 min) [DISCOVERED DURING A1]
+#### A1-2 — Progress events for fallback attempts (~30 min) [DISCOVERED DURING A1]
 
 Found during W6-A1 run 2: when the primary worker engine returns 0 edits, `worker.py:767-815` attempts a fallback dispatch — but no progress events log the attempt. Operators see only the final `step_engine_used` event with `engine_used=<primary>` even when fallback ran (and silently also failed).
 
