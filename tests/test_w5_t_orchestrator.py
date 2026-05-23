@@ -88,6 +88,55 @@ def test_queue_execute_help() -> None:
     assert "--no-merge" in result.output
 
 
+def test_queue_execute_processes_pending_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-U regression guard: exercise the subprocess.run codepath with
+    a real spec in the queue.  This caught a NameError where subprocess
+    was referenced inside queue_execute_cmd but not imported at module
+    top (the bug was invisible to test_queue_execute_empty because that
+    test short-circuits before reaching subprocess.run)."""
+    import subprocess as _subprocess  # noqa: F401  — proves import wiring
+
+    monkeypatch.chdir(tmp_path)
+    auto = tmp_path / "spec" / "auto"
+    auto.mkdir(parents=True)
+    spec = auto / "test-spec.md"
+    spec.write_text("# SPEC-ID: test\n\n## Goal\nDo a thing.\n", encoding="utf-8")
+
+    # Mock subprocess.run so we don't actually fork harness subprocesses.
+    class _MockProc:
+        def __init__(self, stdout: str, returncode: int = 0):
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = returncode
+
+    calls: list[list[str]] = []
+
+    def _mock_run(args, **kwargs):
+        calls.append(args)
+        # Simulate `coord plan` output that the parser can extract a
+        # run-id from.
+        if "plan" in args:
+            rid = "test-run-123"
+            (tmp_path / "runs" / rid).mkdir(parents=True, exist_ok=True)
+            return _MockProc(stdout=f"plan: runs/{rid}/plan.json")
+        # `coord run` or `coord integrate` — return success.
+        return _MockProc(stdout="ok")
+
+    monkeypatch.setattr("subprocess.run", _mock_run)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["queue", "execute", "--once", "--no-merge"])
+    # The CliRunner SystemExit is captured; exit_code reflects sys.exit(0).
+    assert result.exit_code == 0, f"output={result.output}\nexception={result.exception}"
+    # Spec should have been moved to spec/auto/done/
+    assert not spec.exists(), "Spec should have moved to done/"
+    assert (auto / "done" / "test-spec.md").exists()
+    # At least the plan call should have been made.
+    assert any("plan" in c for c in calls), f"calls={calls}"
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator module — dry-run path
 # ---------------------------------------------------------------------------
