@@ -77,12 +77,16 @@ def _patch_abstract(monkeypatch: pytest.MonkeyPatch, cls: type) -> None:
 
 
 def test_deepseek_dispatch_populates_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W5-MM: DeepSeek now streams.  Mock SSE body with usage chunk
+    (standard OpenAI 'data: <json>' format)."""
     _patch_abstract(monkeypatch, DeepSeekConcrete)
-    body = {
-        "choices": [{"message": {"content": "ok"}}],
-        "usage": {"prompt_tokens": 50, "completion_tokens": 100},
-    }
-    _swap_httpx(monkeypatch, lambda req: httpx.Response(200, json=body))
+    chunks = [
+        'data: {"choices":[{"delta":{"content":"ok"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":50,"completion_tokens":100}}',
+        'data: [DONE]',
+    ]
+    sse_body = "\n\n".join(chunks).encode("utf-8")
+    _swap_httpx(monkeypatch, lambda req: httpx.Response(200, content=sse_body))
     eng = DeepSeekConcrete("ds-key")
     resp = eng.dispatch("hello", "deepseek-chat", {})
     assert resp.success is True
@@ -139,10 +143,17 @@ def test_anthropic_dispatch_populates_tokens(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_dispatch_no_usage_block_defaults_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    """API that omits `usage` shouldn't crash — just falls back to 0/0."""
+    """W5-MM: SSE stream without a `usage` chunk → tokens_in/out fall
+    back to 0 but the dispatch still succeeds (response had valid
+    content chunks + finish_reason)."""
     _patch_abstract(monkeypatch, DeepSeekConcrete)
-    body = {"choices": [{"message": {"content": "no-usage-block"}}]}
-    _swap_httpx(monkeypatch, lambda req: httpx.Response(200, json=body))
+    chunks = [
+        'data: {"choices":[{"delta":{"content":"no-usage-block"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}]}',
+        'data: [DONE]',
+    ]
+    sse_body = "\n\n".join(chunks).encode("utf-8")
+    _swap_httpx(monkeypatch, lambda req: httpx.Response(200, content=sse_body))
     eng = DeepSeekConcrete("ds-key")
     resp = eng.dispatch("hello", "deepseek-chat", {})
     assert resp.success is True

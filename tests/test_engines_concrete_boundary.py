@@ -101,13 +101,22 @@ DEEPSEEK_JSON_OK = {"choices": [{"message": {"content": "deepseek-ok"}}]}
 def test_deepseek_success(
     monkeypatch: pytest.MonkeyPatch, deepseek_engine: DeepSeekConcrete
 ) -> None:
+    """W5-MM: DeepSeek now streams (SSE).  Probe measured 4× total
+    latency improvement (10.6s → 2.8s) and 13× TTFB improvement."""
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["headers"] = dict(request.headers)
         captured["body"] = json.loads(request.content)
-        return httpx.Response(200, json=DEEPSEEK_JSON_OK)
+        # Return SSE-streaming response (standard OpenAI "data: " format
+        # since DeepSeek emits the spec-compliant variant).
+        sse = (
+            'data: {"choices":[{"delta":{"content":"deepseek-ok"}}]}\n\n'
+            'data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n'
+            'data: [DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
 
     monkeypatch.setattr(
         httpx, "Client", lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(transport=httpx.MockTransport(handler))
@@ -124,6 +133,8 @@ def test_deepseek_success(
     assert captured["body"]["model"] == "deepseek-chat"
     assert captured["body"]["messages"] == [{"role": "user", "content": "hello"}]
     assert "temperature" in captured["body"]
+    # W5-MM: stream=true is always set for DeepSeek
+    assert captured["body"]["stream"] is True
 
 
 def test_deepseek_401(
@@ -203,6 +214,8 @@ def test_deepseek_timeout(
 def test_deepseek_malformed_json(
     monkeypatch: pytest.MonkeyPatch, deepseek_engine: DeepSeekConcrete
 ) -> None:
+    """W5-MM: streaming response with no parseable SSE chunks → error
+    `parse_error_no_chunks` (same diagnostic as Kimi's W5-V path)."""
     transport = _mock_transport(status_code=200, text_body="not json")
     monkeypatch.setattr(
         httpx, "Client", lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(transport=transport)
@@ -211,7 +224,7 @@ def test_deepseek_malformed_json(
     resp = deepseek_engine.dispatch("hello", "deepseek-chat", {})
 
     assert resp.success is False
-    assert resp.error == "internal"
+    assert resp.error == "parse_error_no_chunks"
 
 
 # ---------------------------------------------------------------------------

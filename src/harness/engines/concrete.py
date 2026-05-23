@@ -191,67 +191,100 @@ class DeepSeekConcrete(Engine):
         model: str,
         extra_args: Optional[dict[str, Any]] = None,
     ) -> EngineResponse:
+        # W5-MM 2026-05-23: stream=true gives DeepSeek 4× faster total
+        # latency (10.6s → 2.8s) and 13× faster TTFB (10.6s → 0.8s) on
+        # deepseek-v4-flash, measured via scripts/probe_deepseek_streaming.py.
+        # Same SSE parsing as Kimi (W5-V): accept both "data: " and
+        # "data:" prefix variants, break on [DONE], aggregate content
+        # chunks + usage.
         extra = extra_args or {}
+        payload = self._build_payload(packet_content, model, extra)
+        payload["stream"] = True  # W5-MM: always stream DeepSeek
+
+        url = "https://api.deepseek.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "User-Agent": _make_user_agent(),
+        }
 
         start = time.monotonic()
+        content_chunks: list[str] = []
+        usage_info: dict | None = None
+        finish_reason: str = ""
+
         try:
-            with httpx.Client(
-                verify=True,
-                timeout=_DEFAULT_TIMEOUT,
-            ) as client:
-                payload = self._build_payload(packet_content, model, extra)
-                response = client.post(
-                    "https://api.deepseek.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "User-Agent": _make_user_agent(),
-                    },
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                text = _extract_chat_text(data)
-                tokens_in, tokens_out = _extract_openai_usage(data)
-                latency_ms = int((time.monotonic() - start) * 1000)
+            with httpx.Client(verify=True, timeout=_DEFAULT_TIMEOUT) as client:
+                with client.stream("POST", url, headers=headers, json=payload) as r:
+                    if r.status_code != 200:
+                        latency_ms = int((time.monotonic() - start) * 1000)
+                        return EngineResponse(
+                            success=False, text="", latency_ms=latency_ms,
+                            error=f"HTTP {r.status_code}",
+                        )
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        # W5-V/W5-MM: handle both standard "data: " and
+                        # no-space "data:" SSE prefixes.
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                        elif line.startswith("data:"):
+                            data_str = line[5:]
+                        else:
+                            continue
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except (ValueError, json.JSONDecodeError):
+                            continue
+                        choices = chunk.get("choices") or []
+                        if choices:
+                            delta = choices[0].get("delta") or {}
+                            if delta.get("content"):
+                                content_chunks.append(delta["content"])
+                            fr = choices[0].get("finish_reason")
+                            if fr:
+                                finish_reason = fr
+                        if chunk.get("usage"):
+                            usage_info = chunk["usage"]
+            latency_ms = int((time.monotonic() - start) * 1000)
+            text = "".join(content_chunks)
+            tokens_in = int((usage_info or {}).get("prompt_tokens", 0))
+            tokens_out = int((usage_info or {}).get("completion_tokens", 0))
+            # Empty body w/ no usage block → structurally invalid response
+            parsed_anything = (
+                bool(content_chunks) or usage_info is not None or bool(finish_reason)
+            )
+            if not parsed_anything:
                 return EngineResponse(
-                    success=True,
-                    text=text,
-                    latency_ms=latency_ms,
-                    error=None,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
+                    success=False, text="", latency_ms=latency_ms,
+                    error="parse_error_no_chunks",
                 )
+            return EngineResponse(
+                success=True, text=text, latency_ms=latency_ms,
+                error=None, tokens_in=tokens_in, tokens_out=tokens_out,
+            )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
+                success=False, text="", latency_ms=latency_ms,
                 error=f"HTTP {e.response.status_code}",
             )
         except httpx.TimeoutException:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="timeout",
+                success=False, text="", latency_ms=latency_ms, error="timeout",
             )
         except httpx.ConnectError:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="network",
+                success=False, text="", latency_ms=latency_ms, error="network",
             )
         except Exception:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="internal",
+                success=False, text="", latency_ms=latency_ms, error="internal",
             )
 
     @staticmethod
