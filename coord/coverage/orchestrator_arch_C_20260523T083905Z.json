@@ -1,0 +1,14 @@
+{
+  "arch": "C",
+  "started_at": "2026-05-23T08:39:05.242465+00:00",
+  "elapsed_s": 18.2,
+  "todo_id": "2026-05-22T094327Z",
+  "todo_title": "Dispatch 2026-05-22T094327Z",
+  "spec_path": "spec\\auto\\auto-2026-05-22t094327z.md",
+  "spec_lines": 19,
+  "composer_engine": "mimo/mimo-v2.5-pro (primary)",
+  "composer_cost_usd": 0.0,
+  "executed": false,
+  "execution_outcome": "skipped",
+  "notes": "picked TODO id=2026-05-22T094327Z status=in_progress; composed spec via mimo/mimo-v2.5-pro (primary) (19 lines, $0.0000); execute=False, spec composed but not run"
+}

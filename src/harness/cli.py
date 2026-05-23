@@ -605,6 +605,260 @@ def dashboard_serve(port: int, host: str) -> None:
     serve(host=host, port=port)
 
 
+@cli.group(name="queue")
+def queue_group() -> None:
+    """W5-U Path β: burst-composition spec queue (Claude composes, autonomous executor)."""
+
+
+@queue_group.command(name="list")
+def queue_list_cmd() -> None:
+    """List pending specs in spec/auto/ (the queue)."""
+    queue_dir = Path("spec/auto")
+    done_dir = queue_dir / "done"
+    if not queue_dir.exists():
+        click.echo("(spec/auto/ does not exist; no queued specs)")
+        sys.exit(0)
+    pending = sorted(p for p in queue_dir.glob("*.md") if p.is_file())
+    done = sorted(done_dir.glob("*.md")) if done_dir.exists() else []
+    click.echo(f"pending: {len(pending)}")
+    for p in pending:
+        click.echo(f"  - {p.name}")
+    click.echo(f"\ndone: {len(done)}")
+    for p in done[-5:]:
+        click.echo(f"  - {p.name}")
+    if len(done) > 5:
+        click.echo(f"  ... +{len(done) - 5} more")
+    sys.exit(0)
+
+
+@queue_group.command(name="execute")
+@click.option("--once", is_flag=True, help="Process a single spec and exit.")
+@click.option("--max", "max_specs", type=int, default=None,
+              help="Cap on specs processed (default: all pending).")
+@click.option("--engine", default="swarm/mimo",
+              help="Worker engine (default swarm/mimo).")
+@click.option("--fallback-engine", default="swarm/deepseek",
+              help="Worker fallback engine.")
+@click.option("--no-merge", is_flag=True,
+              help="Run validation only; don't merge to master.")
+def queue_execute_cmd(once: bool, max_specs: int | None,
+                      engine: str, fallback_engine: str,
+                      no_merge: bool) -> None:
+    """Process pending specs from spec/auto/, moving each to spec/auto/done/.
+
+    Default flow per cycle:
+      1. Pop oldest spec from spec/auto/
+      2. coord plan + coord run --watch (validate; merge-policy-driven)
+      3. If worker.state=completed + tests_passed: coord integrate --commit
+      4. Move spec file to spec/auto/done/
+      5. Continue to next spec
+
+    Safe to kill mid-cycle: W5-M PID sentinel prevents duplicate worker
+    spawn on resume.
+    """
+    queue_dir = Path("spec/auto")
+    done_dir = queue_dir / "done"
+    done_dir.mkdir(parents=True, exist_ok=True)
+    pending = sorted(p for p in queue_dir.glob("*.md") if p.is_file())
+    if not pending:
+        click.echo("Queue empty.")
+        sys.exit(0)
+
+    limit = 1 if once else (max_specs or len(pending))
+    processed = 0
+    completed_count = 0
+    merged_count = 0
+    for spec_path in pending[:limit]:
+        click.echo(f"\n{'='*60}\n=== Processing: {spec_path.name} ===\n{'='*60}")
+        # Plan
+        plan_proc = subprocess.run(
+            [sys.executable, "-m", "harness", "coord", "plan",
+             "--spec", str(spec_path), "--engine", "claude"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if plan_proc.returncode != 0:
+            click.echo(f"PLAN FAILED: {plan_proc.stderr[:200]}", err=True)
+            processed += 1
+            continue
+        rid = None
+        for line in plan_proc.stdout.splitlines():
+            if "plan:" in line and "runs" in line:
+                rid = line.split("runs")[-1].lstrip("\\/").split("\\")[0].split("/")[0]
+                break
+        if not rid:
+            click.echo(f"NO RUN-ID parsed from plan output", err=True)
+            processed += 1
+            continue
+
+        # Run --no-merge first (validates)
+        run_cmd = [
+            sys.executable, "-m", "harness", "coord", "run",
+            "--spec", str(spec_path), "--run-id", rid,
+            "--engine", engine, "--proxy", "off",
+            "--watch", "--watch-interval", "5",
+            "--watch-max-seconds", "600", "--no-merge",
+        ]
+        if fallback_engine:
+            run_cmd.extend(["--fallback-engine", fallback_engine])
+        run_proc = subprocess.run(run_cmd, timeout=900,
+                                   capture_output=True, text=True)
+
+        # Inspect worker outcomes
+        run_dir = Path("runs") / rid
+        ckpt_dir = run_dir / "checkpoints"
+        all_completed = True
+        all_tests_passed = True
+        worker_count = 0
+        if ckpt_dir.exists():
+            for ckpt_path in sorted(ckpt_dir.glob("worker-*.json")):
+                worker_count += 1
+                try:
+                    ck = json.loads(ckpt_path.read_text(encoding="utf-8"))
+                    if ck.get("state") != "completed":
+                        all_completed = False
+                    if not ck.get("tests_passed", False):
+                        all_tests_passed = False
+                except Exception:
+                    all_completed = False
+                    all_tests_passed = False
+        if worker_count == 0:
+            all_completed = False
+
+        click.echo(f"  run {rid}: workers={worker_count} "
+                   f"all_completed={all_completed} tests_passed={all_tests_passed}")
+
+        # Conditional merge per operator policy
+        should_merge = (not no_merge) and all_completed and all_tests_passed
+        merged_now = False
+        if should_merge:
+            integrate_proc = subprocess.run(
+                [sys.executable, "-m", "harness", "coord", "integrate",
+                 "--run-id", rid, "--commit"],
+                capture_output=True, text=True, timeout=900,
+            )
+            merged_now = integrate_proc.returncode == 0
+            click.echo(f"  integrate: rc={integrate_proc.returncode} "
+                       f"merged={merged_now}")
+
+        # Move spec to done/
+        try:
+            dest = done_dir / spec_path.name
+            spec_path.rename(dest)
+            click.echo(f"  moved spec -> {dest}")
+        except OSError as exc:
+            click.echo(f"  failed to move spec: {exc}", err=True)
+
+        if all_completed:
+            completed_count += 1
+        if merged_now:
+            merged_count += 1
+        processed += 1
+
+    click.echo(f"\nQUEUE DONE: processed={processed}, "
+               f"completed={completed_count}, merged={merged_count}")
+    sys.exit(0)
+
+
+@cli.group(name="orchestrator")
+def orchestrator_group() -> None:
+    """W5-T: autonomous orchestrator (Path α: MiMo→DeepSeek→template chain)."""
+
+
+@orchestrator_group.command(name="start")
+@click.option("--once", is_flag=True, help="Run a single cycle and exit.")
+@click.option("--max-cycles", type=int, default=None,
+              help="Cap on iterations (default: until backlog empty).")
+@click.option("--interval-seconds", type=int, default=0,
+              help="Sleep between cycles (cron-style cadence).")
+@click.option("--dry-run", is_flag=True,
+              help="Compose specs but don't fire coord run.")
+def orchestrator_start(once: bool, max_cycles: int | None,
+                       interval_seconds: int, dry_run: bool) -> None:
+    """Run the autonomous orchestrator.
+
+    Default: runs cycles until coord/STATUS.csv backlog is empty.
+    Each cycle picks the next open TODO, composes a spec via the
+    MiMo→DeepSeek→template chain, dispatches to coord run, and
+    conditionally merges based on tests-passed status.
+
+    Cycles are independent; safe to kill mid-cycle (worker subprocess
+    is detached + W5-M pid sentinel prevents duplicate spawn on resume).
+    """
+    from harness.orchestrator import run_loop, run_one_cycle
+
+    if once:
+        outcome = run_one_cycle(1, dry_run=dry_run)
+        click.echo(f"\nFINAL: cycle {outcome.cycle} todo={outcome.todo_id} "
+                   f"outcome={outcome.worker_outcome} merged={outcome.merged}")
+        sys.exit(0 if outcome.worker_outcome in ("completed", "skipped") else 1)
+
+    outcomes = run_loop(
+        max_cycles=max_cycles,
+        interval_seconds=interval_seconds,
+        dry_run=dry_run,
+    )
+    total_cost = sum(o.composer_cost_usd for o in outcomes)
+    completed = sum(1 for o in outcomes if o.worker_outcome == "completed")
+    click.echo(f"\nLOOP DONE: {len(outcomes)} cycles, {completed} completed, "
+               f"total compose cost=${total_cost:.4f}")
+    sys.exit(0)
+
+
+@orchestrator_group.command(name="install-scheduler")
+@click.option("--interval-minutes", type=int, default=30,
+              help="How often Task Scheduler fires the orchestrator (default 30 min).")
+@click.option("--task-name", default="xaxiu-harness-orchestrator",
+              help="Windows Task Scheduler task name.")
+def orchestrator_install_scheduler(interval_minutes: int, task_name: str) -> None:
+    """Install a Windows Task Scheduler entry to run the orchestrator.
+
+    Creates a task that runs `harness orchestrator start --once` every
+    `interval_minutes`.  Operator must approve the schedule + run
+    permissions (Task Scheduler will prompt).
+
+    To remove: `schtasks /Delete /TN <task-name> /F` from PowerShell.
+    """
+    import shutil
+    import os
+
+    repo_root = Path.cwd()
+    python_exe = sys.executable
+    # Build the command Task Scheduler will run.  We need to set
+    # PYTHONPATH=src + cwd to repo_root.
+    cmd = (
+        f'cmd /c "cd /d {repo_root} && '
+        f'set PYTHONPATH=src && '
+        f'\"{python_exe}\" -m harness orchestrator start --once"'
+    )
+    schtasks_cmd = [
+        "schtasks", "/Create",
+        "/TN", task_name,
+        "/SC", "MINUTE",
+        "/MO", str(interval_minutes),
+        "/TR", cmd,
+        "/F",
+    ]
+    click.echo(f"Installing Task Scheduler entry '{task_name}'...")
+    click.echo(f"  Schedule: every {interval_minutes} minutes")
+    click.echo(f"  Command: {cmd}")
+    if shutil.which("schtasks") is None:
+        click.echo("ERROR: schtasks not on PATH (need Windows)", err=True)
+        sys.exit(1)
+    try:
+        result = subprocess.run(schtasks_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            click.echo(f"\n✓ Task installed.  To remove: "
+                       f"schtasks /Delete /TN {task_name} /F")
+        else:
+            click.echo(f"schtasks FAILED rc={result.returncode}: "
+                       f"{result.stderr}", err=True)
+            sys.exit(1)
+    except Exception as exc:
+        click.echo(f"ERROR invoking schtasks: {exc}", err=True)
+        sys.exit(1)
+    sys.exit(0)
+
+
 @cli.group(name="memory")
 def memory_group() -> None:
     """W5-S: engine-agnostic operator memory (memory/*.md repo dir)."""
