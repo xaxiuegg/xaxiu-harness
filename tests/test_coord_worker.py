@@ -889,6 +889,135 @@ def test_fallback_emits_progress_events_when_primary_returns_empty(
     assert attempted["fallback_engine"] == "swarm/deepseek"
 
 
+def test_existing_write_set_files_preloaded_into_prompt_context(
+    tmp_path: Path,
+) -> None:
+    """W6-A1-3: planners frequently emit read_set=[] for tasks that edit
+    existing files (they treat 'write' as implying 'no read needed').  The
+    worker must pre-load existing write_set files into the prompt context
+    so the engine can produce FILE/REPLACE blocks with matching anchors.
+    Without this, engines either silent_no_op (no anchors to match) or
+    skip the file (W6-A1 run4: kimi-api edited only tests/test_doctor.py
+    because src/harness/doctor.py wasn't in context)."""
+    run_dir = tmp_path / "runs" / "20260523T000000-w6a13"
+    run_dir.mkdir(parents=True)
+
+    # Existing file on disk in the repo root with distinctive content
+    src_file = tmp_path / "src" / "existing.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text(
+        "SENTINEL_EXISTING_FUNCTION_BODY\ndef existing():\n    return 42\n",
+        encoding="utf-8",
+    )
+
+    # Task with read_set=[] but write_set names the existing file.
+    task = {
+        "worker_id": "worker-1",
+        "title": "Edit existing file",
+        "description": "Add a helper",
+        "read_set": [],
+        "write_set": ["src/existing.py"],
+        "test_set": [],
+        "depends_on": [],
+        "steps": [
+            {
+                "step_id": "s1",
+                "kind": "edit",
+                "instruction": "Add a helper function",
+                "target_files": ["src/existing.py"],
+                "expected_diff_lines": 5,
+                "required_tests": [],
+            },
+        ],
+        "estimated_kimi_minutes": 1,
+        "max_context_tokens": 30000,
+    }
+
+    captured: dict = {}
+
+    def _capture_packet(packet_path: Path, engine, wt_path):
+        captured["prompt"] = Path(packet_path).read_text(encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            text=(
+                "FILE: src/existing.py\n"
+                "<<<<<<< SEARCH\n"
+                "=======\n"
+                "# helper appended\n"
+                ">>>>>>> REPLACE\n"
+            ),
+            error=None, tokens_used=0, cost_usd=0.0,
+        )
+
+    with patch("harness.coord.worker._dispatch_via_swarm",
+               side_effect=_capture_packet), \
+         patch("harness.coord.worker._run_pytest",
+               return_value={"ran": 0, "passed": 0, "failed": 0,
+                             "skipped": 0, "duration_seconds": 0.0}):
+        run_worker(task, run_dir, project_root=tmp_path)
+
+    prompt = captured.get("prompt", "")
+    assert "SENTINEL_EXISTING_FUNCTION_BODY" in prompt, (
+        "write_set file's existing content was not embedded in the worker "
+        "prompt; engine has no anchors for FILE/REPLACE edits.  Snippet: "
+        f"{prompt[:500]}"
+    )
+
+
+def test_nonexistent_write_set_files_skipped_in_prompt_context(
+    tmp_path: Path,
+) -> None:
+    """W6-A1-3: write_set files that don't exist on disk yet (the
+    create-new-file case) must NOT cause an error during prompt assembly.
+    The engine uses the empty-SEARCH create idiom for new files."""
+    run_dir = tmp_path / "runs" / "20260523T000000-w6a13"
+    run_dir.mkdir(parents=True)
+
+    task = {
+        "worker_id": "worker-1",
+        "title": "Create a new module",
+        "description": "Brand-new file",
+        "read_set": [],
+        "write_set": ["src/brand_new.py"],
+        "test_set": [],
+        "depends_on": [],
+        "steps": [
+            {
+                "step_id": "s1",
+                "kind": "create",
+                "instruction": "Create the module",
+                "target_files": ["src/brand_new.py"],
+                "expected_diff_lines": 5,
+                "required_tests": [],
+            },
+        ],
+        "estimated_kimi_minutes": 1,
+        "max_context_tokens": 30000,
+    }
+
+    create_response = SimpleNamespace(
+        success=True,
+        text=(
+            "FILE: src/brand_new.py\n"
+            "<<<<<<< SEARCH\n"
+            "=======\n"
+            "# brand new\n"
+            ">>>>>>> REPLACE\n"
+        ),
+        error=None, tokens_used=0, cost_usd=0.0,
+    )
+
+    with patch("harness.coord.worker._dispatch_via_swarm",
+               return_value=create_response), \
+         patch("harness.coord.worker._run_pytest",
+               return_value={"ran": 0, "passed": 0, "failed": 0,
+                             "skipped": 0, "duration_seconds": 0.0}):
+        # Must not raise; create-flow proceeds with no existing content.
+        result = run_worker(task, run_dir, project_root=tmp_path)
+
+    assert "src/brand_new.py" in result["files_modified"]
+
+
 def test_fallback_emits_exception_event_when_fallback_crashes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -619,6 +619,22 @@ def run_worker(
         src_file = repo / rel_path
         if src_file.exists():
             read_set_contents[rel_path] = src_file.read_text(encoding="utf-8")
+    # W6-A1-3 2026-05-23: also include existing write_set files in the
+    # context.  Planners frequently emit read_set=[] when a task writes to
+    # an existing file (they think "write" implies "no read needed").  But
+    # the engine needs to see the existing content to produce a valid
+    # FILE/REPLACE block with matching anchors.  W6-A1 run3 (mimo) failed
+    # silent_no_op and run4 (kimi-api) skipped src/harness/doctor.py for
+    # exactly this reason — the worker prompt had no view of doctor.py's
+    # existing definitions, so the engine couldn't anchor edits.  Skip new
+    # files (don't exist on disk yet — they go through the empty-SEARCH
+    # create idiom) and skip duplicates already in read_set.
+    for rel_path in task_obj.write_set or []:
+        if rel_path in read_set_contents:
+            continue
+        src_file = repo / rel_path
+        if src_file.exists():
+            read_set_contents[rel_path] = src_file.read_text(encoding="utf-8")
 
     start_idx = ckpt.last_completed_step_index + 1
     idx = start_idx - 1
