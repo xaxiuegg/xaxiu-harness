@@ -468,8 +468,15 @@ def run_worker(
             "kind": step.kind, "idx": idx,
         })
 
-        # Build and dispatch prompt packet for edit steps
-        if step.kind == "edit" and step.target_files:
+        # Build and dispatch prompt packet for edit + create steps.
+        # W5-Q 2026-05-23: extended kind matching.  Pre-W5-Q only "edit"
+        # triggered dispatch.  Planners emit kind="create" for new-file
+        # tasks (Pilot G2 caught this — step s2 was kind=create + new
+        # tests/file, worker silently skipped dispatch, file never
+        # created, W4-A didn't fire because target_files was new-file
+        # placeholder).  "create" semantics: SEARCH is empty + REPLACE
+        # is the full file content (same as edit's append idiom).
+        if step.kind in ("edit", "create") and step.target_files:
             prompt = _build_prompt(task_obj, step, read_set_contents)
             packet_path = repo / "state" / f".tmp_worker_{task_obj.worker_id}_{step.step_id}_{uuid.uuid4().hex}.md"
             packet_path.parent.mkdir(parents=True, exist_ok=True)
@@ -647,7 +654,7 @@ def run_worker(
             # WIRE-NOOP-DETECT: if this is an edit step with target_files,
             # we EXPECTED edits.  Zero actual edits → engine failure mode.
             # Fail the worker loud rather than silently claiming completion.
-            if step.kind == "edit" and step.target_files and not step_modified:
+            if step.kind in ("edit", "create") and step.target_files and not step_modified:
                 diagnostic = (
                     f"silent_no_op: step {step.step_id} declared "
                     f"target_files={list(step.target_files)} but 0 files were "
