@@ -1,0 +1,14 @@
+{
+  "arch": "B",
+  "started_at": "2026-05-23T08:00:10.484393+00:00",
+  "elapsed_s": 117.2,
+  "todo_id": "2026-05-22T094327Z",
+  "todo_title": "Dispatch 2026-05-22T094327Z",
+  "spec_path": "spec\\auto\\auto-2026-05-22t094327z.md",
+  "spec_lines": 18,
+  "composer_engine": "deepseek/default",
+  "composer_cost_usd": 0.0012,
+  "executed": true,
+  "execution_outcome": "completed",
+  "notes": "picked TODO id=2026-05-22T094327Z status=in_progress; composed spec via deepseek/default (18 lines, $0.0012); executed coord run: outcome=completed workers=1"
+}
