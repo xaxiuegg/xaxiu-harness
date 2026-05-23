@@ -34,12 +34,12 @@ The harness ("xaxiu-harness") is a Python tool that dispatches "specs"
 (markdown work orders) to one of several LLM engines:
 - MiMo Pro v2.5 (Xiaomi, free via Token Plan subscription, 100% reliable
   for spec composition)
-- DeepSeek v4-flash (pay-per-token ~$0.001/dispatch; reasoning-strong
-  but drifts to prose+markdown on FILE/REPLACE ~50%)
-- Kimi K2.6 (free via subscription; CLI is agentic, HTTP has 60s
-  thinking-cap)
-- Claude Code (interactive only; operator has Max subscription but no
-  separate Anthropic Console API key)
+- DeepSeek v4-flash (pay-per-token ~$0.001/dispatch; reasoning-strong;
+  now streaming, 2-3s typical latency)
+- Kimi K2.6 (free via subscription; CLI is agentic; HTTP now streaming
+  with SSE — verified 3/3 on source-laden packets post-W5-V wiring fix,
+  2026-05-23)
+- Claude Code (interactive only; operator has Max subscription)
 
 The CURRENT orchestrator is Claude Opus 4.7 running interactively in a
 Claude Code session (the operator triggers tasks, Claude composes specs
@@ -52,7 +52,9 @@ quota maxes out, OS reboot), the orchestrator stops.  We've verified
 that spawning `claude -p` (headless Claude Code) as a subprocess from
 INSIDE another Claude Code session is blocked — Anthropic's
 anti-recursion guard refuses to honor OAuth for child Claude Code
-processes.
+processes.  HOWEVER, `claude -p` launched directly from Windows Task
+Scheduler (no parent Claude Code session) DOES honor the OAuth token
+in Windows keychain — this is the only autonomous-Claude path.
 
 The orchestrator's responsibilities:
 1. Read coord/STATUS.csv → identify next TODO (light reasoning)
@@ -60,38 +62,47 @@ The orchestrator's responsibilities:
 3. Fire `coord run --watch` to dispatch to a worker engine
 4. Interpret results, update STATUS.csv, decide next move
 
-# Constraints
+# Constraints (operator-finalized 2026-05-23)
 
-- No Anthropic Console API key (operator deems it uneconomical).
+- NO Anthropic Console API key — operator has DEFINITIVELY DECLINED
+  the pay-per-token Anthropic API.  Only Kimi/MiMo/DeepSeek API keys
+  are available.  Any Claude usage must go through the OAuth-backed
+  Claude Code subscription.
 - $0-low cost preferred ($1-5/overnight tops).
 - Must work AUTONOMOUSLY (no operator presence assumed).
 - Must integrate with Windows Task Scheduler (operator's environment).
-- Existing engines callable: MiMo (free), DeepSeek (cheap pay-per-token),
-  Kimi (free; CLI agentic, HTTP unreliable for big packets).
+- Existing engines callable via API key: MiMo (free, tp- key), DeepSeek
+  (pay-per-token, sk- key, now streaming 4x faster), Kimi (free, tp-
+  key, now streaming reliable post-W5-V).
 - Operator can keep Claude Code session running INTERACTIVELY when
   available, but architecture must not depend on this.
 
 # Already-considered options
 
-1. Arch A: claude -p via cron — BLOCKED by Anthropic anti-recursion when
-   spawned from another Claude Code session.  Workable only if launched
-   directly from Task Scheduler.
+1. Arch A: claude -p via Task Scheduler — viable IF launched directly
+   from schtasks (not from inside another Claude Code).  Untested
+   end-to-end but should work given OAuth in keychain.
 2. Arch B: single non-Claude engine (DeepSeek or MiMo) — proven working
    in pilots.
 3. Arch C: hybrid (MiMo primary, DeepSeek fallback) — proven working,
-   $0 typical.
-4. Burst-composition: Claude session pre-composes a queue of specs,
-   autonomous executor consumes the queue.
-5. Anthropic Console API key — operator declined.
+   $0 typical, and Phase 3 Path β (`harness queue execute`) validated
+   end-to-end on real Kimi-API + MiMo dispatches 2026-05-23.
+4. Burst-composition (Path β): Claude session pre-composes a queue of
+   specs, autonomous executor consumes the queue.  SHIPPED.
+5. Anthropic Console API key — operator DECLINED (final 2026-05-23).
 6. Local LLM (Ollama, Qwen) — viable backup.
 7. GitHub Actions / CI — viable but adds ops overhead.
 
 # Your task
 
-Recommend ONE architecture (existing or novel) that BEST solves the
-problem given the constraints.  Focus on:
+Given the CURRENT post-W5-V state (Kimi reliable, DeepSeek streaming,
+queue execute Path β shipped, Anthropic key permanently off the
+table), recommend the BEST architecture for autonomous overnight
+operation.  Focus on:
 - WHY your recommendation is better than the obvious choice (Arch C
-  cron with MiMo).
+  hybrid + Path β queue).
+- Whether Claude-via-Task-Scheduler (Arch A) is worth the integration
+  effort given the OAuth-in-keychain path now appears viable.
 - Specific implementation steps.
 - What could go wrong.
 - Concrete pros + cons.

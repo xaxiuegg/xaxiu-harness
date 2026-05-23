@@ -213,6 +213,202 @@ def test_install_scheduler_rejects_zero_interval(
     assert not schtasks_calls, f"should not invoke schtasks: {schtasks_calls}"
 
 
+# ---------------------------------------------------------------------------
+# W5-OO Claude-via-Task-Scheduler
+# ---------------------------------------------------------------------------
+
+def test_install_claude_scheduler_help_includes_oauth_explanation() -> None:
+    """W5-OO: help text explains why this works when other paths fail."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["orchestrator", "install-claude-scheduler", "--help"],
+    )
+    assert result.exit_code == 0
+    assert "--interval-minutes" in result.output
+    assert "--task-name" in result.output
+    assert "--prompt-file" in result.output
+    assert "--output-dir" in result.output
+
+
+def test_install_claude_scheduler_scaffolds_prompt_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-OO: when prompt-file doesn't exist, a default is auto-scaffolded."""
+    captured = _capture_schtasks_call(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["orchestrator", "install-claude-scheduler",
+              "--interval-minutes", "60",
+              "--task-name", "t-claude-scaffold",
+              "--prompt-file", "coord/my-prompt.md",
+              "--output-dir", "coord/my-runs"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    prompt = tmp_path / "coord" / "my-prompt.md"
+    assert prompt.exists(), "should auto-scaffold default prompt"
+    body = prompt.read_text(encoding="utf-8")
+    assert "autonomous orchestrator" in body.lower()
+    assert "STATUS.csv" in body
+    # Output dir pre-created
+    assert (tmp_path / "coord" / "my-runs").exists()
+    # schtasks called with the right cadence
+    schtasks_calls = [c for c in captured if c and c[0] == "schtasks"]
+    assert schtasks_calls, f"no schtasks call: {captured}"
+    cmd = schtasks_calls[0]
+    assert "/SC" in cmd and cmd[cmd.index("/SC") + 1] == "MINUTE"
+    assert "/MO" in cmd and cmd[cmd.index("/MO") + 1] == "60"
+
+
+def test_install_claude_scheduler_respects_existing_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W5-OO: don't overwrite an operator-customized prompt file."""
+    _capture_schtasks_call(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    custom = tmp_path / "coord" / "custom-prompt.md"
+    custom.parent.mkdir(parents=True)
+    custom.write_text("# my custom prompt\nhello\n", encoding="utf-8")
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["orchestrator", "install-claude-scheduler",
+              "--prompt-file", "coord/custom-prompt.md"],
+    )
+    assert custom.read_text(encoding="utf-8") == "# my custom prompt\nhello\n"
+
+
+def test_install_claude_scheduler_daily_for_long_intervals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """W5-OO + W5-Z: intervals >= 1440 use /SC DAILY (same fix as
+    install-scheduler)."""
+    captured = _capture_schtasks_call(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["orchestrator", "install-claude-scheduler",
+              "--interval-minutes", "2880", "--task-name", "t-claude-daily"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    schtasks_calls = [c for c in captured if c and c[0] == "schtasks"]
+    cmd = schtasks_calls[0]
+    assert cmd[cmd.index("/SC") + 1] == "DAILY"
+    assert cmd[cmd.index("/MO") + 1] == "2"  # 2880 / 1440 = 2 days
+
+
+class TestQueueSortPriority:
+    """W5-NN: spec/auto/ filenames with P<n>- prefix run in priority order."""
+
+    def test_no_prefixes_alphabetical(self) -> None:
+        """Without P<n>- prefixes, sort is pure alphabetical."""
+        from harness.cli import _sort_queue_paths
+        paths = [Path("zebra.md"), Path("alpha.md"), Path("beta.md")]
+        result = _sort_queue_paths(paths)
+        assert [p.name for p in result] == ["alpha.md", "beta.md", "zebra.md"]
+
+    def test_p0_runs_first(self) -> None:
+        """P0- always runs before P1-, P2-, …, and before unprefixed."""
+        from harness.cli import _sort_queue_paths
+        paths = [
+            Path("P2-medium.md"),
+            Path("urgent-without-prefix.md"),
+            Path("P0-critical.md"),
+            Path("P1-high.md"),
+        ]
+        result = _sort_queue_paths(paths)
+        assert [p.name for p in result] == [
+            "P0-critical.md",         # priority 0
+            "P1-high.md",             # priority 1
+            "P2-medium.md",           # priority 2
+            "urgent-without-prefix.md",  # priority 5 default
+        ]
+
+    def test_unprefixed_priority_is_5(self) -> None:
+        """Specs without P<n>- get default priority 5: between P0-P4 and P6+."""
+        from harness.cli import _sort_queue_paths
+        paths = [
+            Path("P9-defer.md"),
+            Path("normal.md"),
+            Path("P3-soon.md"),
+        ]
+        result = _sort_queue_paths(paths)
+        assert [p.name for p in result] == [
+            "P3-soon.md",   # priority 3
+            "normal.md",    # priority 5 default
+            "P9-defer.md",  # priority 9
+        ]
+
+    def test_alphabetical_within_priority(self) -> None:
+        """Multiple specs with same P<n>- prefix sort alphabetically."""
+        from harness.cli import _sort_queue_paths
+        paths = [
+            Path("P1-zeta.md"),
+            Path("P1-alpha.md"),
+            Path("P1-beta.md"),
+        ]
+        result = _sort_queue_paths(paths)
+        assert [p.name for p in result] == [
+            "P1-alpha.md",
+            "P1-beta.md",
+            "P1-zeta.md",
+        ]
+
+    def test_double_digit_priority(self) -> None:
+        """P10 / P99 prefixes parse correctly (not P1 + extra chars)."""
+        from harness.cli import _sort_queue_paths
+        paths = [
+            Path("P10-late.md"),
+            Path("P2-early.md"),
+            Path("P99-last.md"),
+        ]
+        result = _sort_queue_paths(paths)
+        assert [p.name for p in result] == [
+            "P2-early.md",
+            "P10-late.md",
+            "P99-last.md",
+        ]
+
+    def test_queue_execute_honors_priority(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Integration: queue execute picks P0- spec before unprefixed when
+        --once is set."""
+        monkeypatch.chdir(tmp_path)
+        auto = tmp_path / "spec" / "auto"
+        auto.mkdir(parents=True)
+        # Older alphabetical first ("aaaa" < "P0-..." in ASCII) but with
+        # W5-NN P0 should still win.
+        (auto / "aaaa-old.md").write_text("# spec\n## Goal\nold\n", encoding="utf-8")
+        (auto / "P0-urgent.md").write_text("# spec\n## Goal\nurgent\n", encoding="utf-8")
+
+        class _Proc:
+            def __init__(self, stdout: str) -> None:
+                self.stdout = stdout
+                self.stderr = ""
+                self.returncode = 0
+        calls: list[list[str]] = []
+
+        def _mock_run(args, **kwargs):
+            calls.append(args)
+            if "plan" in args:
+                rid = "test-run-prio"
+                (tmp_path / "runs" / rid).mkdir(parents=True, exist_ok=True)
+                return _Proc(stdout=f"plan: runs/{rid}/plan.json")
+            return _Proc(stdout="ok")
+
+        monkeypatch.setattr("subprocess.run", _mock_run)
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["queue", "execute", "--once", "--no-merge"],
+        )
+        assert result.exit_code == 0, f"output={result.output}"
+        # P0-urgent.md should have moved, NOT aaaa-old.md
+        done = tmp_path / "spec" / "auto" / "done"
+        assert (done / "P0-urgent.md").exists()
+        assert not (done / "aaaa-old.md").exists()
+        assert (auto / "aaaa-old.md").exists()  # still waiting
+
+
 def test_queue_execute_planner_engine_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

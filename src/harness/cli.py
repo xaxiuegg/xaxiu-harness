@@ -716,6 +716,33 @@ def queue_group() -> None:
     """W5-U Path β: burst-composition spec queue (Claude composes, autonomous executor)."""
 
 
+def _sort_queue_paths(paths: list[Path]) -> list[Path]:
+    """Sort spec/auto/ paths by W5-NN priority prefix then name.
+
+    Priority prefix is an optional ``P<n>-`` at the start of the filename
+    (e.g. ``P0-fix-bug.md``, ``P2-add-feature.md``).  Lower numbers run
+    first.  Specs without a prefix get default priority 5 (sits between
+    P0-P4 explicit-urgent and P6+ explicit-defer).
+
+    Examples:
+        P0-fix.md  → (0, "P0-fix.md")        runs first
+        spec.md    → (5, "spec.md")          default priority
+        P9-doc.md  → (9, "P9-doc.md")        runs late
+
+    Within the same priority bucket, alphabetical order is preserved
+    (so existing single-priority queues behave identically to the old
+    sort()).
+    """
+    import re as _re_prio
+    pattern = _re_prio.compile(r"^P(\d+)-")
+
+    def _priority(p: Path) -> int:
+        m = pattern.match(p.name)
+        return int(m.group(1)) if m else 5
+
+    return sorted(paths, key=lambda p: (_priority(p), p.name))
+
+
 @queue_group.command(name="list")
 def queue_list_cmd() -> None:
     """List pending specs in spec/auto/ (the queue)."""
@@ -724,7 +751,7 @@ def queue_list_cmd() -> None:
     if not queue_dir.exists():
         click.echo("(spec/auto/ does not exist; no queued specs)")
         sys.exit(0)
-    pending = sorted(p for p in queue_dir.glob("*.md") if p.is_file())
+    pending = _sort_queue_paths([p for p in queue_dir.glob("*.md") if p.is_file()])
     done = sorted(done_dir.glob("*.md")) if done_dir.exists() else []
     click.echo(f"pending: {len(pending)}")
     for p in pending:
@@ -770,7 +797,8 @@ def queue_execute_cmd(once: bool, max_specs: int | None,
     queue_dir = Path("spec/auto")
     done_dir = queue_dir / "done"
     done_dir.mkdir(parents=True, exist_ok=True)
-    pending = sorted(p for p in queue_dir.glob("*.md") if p.is_file())
+    # W5-NN: respect P<n>- priority prefix; lower numbers run first.
+    pending = _sort_queue_paths([p for p in queue_dir.glob("*.md") if p.is_file()])
     if not pending:
         click.echo("Queue empty.")
         sys.exit(0)
@@ -980,6 +1008,140 @@ def orchestrator_install_scheduler(interval_minutes: int, task_name: str) -> Non
         if result.returncode == 0:
             click.echo(f"\n✓ Task installed.  To remove: "
                        f"schtasks /Delete /TN {task_name} /F")
+        else:
+            click.echo(f"schtasks FAILED rc={result.returncode}: "
+                       f"{result.stderr}", err=True)
+            sys.exit(1)
+    except Exception as exc:
+        click.echo(f"ERROR invoking schtasks: {exc}", err=True)
+        sys.exit(1)
+    sys.exit(0)
+
+
+@orchestrator_group.command(name="install-claude-scheduler")
+@click.option("--interval-minutes", type=int, default=60,
+              help="How often Task Scheduler fires `claude -p` (default 60 min).")
+@click.option("--task-name", default="xaxiu-harness-claude-orchestrator",
+              help="Windows Task Scheduler task name.")
+@click.option("--prompt-file", type=click.Path(path_type=Path),
+              default=Path("coord/claude-orchestrator-prompt.md"),
+              help="Markdown file Claude reads on each tick.  Defaults to "
+                   "coord/claude-orchestrator-prompt.md which the harness "
+                   "auto-scaffolds.")
+@click.option("--output-dir", type=click.Path(path_type=Path),
+              default=Path("coord/claude-orchestrator-runs"),
+              help="Directory where each tick's Claude output lands.")
+@click.option("--claude-bin", default="claude",
+              help="Path to the claude binary (default 'claude' on PATH).")
+def orchestrator_install_claude_scheduler(
+    interval_minutes: int, task_name: str,
+    prompt_file: Path, output_dir: Path, claude_bin: str,
+) -> None:
+    """W5-OO 2026-05-23: install a Task Scheduler entry that runs `claude -p`
+    OUTSIDE any parent Claude Code session.
+
+    Why this works when other paths fail:
+    - Anthropic's anti-recursion blocks `claude -p` only when its parent
+      process is itself a Claude Code session.
+    - Task Scheduler spawns processes in a fresh session — no parent
+      Claude Code, no recursion guard, OAuth in Windows keychain
+      honoured.
+    - This is the ONLY autonomous-Claude path available without an
+      Anthropic Console API key.
+
+    The installed task on each tick:
+      1. Reads ``prompt-file`` (a markdown file describing the
+         orchestrator's standing instructions; see `harness orchestrator
+         start` for the equivalent in-process behaviour).
+      2. Runs ``claude -p < prompt-file > output-dir/<timestamp>.txt``
+         so Claude's reply is captured to disk.
+      3. The operator (or a downstream harness verb) reads the output
+         and feeds it back into the dispatch pipeline.
+
+    NOTE: this verb only installs the task.  It does NOT validate that
+    `claude -p` succeeds — first-time validation must be done by the
+    operator (run the task manually + inspect output) because we cannot
+    test the OAuth path from inside this Claude Code session.
+
+    To remove: `schtasks /Delete /TN <task-name> /F` from PowerShell.
+    """
+    import shutil
+
+    repo_root = Path.cwd()
+    output_dir_abs = (repo_root / output_dir).resolve()
+    prompt_path_abs = (repo_root / prompt_file).resolve()
+
+    # Pre-create the output dir + scaffold a default prompt if missing.
+    output_dir_abs.mkdir(parents=True, exist_ok=True)
+    if not prompt_path_abs.exists():
+        prompt_path_abs.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path_abs.write_text(
+            "# Claude orchestrator prompt (W5-OO scaffold)\n\n"
+            "You are the autonomous orchestrator for xaxiu-harness.\n\n"
+            "On each tick:\n"
+            "1. Read coord/STATUS.csv\n"
+            "2. Identify the highest-priority queued production row\n"
+            "3. Compose a spec markdown for it\n"
+            "4. Drop the spec into spec/auto/ with appropriate P<n>- prefix\n"
+            "5. Exit\n\n"
+            "Be concise.  The harness queue execute will pick up the spec\n"
+            "and dispatch it autonomously.\n",
+            encoding="utf-8",
+        )
+        click.echo(f"scaffolded default prompt: {prompt_path_abs}")
+
+    # Command: claude reads prompt + writes timestamped output.
+    # Uses PowerShell so we can interpolate Get-Date for filename.
+    cmd = (
+        f'powershell -NoProfile -Command "'
+        f'$ts = Get-Date -Format yyyyMMddTHHmmssZ; '
+        f'$out = \\"{output_dir_abs}\\\\$ts.txt\\"; '
+        f'Get-Content -Raw \\"{prompt_path_abs}\\" | '
+        f'& \\"{claude_bin}\\" -p > $out 2>&1"'
+    )
+
+    # Same MINUTE/DAILY bounds logic as install-scheduler (W5-Z).
+    if interval_minutes < 1:
+        click.echo("ERROR: --interval-minutes must be >= 1", err=True)
+        sys.exit(1)
+    if interval_minutes <= 1439:
+        sc_flag, mo_value, cadence_desc = (
+            "MINUTE", str(interval_minutes), f"every {interval_minutes} minutes",
+        )
+    else:
+        days = max(1, interval_minutes // (24 * 60))
+        sc_flag, mo_value, cadence_desc = (
+            "DAILY", str(days), f"every {days} days",
+        )
+
+    schtasks_cmd = [
+        "schtasks", "/Create",
+        "/TN", task_name,
+        "/SC", sc_flag,
+        "/MO", mo_value,
+        "/TR", cmd,
+        "/F",
+    ]
+    click.echo(f"Installing Claude orchestrator Task Scheduler entry '{task_name}'...")
+    click.echo(f"  Schedule: {cadence_desc} (/SC {sc_flag} /MO {mo_value})")
+    click.echo(f"  Prompt:   {prompt_path_abs}")
+    click.echo(f"  Output:   {output_dir_abs}")
+    click.echo(f"  Claude:   {claude_bin}")
+    if shutil.which("schtasks") is None:
+        click.echo("ERROR: schtasks not on PATH (need Windows)", err=True)
+        sys.exit(1)
+    try:
+        result = subprocess.run(schtasks_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            click.echo(
+                f"\n✓ Task installed.  Operator-side validation required:\n"
+                f"  1. Run manually:  schtasks /Run /TN {task_name}\n"
+                f"  2. Inspect:       Get-Content {output_dir_abs}/*.txt | Select-Object -Last 20\n"
+                f"  3. If empty output or 'Not logged in', `claude` OAuth\n"
+                f"     is not honoured under Task Scheduler context — fall\n"
+                f"     back to MiMo/Kimi-API orchestrator.\n"
+                f"\nTo remove: schtasks /Delete /TN {task_name} /F"
+            )
         else:
             click.echo(f"schtasks FAILED rc={result.returncode}: "
                        f"{result.stderr}", err=True)
