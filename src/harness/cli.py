@@ -148,6 +148,96 @@ def spec_verify_cmd(spec_path: Path) -> None:
     sys.exit(0 if matches else 1)
 
 
+@cli.command(name="spec-init")
+@click.argument("name")
+@click.option("--strict-paths", default=None,
+              help="Comma-separated list of relative paths to bind under "
+                   "`## Strict Paths` (W5-BB).  Each becomes a bullet entry.")
+@click.option("--out", "out_dir", type=click.Path(path_type=Path),
+              default=Path("spec/auto"),
+              help="Output directory.  Default `spec/auto/` queues for "
+                   "autonomous processing via `harness queue execute`.")
+@click.option("--goal", default=None,
+              help="One-line goal (auto-prompted if missing).")
+def spec_init_cmd(name: str, strict_paths: str | None,
+                  out_dir: Path, goal: str | None) -> None:
+    """Scaffold a starter spec markdown with canonical sections.
+
+    W5-KK 2026-05-23: makes the `## Strict Paths` syntax (W5-BB)
+    discoverable via tooling.  Operator runs:
+
+      harness spec-init my-feature --strict-paths coord/x.md,coord/y.md
+
+    and gets a ready-to-edit spec at spec/auto/my-feature.md with all
+    canonical sections (SPEC-ID, Goal, Strict Paths, Acceptance, Why)
+    prefilled.  Drop in a goal, customize acceptance criteria, then
+    `harness queue execute --once` processes it.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Slugify the name: replace whitespace + non-safe chars with hyphens
+    import re as _re_slug
+    slug = _re_slug.sub(r"[^a-zA-Z0-9._-]+", "-", name.strip()).strip("-")
+    if not slug:
+        click.echo("ERROR: name must contain at least one alphanumeric char",
+                   err=True)
+        sys.exit(1)
+    spec_path = out_dir / f"{slug}.md"
+    if spec_path.exists():
+        click.echo(f"ERROR: {spec_path} already exists.  Pick a different "
+                   f"--out dir or delete the existing file first.", err=True)
+        sys.exit(1)
+
+    # Parse strict-paths CSV
+    paths: list[str] = []
+    if strict_paths:
+        paths = [p.strip().strip("`'\"") for p in strict_paths.split(",") if p.strip()]
+
+    goal_line = goal or "<one-line description of what this spec accomplishes>"
+
+    lines: list[str] = [
+        f"# SPEC-ID: {slug} — <short title>",
+        "",
+        "## Goal",
+        "",
+        goal_line,
+        "",
+    ]
+    if paths:
+        lines.append("## Strict Paths")
+        lines.append("")
+        for p in paths:
+            lines.append(f"- {p}")
+        lines.append("")
+    else:
+        lines.append("## Strict Paths")
+        lines.append("")
+        lines.append("<!-- W5-BB 2026-05-23: list operator-declared output paths -->")
+        lines.append("<!-- Worker MUST create files at these exact paths.   -->")
+        lines.append("<!-- Example:                                          -->")
+        lines.append("<!--   - coord/operator/my-report.md                   -->")
+        lines.append("<!--   - coord/operator/my-report.json                 -->")
+        lines.append("")
+    lines.extend([
+        "## Acceptance",
+        "",
+        "1. <criterion 1 — e.g. file exists at the declared path>",
+        "2. <criterion 2 — e.g. contains specific text>",
+        "3. <criterion 3 — e.g. tests pass>",
+        "",
+        "## Why this spec exists",
+        "",
+        "<explain the motivation: bug fix, feature gap, dispatch failure, "
+        "process improvement.  This becomes the post-merge audit trail.>",
+        "",
+    ])
+    spec_path.write_text("\n".join(lines), encoding="utf-8")
+    click.echo(f"created: {spec_path}")
+    if paths:
+        click.echo(f"  strict_paths: {len(paths)} path(s)")
+    click.echo("  edit the spec, then run:")
+    click.echo(f"    harness queue execute --once --planner-engine kimi-api")
+
+
 @cli.group(name="status")
 def status() -> None:
     """Canonical STATUS.csv task tracker (harness primitive #19).

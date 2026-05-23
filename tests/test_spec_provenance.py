@@ -95,3 +95,80 @@ def test_cli_spec_verify_exits_1_on_mismatch(tmp_path: Path) -> None:
         result = runner.invoke(cli, ["spec-verify", str(spec)])
     assert result.exit_code == 1
     assert "MISMATCH" in result.output
+
+
+# ---------------------------------------------------------------------------
+# W5-KK harness spec-init
+# ---------------------------------------------------------------------------
+
+def test_spec_init_creates_canonical_template(tmp_path: Path) -> None:
+    """spec-init writes a markdown with all 4 canonical sections."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["spec-init", "my-feature", "--out", str(tmp_path),
+              "--goal", "Test the thing"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    spec = tmp_path / "my-feature.md"
+    assert spec.exists()
+    body = spec.read_text(encoding="utf-8")
+    assert "# SPEC-ID: my-feature" in body
+    assert "## Goal" in body
+    assert "Test the thing" in body
+    assert "## Strict Paths" in body
+    assert "## Acceptance" in body
+    assert "## Why this spec exists" in body
+
+
+def test_spec_init_inlines_strict_paths(tmp_path: Path) -> None:
+    """--strict-paths CSV becomes a bullet list under Strict Paths."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["spec-init", "demo", "--out", str(tmp_path),
+              "--strict-paths", "coord/a.md,coord/b.md, coord/c.md "],
+    )
+    assert result.exit_code == 0
+    spec = tmp_path / "demo.md"
+    body = spec.read_text(encoding="utf-8")
+    # Each path becomes a bullet entry (whitespace trimmed)
+    assert "- coord/a.md" in body
+    assert "- coord/b.md" in body
+    assert "- coord/c.md" in body
+    # No example comment block when explicit paths are provided
+    assert "<!-- Example:" not in body
+
+
+def test_spec_init_round_trips_through_planner_extractor(tmp_path: Path) -> None:
+    """W5-BB integration: spec-init output is parseable by
+    `_extract_strict_paths` so the round trip is consistent."""
+    from harness.coord.planner import _extract_strict_paths
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["spec-init", "rt", "--out", str(tmp_path),
+              "--strict-paths", "coord/x.md,coord/y.md"],
+    )
+    spec_text = (tmp_path / "rt.md").read_text(encoding="utf-8")
+    assert _extract_strict_paths(spec_text) == ["coord/x.md", "coord/y.md"]
+
+
+def test_spec_init_refuses_existing_file(tmp_path: Path) -> None:
+    """Don't clobber an existing spec."""
+    runner = CliRunner()
+    runner.invoke(cli, ["spec-init", "x", "--out", str(tmp_path)])
+    result = runner.invoke(cli, ["spec-init", "x", "--out", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+
+
+def test_spec_init_slugifies_name(tmp_path: Path) -> None:
+    """Names with spaces / odd chars get slugified into a valid filename."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["spec-init", "My Cool Feature!", "--out", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    files = list(tmp_path.glob("*.md"))
+    assert len(files) == 1
+    # Slug is hyphenated, no spaces / punctuation
+    assert " " not in files[0].name
+    assert "!" not in files[0].name
