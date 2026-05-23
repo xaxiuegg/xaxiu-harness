@@ -204,7 +204,7 @@ def test_start_autonomous_mode_attempts_scheduler_install(
     runner = CliRunner()
     result = runner.invoke(
         cli, ["start", "--orchestrator", "mimo", "--mode", "autonomous",
-              "--interval-minutes", "45"],
+              "--interval-minutes", "45", "--skip-preflight"],
     )
     assert result.exit_code == 0, f"output={result.output}"
     # install-scheduler subprocess called
@@ -241,10 +241,127 @@ def test_start_claude_autonomous_uses_install_claude_scheduler(
                         lambda args, **kw: (calls.append(list(args)), _Proc())[1])
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["start", "--orchestrator", "claude", "--mode", "autonomous"],
+        cli, ["start", "--orchestrator", "claude", "--mode", "autonomous",
+              "--skip-preflight"],
     )
     assert result.exit_code == 0, f"output={result.output}"
     assert any(
         "install-claude-scheduler" in str(a)
         for c in calls for a in c
     ), f"should use install-claude-scheduler: {calls}"
+
+
+# ---------------------------------------------------------------------------
+# W6-B3: preflight gate
+# ---------------------------------------------------------------------------
+
+
+def test_start_autonomous_blocked_by_preflight_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Autonomous mode without --skip-preflight refuses to start if
+    preflight surfaces a fail-severity check."""
+    monkeypatch.setenv("MIMO_API_KEY", "tp-test")
+    monkeypatch.chdir(tmp_path)
+    from harness.preflight import PreflightCheck
+
+    def _fake_run_all():
+        return [
+            PreflightCheck(name="git_clean", severity="fail",
+                           message="dirty tree",
+                           fix="commit your work"),
+        ]
+
+    monkeypatch.setattr("harness.preflight.run_all", _fake_run_all)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["start", "--orchestrator", "mimo", "--mode", "autonomous"],
+    )
+    assert result.exit_code == 4, f"output={result.output}"
+    assert "Preflight FAILED" in result.output
+    assert "git_clean" in result.output
+    assert "commit your work" in result.output
+
+
+def test_start_autonomous_warns_on_preflight_warn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Autonomous mode with warn-severity preflight prints warning but
+    proceeds to scheduler install."""
+    monkeypatch.setenv("MIMO_API_KEY", "tp-test")
+    monkeypatch.chdir(tmp_path)
+    from harness.preflight import PreflightCheck
+
+    def _fake_run_all():
+        return [
+            PreflightCheck(name="status_csv", severity="warn",
+                           message="stale: 30h ago"),
+        ]
+
+    monkeypatch.setattr("harness.preflight.run_all", _fake_run_all)
+
+    class _Proc:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = ""
+            self.stderr = ""
+
+    monkeypatch.setattr("subprocess.run",
+                        lambda args, **kw: _Proc())
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["start", "--orchestrator", "mimo", "--mode", "autonomous"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    assert "Preflight surfaced warnings" in result.output
+
+
+def test_start_autonomous_ok_when_preflight_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All-ok preflight proceeds silently to scheduler install."""
+    monkeypatch.setenv("MIMO_API_KEY", "tp-test")
+    monkeypatch.chdir(tmp_path)
+    from harness.preflight import PreflightCheck
+
+    monkeypatch.setattr("harness.preflight.run_all", lambda: [
+        PreflightCheck(name="status_csv", severity="ok", message="fresh"),
+    ])
+
+    class _Proc:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = ""
+            self.stderr = ""
+
+    monkeypatch.setattr("subprocess.run",
+                        lambda args, **kw: _Proc())
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["start", "--orchestrator", "mimo", "--mode", "autonomous"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    assert "Preflight passed" in result.output
+
+
+def test_start_interactive_skips_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive mode does NOT run preflight — that's only for
+    autonomous-mode arming."""
+    monkeypatch.setenv("MIMO_API_KEY", "tp-test")
+    monkeypatch.chdir(tmp_path)
+
+    call_count = {"n": 0}
+
+    def _spy_run_all():
+        call_count["n"] += 1
+        return []
+
+    monkeypatch.setattr("harness.preflight.run_all", _spy_run_all)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["start", "--orchestrator", "mimo", "--mode", "interactive"],
+    )
+    assert result.exit_code == 0, f"output={result.output}"
+    assert call_count["n"] == 0, "preflight should NOT run for interactive mode"

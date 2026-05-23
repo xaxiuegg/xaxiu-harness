@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -160,8 +161,13 @@ def spec_verify_cmd(spec_path: Path) -> None:
               help="Print the orchestrator picker + connection status, then exit.")
 @click.option("--interval-minutes", type=int, default=30,
               help="Task Scheduler tick cadence for autonomous mode (default 30).")
+@click.option("--skip-preflight", is_flag=True, default=False,
+              help="W6-B3: bypass the preflight readiness gate before "
+                   "arming autonomous mode (use only when you know a "
+                   "warn-severity check is acceptable for your run).")
 def start_cmd(orchestrator: str | None, mode: str | None,
-              just_list: bool, interval_minutes: int) -> None:
+              just_list: bool, interval_minutes: int,
+              skip_preflight: bool) -> None:
     """W5-SS 2026-05-23: pick orchestrator + toggle autonomous loop.
 
     Operator-facing boot screen.  Interactive picker shows the 4
@@ -270,6 +276,48 @@ def start_cmd(orchestrator: str | None, mode: str | None,
     # 5. Mode-specific next steps
     click.echo()
     if mode == "autonomous":
+        # W6-B3 2026-05-23: preflight gate.  Refuse to arm autonomous
+        # mode unless the readiness checks pass (or the operator opts
+        # out via --skip-preflight).  Fail-severity checks are
+        # blockers; warn-severity ones print a warning but proceed
+        # (operator can still inspect via `harness preflight`).
+        if not skip_preflight:
+            from harness.preflight import run_all, overall_exit_code
+            click.echo("Preflight: running readiness checks...")
+            pre_results = run_all()
+            pre_exit = overall_exit_code(pre_results)
+            if pre_exit == 4:
+                click.echo(
+                    "\n✗ Preflight FAILED — autonomous mode REFUSED.\n"
+                    "  Failing checks:",
+                    err=True,
+                )
+                for r in pre_results:
+                    if r.severity == "fail":
+                        click.echo(f"    [X] {r.name}: {r.message}", err=True)
+                        if r.fix:
+                            click.echo(f"        fix: {r.fix}", err=True)
+                click.echo(
+                    "\n  Resolve the blockers above (or use "
+                    "`--skip-preflight` if you accept the risk), "
+                    "then re-run `harness start`.",
+                    err=True,
+                )
+                sys.exit(4)
+            elif pre_exit == 1:
+                click.echo(
+                    "\n⚠ Preflight surfaced warnings; proceeding to "
+                    "autonomous mode anyway.  Inspect via "
+                    "`harness preflight` if unsure.",
+                    err=True,
+                )
+            else:
+                click.echo("  ✓ Preflight passed.")
+        else:
+            click.echo(
+                "  ⚠ Skipping preflight (--skip-preflight set).",
+                err=True,
+            )
         click.echo(f"Autonomous mode: arming Task Scheduler at {interval_minutes}min cadence...")
         if chosen.key == "claude":
             click.echo("  → using `harness orchestrator install-claude-scheduler` "
@@ -1744,6 +1792,80 @@ def doctor_cmd(fmt: str) -> None:
         click.echo(f"overall: {overall.upper()}")
 
     sys.exit(0 if overall != "fail" else 1)
+
+
+@cli.command(name="preflight")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty",
+              help="Output format.")
+@click.option("--skip-engines", is_flag=True, default=False,
+              help="Skip live engine probes (offline mode).")
+def preflight_cmd(fmt: str, skip_engines: bool) -> None:
+    """Comprehensive autonomous-mode readiness gate.
+
+    Runs ``harness doctor`` checks PLUS live engine probes, observer/
+    loops Task-Scheduler arming, STATUS.csv freshness, pytest cache
+    state, and git tree cleanliness.  Designed to complete in <30s
+    via parallel execution.
+
+    Exit codes:
+        0  all checks pass
+        1  any warn-severity check (autonomous-mode can override)
+        4  any fail-severity check (L5 blocker; refuse to start)
+    """
+    import dataclasses
+    from harness.preflight import run_all, overall_exit_code, PreflightCheck
+
+    started = time.monotonic()
+    if skip_engines:
+        # Build a custom subset that excludes engine probes; useful for
+        # offline CI smoke runs.
+        from harness import preflight as _pf
+        pairs = [(n, fn) for n, fn in _pf._all_check_callables()
+                 if not n.startswith("engine:")]
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results: list[PreflightCheck] = []
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(fn): name for name, fn in pairs}
+            for f in as_completed(futures):
+                try:
+                    results.append(f.result())
+                except Exception as exc:
+                    results.append(PreflightCheck(
+                        name=futures[f], severity="fail",
+                        message=f"check raised: {type(exc).__name__}: {exc}",
+                    ))
+        results.sort(key=lambda r: r.name)
+    else:
+        results = run_all()
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+
+    if fmt == "json":
+        click.echo(json.dumps({
+            "elapsed_ms": elapsed_ms,
+            "checks": [dataclasses.asdict(r) for r in results],
+        }, indent=2))
+    else:
+        glyph = {"ok": "[OK]", "warn": "[!]", "fail": "[X]"}
+        click.echo("harness preflight — autonomous-mode readiness gate")
+        click.echo("=" * 60)
+        for r in results:
+            click.echo(
+                f"  {glyph.get(r.severity, '?')} "
+                f"{r.name:<20} {r.message}  ({r.duration_ms}ms)"
+            )
+            if r.fix:
+                click.echo(f"          fix: {r.fix}")
+        click.echo("=" * 60)
+        ok_count = sum(1 for r in results if r.severity == "ok")
+        warn_count = sum(1 for r in results if r.severity == "warn")
+        fail_count = sum(1 for r in results if r.severity == "fail")
+        click.echo(
+            f"  {ok_count} ok, {warn_count} warn, {fail_count} fail "
+            f"in {elapsed_ms}ms"
+        )
+
+    sys.exit(overall_exit_code(results))
 
 
 @cli.command(name="panic-dump")

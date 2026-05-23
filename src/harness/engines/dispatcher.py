@@ -896,6 +896,18 @@ def dispatch_packet(
         except Exception:
             pass
 
+        # W6-C2 2026-05-23: dead-engine alarm.  After each per-engine
+        # failure, check whether ``current_engine`` has hit the 5-in-a-row
+        # threshold.  On transition into the dead state, emit L4 + toast.
+        # Best-effort; never block dispatch on alarm I/O.
+        try:
+            from harness.engine_alarm import check_engine_alarm, fire_dead_engine_alarm
+            is_dead, streak, transition = check_engine_alarm(current_engine)
+            if transition:
+                fire_dead_engine_alarm(current_engine, streak)
+        except Exception:
+            pass
+
         _update_active_dispatch_fallback(dispatch_id, next_engine)
 
         current_engine = next_engine
