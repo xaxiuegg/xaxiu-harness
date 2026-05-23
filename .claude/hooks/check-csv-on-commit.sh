@@ -20,7 +20,7 @@ if ! echo "$INPUT" | grep -q 'git commit'; then
   exit 0
 fi
 
-cd "D:/Projects/xaxiu-harness" 2>/dev/null || exit 0
+cd "D:/xaxiu-harness-standalone" 2>/dev/null || exit 0
 LAST=$(git log -1 --name-only --pretty='' 2>/dev/null)
 
 if echo "$LAST" | grep -q "^coord/STATUS.csv$"; then

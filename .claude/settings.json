@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash D:/Projects/xaxiu-harness/.claude/hooks/check-csv-on-commit.sh"
+            "command": "bash D:/xaxiu-harness-standalone/.claude/hooks/check-csv-on-commit.sh"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash D:/Projects/xaxiu-harness/.claude/hooks/check-csv-stale.sh"
+            "command": "bash D:/xaxiu-harness-standalone/.claude/hooks/check-csv-stale.sh"
           }
         ]
       }

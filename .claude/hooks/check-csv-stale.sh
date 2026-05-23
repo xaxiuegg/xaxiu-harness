@@ -9,15 +9,18 @@
 #
 # Exit 0 = silent pass; exit 2 = emit feedback to Claude.
 
-CSV="D:/Projects/xaxiu-harness/coord/STATUS.csv"
+CSV="D:/xaxiu-harness-standalone/coord/STATUS.csv"
 
 if [ ! -f "$CSV" ]; then
   exit 0
 fi
 
-# Scope guard: settings.json lives at D:/Projects/.claude/ so this hook
-# can fire across subprojects. Only act on xaxiu-harness turns.
-if [[ "$PWD" != *"/xaxiu-harness"* ]] && [[ "$PWD" != *"/Projects" ]]; then
+# Scope guard (W6-C1, post-migration 2026-05-22): the project moved from
+# D:/Projects/xaxiu-harness/ to D:/xaxiu-harness-standalone/.  Match BOTH
+# the new path AND the legacy "xaxiu-harness" substring (so anyone with
+# the project at the old path still triggers correctly).
+if [[ "$PWD" != *"/xaxiu-harness-standalone"* ]] \
+   && [[ "$PWD" != *"/xaxiu-harness"* ]]; then
   exit 0
 fi
 
@@ -25,14 +28,17 @@ fi
 # Excludes .git, .swarm audit output, pycache, runs/ workspace output, and
 # packet response files which are autonomous dispatch artifacts (not canonical
 # task state). Coord SESSION_HANDOFF + STATUS.md still count.
-RECENT=$(find "D:/Projects/xaxiu-harness" -maxdepth 5 -type f \
+RECENT=$(find "D:/xaxiu-harness-standalone" -maxdepth 5 -type f \
   \( -name '*.md' -o -name '*.py' -o -name '*.ps1' -o -name '*.sh' \) \
   -not -path '*/.git/*' \
   -not -path '*/.swarm/*' \
   -not -path '*/__pycache__/*' \
-  -not -path '*/.harness/runs/*' \
+  -not -path '*/.harness/*' \
+  -not -path '*/runs/*' \
   -not -path '*/coord/packets/*/responses/*' \
   -not -path '*/coord/packets/*/audit/*' \
+  -not -path '*/coord/reviews/audits/*' \
+  -not -path '*/spec/auto/done/*' \
   -not -name '*-response.md' \
   -not -name '*-deepseek-*.md' \
   -not -name '*-kimi-*.md' \
