@@ -245,8 +245,32 @@ def main() -> int:
     resp = eng.dispatch(prompt, "mimo-v2.5-pro", {"max_tokens": 8_000})
     latency = int((time.monotonic() - started) * 1000)
 
-    if not resp.success or not (resp.text or "").strip():
-        print(f"[audit] MiMo failed ({latency}ms): {resp.error}; "
+    # W6-A2 audit-script hardening 2026-05-23: MiMo's content filter
+    # rejects prompts that mention API keys verbatim, returning a
+    # response like "The request was rejected because it was
+    # considered high risk".  That's a success=True text response,
+    # so the old fallback gate (only success=False) didn't fire.
+    # Also fall back when the response can't possibly be a JSON
+    # audit verdict — no JSON braces or no "confidence" field.
+    _mimo_rejected = (
+        bool(resp.text)
+        and ("rejected" in resp.text.lower()
+             and "high risk" in resp.text.lower())
+    )
+    _mimo_unparseable = (
+        bool(resp.text)
+        and "{" not in resp.text  # no chance of JSON
+    )
+    if (not resp.success
+            or not (resp.text or "").strip()
+            or _mimo_rejected
+            or _mimo_unparseable):
+        reason = (
+            "rejected by content filter" if _mimo_rejected
+            else "unparseable text response" if _mimo_unparseable
+            else resp.error
+        )
+        print(f"[audit] MiMo failed ({latency}ms): {reason}; "
               f"falling back to DeepSeek...", file=sys.stderr)
         try:
             eng = get_engine("deepseek", prefer_dpapi=False)
