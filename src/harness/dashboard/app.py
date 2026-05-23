@@ -43,6 +43,31 @@ def _load_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _scan_queue(root: Path | None = None) -> dict[str, Any]:
+    """W5-LL 2026-05-23: surface the autonomous orchestrator's spec
+    queue (Path β) so the dashboard reflects in-flight + completed
+    autonomous work.
+
+    Returns ``{"pending": [...], "done": [...], "pending_count": N,
+    "done_count": N}`` with each list containing relative spec names.
+    Empty when ``spec/auto/`` doesn't exist (e.g. tests / fresh repo).
+    """
+    base = (root or _REPO_ROOT) / "spec" / "auto"
+    done = base / "done"
+    pending: list[str] = []
+    completed: list[str] = []
+    if base.exists():
+        pending = sorted(p.name for p in base.glob("*.md") if p.is_file())
+    if done.exists():
+        completed = sorted(p.name for p in done.glob("*.md") if p.is_file())
+    return {
+        "pending": pending,
+        "done": completed,
+        "pending_count": len(pending),
+        "done_count": len(completed),
+    }
+
+
 def _snapshot() -> dict[str, Any]:
     state = _load_json(DEFAULT_STATE_PATH) or {}
     status_counts = status_summary(DEFAULT_STATUS_PATH)
@@ -81,6 +106,7 @@ def _snapshot() -> dict[str, Any]:
         "heartbeat": heartbeat.model_dump(mode="json") if heartbeat else None,
         "flags": flags,
         "active_dispatches": active_dispatches,
+        "queue": _scan_queue(),  # W5-LL: Path β queue visibility
     }
     snapshot["v2"] = {
         "runs": runs,
@@ -127,6 +153,13 @@ def create_app() -> FastAPI:
             for f in pending[sev]:
                 flags.append(f.model_dump(mode="json"))
         return flags
+
+    @app.get("/api/queue")
+    async def api_queue() -> dict[str, Any]:
+        """W5-LL 2026-05-23: expose the autonomous-orchestrator queue
+        (Path β / W5-U).  Returns pending + done spec names so operators
+        can watch progress without polling git or the filesystem."""
+        return _scan_queue()
 
     @app.get("/api/summary")
     async def api_summary() -> dict[str, Any]:

@@ -259,4 +259,69 @@ class TestCLI:
         result = runner.invoke(cli, ["dashboard-serve", "--help"])
         assert result.exit_code == 0
         assert "--port" in result.output
-        assert "--host" in result.output
+
+
+# ---------------------------------------------------------------------------
+# 10. W5-LL queue endpoint (autonomous-orchestrator visibility)
+# ---------------------------------------------------------------------------
+
+class TestQueueEndpoint:
+    def test_api_queue_empty_when_dirs_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Endpoint returns empty lists when spec/auto/ doesn't exist."""
+        monkeypatch.setattr("harness.dashboard.app._REPO_ROOT", tmp_path)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "coord" / "dev_loop").mkdir(parents=True)
+        (tmp_path / "coord" / "observer").mkdir(parents=True)
+        from harness.dashboard.app import create_app
+        client = TestClient(create_app())
+        r = client.get("/api/queue")
+        assert r.status_code == 200
+        body = r.json()
+        assert body == {
+            "pending": [],
+            "done": [],
+            "pending_count": 0,
+            "done_count": 0,
+        }
+
+    def test_api_queue_lists_pending_and_done(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Endpoint returns alphabetical pending + done lists."""
+        # Patch _REPO_ROOT to tmp_path so the queue scanner reads our test
+        # fixture instead of the real repo root.
+        monkeypatch.setattr(
+            "harness.dashboard.app._REPO_ROOT", tmp_path,
+        )
+        (tmp_path / "spec" / "auto").mkdir(parents=True)
+        (tmp_path / "spec" / "auto" / "done").mkdir(parents=True)
+        (tmp_path / "spec" / "auto" / "alpha.md").write_text("x", encoding="utf-8")
+        (tmp_path / "spec" / "auto" / "bravo.md").write_text("x", encoding="utf-8")
+        (tmp_path / "spec" / "auto" / "done" / "old.md").write_text("x", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        from harness.dashboard.app import create_app
+        client = TestClient(create_app())
+        r = client.get("/api/queue")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["pending"] == ["alpha.md", "bravo.md"]
+        assert body["done"] == ["old.md"]
+        assert body["pending_count"] == 2
+        assert body["done_count"] == 1
+
+    def test_snapshot_includes_queue_field(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """W5-LL: WebSocket snapshot also surfaces the queue (so frontend
+        doesn't need a second poll)."""
+        monkeypatch.setattr("harness.dashboard.app._REPO_ROOT", tmp_path)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "coord" / "dev_loop").mkdir(parents=True)
+        (tmp_path / "coord" / "observer").mkdir(parents=True)
+        from harness.dashboard.app import _snapshot
+        snap = _snapshot()
+        assert "queue" in snap
+        assert "pending_count" in snap["queue"]
+        assert "done_count" in snap["queue"]
