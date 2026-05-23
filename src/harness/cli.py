@@ -605,6 +605,59 @@ def dashboard_serve(port: int, host: str) -> None:
     serve(host=host, port=port)
 
 
+@cli.group(name="memory")
+def memory_group() -> None:
+    """W5-S: engine-agnostic operator memory (memory/*.md repo dir)."""
+
+
+@memory_group.command(name="list")
+def memory_list_cmd() -> None:
+    """List all memory entries (name + title + size)."""
+    from harness import memory as _mem
+    entries = _mem.load_all()
+    if not entries:
+        click.echo("(no memory entries — create memory/*.md files)")
+        sys.exit(0)
+    click.echo(f"{'name':30} {'size':>6}  title")
+    click.echo("-" * 72)
+    for e in entries:
+        click.echo(f"{e.name:30} {e.size_bytes:>6}  {e.title}")
+    sys.exit(0)
+
+
+@memory_group.command(name="show")
+@click.argument("name")
+def memory_show_cmd(name: str) -> None:
+    """Print one memory entry's content."""
+    from harness import memory as _mem
+    e = _mem.find_by_name(name)
+    if e is None:
+        click.echo(f"(no memory entry named '{name}' -- `harness memory list` "
+                   f"shows what's available)", err=True)
+        sys.exit(1)
+    # W5-S: write UTF-8 bytes directly to avoid Windows cp1252 codec
+    # errors on em-dashes and other non-ASCII content.
+    sys.stdout.buffer.write(e.content.encode("utf-8"))
+    sys.stdout.buffer.write(b"\n")
+    sys.stdout.buffer.flush()
+    sys.exit(0)
+
+
+@memory_group.command(name="search")
+@click.argument("query")
+def memory_search_cmd(query: str) -> None:
+    """Find memory entries whose name/title/content match the query."""
+    from harness import memory as _mem
+    matches = _mem.search(query)
+    if not matches:
+        click.echo(f"(no memory entries match '{query}')")
+        sys.exit(0)
+    click.echo(f"{len(matches)} match(es):")
+    for e in matches:
+        click.echo(f"  {e.name:30} {e.title}")
+    sys.exit(0)
+
+
 @cli.command(name="lint-spec")
 @click.argument("spec_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("--spec", "spec_opt", type=click.Path(exists=True, path_type=Path), default=None,

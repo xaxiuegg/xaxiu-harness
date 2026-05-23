@@ -57,8 +57,20 @@ class MockEngine(Engine):
             except Exception:
                 pass  # fall through to builtins
 
-        # 2. Planner-style stub
-        if "WavePlan" in packet_content or "decompose" in packet_content.lower():
+        # W5-S 2026-05-23: tightened routing.  Memory injection
+        # (memory/*.md auto-included in worker prompts) caused
+        # MockEngine to mistake worker calls for planner calls when
+        # memory content mentioned "WavePlan" or "decompose".  The
+        # `# Worker Task:` header (set by worker._build_prompt) is the
+        # authoritative signal of worker-style intent.
+        is_worker_call = "# Worker Task:" in packet_content
+
+        # 2. Planner-style stub (only if NOT a worker call AND mentions
+        # planning keywords)
+        if not is_worker_call and (
+            "WavePlan" in packet_content
+            or "decompose" in packet_content.lower()
+        ):
             return EngineResponse(
                 success=True,
                 text=_default_waveplan_stub(packet_content),
@@ -66,7 +78,8 @@ class MockEngine(Engine):
                 error=None,
             )
 
-        # 3. Worker-style stub
+        # 3. Worker-style stub (default fallthrough OR explicit Worker
+        # Task header)
         return EngineResponse(
             success=True,
             text=_default_worker_stub(packet_content),

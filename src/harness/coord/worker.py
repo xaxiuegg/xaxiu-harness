@@ -195,13 +195,25 @@ def _build_prompt(task_obj, step, read_set_contents: dict[str, str]) -> str:
     drops the protocol, the worker parses 0 edits, W4-A fires.  Adding
     explicit "no prose, no markdown wrappers around the protocol" rules
     + 2 concrete examples reduces that drift.
+
+    W5-S 2026-05-23: auto-inject engine-agnostic memory/*.md content
+    at the top of the packet so any engine (MiMo / DeepSeek / Kimi /
+    Claude) has the operator's standing decisions, conventions, and
+    engine quirks before composing output.  See memory/README.md.
     """
-    lines = [
+    from harness.memory import format_for_packet as _memory_packet
+
+    lines: list[str] = []
+    memory_block = _memory_packet()
+    if memory_block:
+        lines.append(memory_block)
+        lines.append("\n---\n")
+    lines.extend([
         f"# Worker Task: {task_obj.worker_id}",
         f"## Step: {step.step_id} ({step.kind})",
         f"\n{step.instruction}\n",
         "## Context Files",
-    ]
+    ])
     for path, content in read_set_contents.items():
         lines.append(f"\n### {path}\n```\n{content}\n```\n")
     lines.append("\n## Output Format — STRICT")
