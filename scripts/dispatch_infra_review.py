@@ -49,7 +49,8 @@ def main() -> int:
         eng = get_engine(rv.engine, prefer_dpapi=False)
         started = time.monotonic()
         try:
-            resp = eng.dispatch(text, rv.model, {"max_tokens": 4000})
+            # W5-W: don't cap max_tokens; engine defaults apply.
+            resp = eng.dispatch(text, rv.model, {})
             latency = int((time.monotonic() - started) * 1000)
             ok = bool(resp.success and (resp.text or "").strip())
             body = resp.text or ""

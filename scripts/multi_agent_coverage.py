@@ -185,7 +185,11 @@ def main() -> int:
             try:
                 # For mimo, pass 'auto' so it picks Pro or Std automatically;
                 # but here we want EXPLICIT Pro/Std per the matrix.
-                resp = eng.dispatch(packet, model, {"max_tokens": 1500})
+                # W5-W 2026-05-23 (operator directive): don't cap
+                # max_tokens for unlimited-subscription engines.  Let
+                # engine defaults apply (Kimi/MiMo: 131-200k; DeepSeek
+                # still caps at 32k for cost).
+                resp = eng.dispatch(packet, model, {})
                 latency = int((time.monotonic() - started) * 1000)
                 ok = bool(resp.success and (resp.text or "").strip())
                 raw = resp.text or ""

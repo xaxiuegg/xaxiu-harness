@@ -450,12 +450,13 @@ class KimiConcrete(Engine):
         extra: dict[str, Any],
     ) -> dict:
         temperature = extra.get("temperature", 0.6)
-        # WIRE-MAX-TOKENS (2026-05-22): Kimi Code's default output cap is
-        # ~16K when omitted, which silently truncates long worker
-        # outputs.  Explicit 32K gives headroom without bloating the
-        # context budget.  Kimi K2.6 supports up to 256K total context
-        # so this leaves plenty of room for the input prompt.
-        max_tokens = int(extra.get("max_tokens", 32768))
+        # W5-W 2026-05-23 (operator directive): "do not limit max_tokens
+        # of Kimi" — Kimi is unlimited via tp- Token Plan subscription.
+        # Capping output tokens leaves capability on the table.  Default
+        # raised from 32K to 200K (Kimi K2.6 supports 256K total context,
+        # 200K output leaves a small input budget; explicit override via
+        # extra_args still respected for callers that want a cap).
+        max_tokens = int(extra.get("max_tokens", 200_000))
         return {
             "model": model,
             "messages": [{"role": "user", "content": content}],
@@ -764,7 +765,12 @@ class MiMoConcrete(Engine):
         extra: dict[str, Any],
     ) -> dict:
         temperature = float(extra.get("temperature", 0.6))
-        max_tokens = int(extra.get("max_tokens", 32768))
+        # W5-W 2026-05-23 (operator directive): "do not limit max_tokens
+        # of unlimited-subscription engines" — MiMo via tp- Token Plan
+        # is flat-rate.  Default raised to MiMo's hardware max (131072).
+        # sk- pay-per-token callers can override via extra_args if cost
+        # control is needed.
+        max_tokens = int(extra.get("max_tokens", 131_072))
         payload: dict = {
             "model": model,
             "messages": [{"role": "user", "content": content}],

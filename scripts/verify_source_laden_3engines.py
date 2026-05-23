@@ -118,12 +118,10 @@ def main() -> int:
             eng = get_engine(engine_name, prefer_dpapi=False)
             started = time.monotonic()
             try:
-                # max_tokens=8192: 4x the 2000-token re-run.  Operator
-                # surfaced that kimi+mimo have unlimited subscription budget,
-                # so let's test if higher caps unlock more reliability.
-                # Kimi's 60s thinking-time cap is server-side, so budget
-                # won't help it; MiMo Pro might gain reliability though.
-                resp = eng.dispatch(packet, model, {"max_tokens": 8192})
+                # W5-W 2026-05-23: operator directive "do not limit
+                # max_tokens of unlimited-subscription engines".  Pass {}
+                # so engine defaults apply (Kimi 200k, MiMo 131k, DS 32k).
+                resp = eng.dispatch(packet, model, {})
                 latency = int((time.monotonic() - started) * 1000)
                 ok = bool(resp.success and (resp.text or "").strip())
                 text = resp.text or ""

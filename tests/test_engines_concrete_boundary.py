@@ -570,8 +570,11 @@ def test_default_read_timeout_overridable_via_env(monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 
 def test_kimi_payload_includes_max_tokens_default() -> None:
+    # W5-W 2026-05-23: operator directive "do not limit max_tokens of
+    # Kimi" — default raised from 32K to 200K (Kimi K2.6 supports 256K
+    # total context, 200K output leaves a small input budget).
     payload = KimiConcrete._build_payload("hello", "kimi-for-coding", {})
-    assert payload["max_tokens"] == 32768
+    assert payload["max_tokens"] == 200_000
 
 
 def test_kimi_payload_max_tokens_overridable() -> None:
@@ -632,11 +635,14 @@ def test_resolve_mimo_upstream_explicit_env_override(monkeypatch: pytest.MonkeyP
 
 
 def test_mimo_payload_shape() -> None:
+    # W5-W 2026-05-23: operator directive "do not limit max_tokens of
+    # unlimited-subscription engines" — MiMo default raised from 32K to
+    # 131K (hardware max).
     from harness.engines.concrete import MiMoConcrete
     p = MiMoConcrete._build_payload("hi", "mimo-v2.5-pro", {})
     assert p["model"] == "mimo-v2.5-pro"
     assert p["messages"][0]["content"] == "hi"
-    assert p["max_tokens"] == 32768
+    assert p["max_tokens"] == 131_072
     assert "temperature" in p
     assert "thinking" not in p  # only included when explicitly requested
 

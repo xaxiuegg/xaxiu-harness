@@ -56,8 +56,8 @@ def main() -> int:
         engine = get_engine(rv.engine, prefer_dpapi=False)
         started = time.monotonic()
         try:
-            # Direct dispatch — generous max_tokens; no fallback chain
-            resp = engine.dispatch(packet_text, rv.model, {"max_tokens": 8000})
+            # W5-W 2026-05-23: don't cap max_tokens; engine defaults apply.
+            resp = engine.dispatch(packet_text, rv.model, {})
             latency = int((time.monotonic() - started) * 1000)
             ok = bool(resp.success and (resp.text or "").strip())
             text = resp.text or ""

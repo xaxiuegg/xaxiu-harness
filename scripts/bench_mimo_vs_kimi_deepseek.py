@@ -137,7 +137,9 @@ def _dispatch_one(prompt_id: str, prompt: str,
 
     started = time.monotonic()
     try:
-        resp = engine.dispatch(prompt, model, {"max_tokens": 2048})
+        # W5-W 2026-05-23: don't cap max_tokens for unlimited-subscription
+        # engines; engine defaults apply (Kimi 200k, MiMo 131k, DS 32k).
+        resp = engine.dispatch(prompt, model, {})
     except Exception as exc:
         latency = int((time.monotonic() - started) * 1000)
         return RunResult(
