@@ -1,0 +1,206 @@
+{
+  "run_at_utc": "2026-05-23T10:35:15.223847+00:00",
+  "total_dispatches": 9,
+  "engines": [
+    {
+      "name": "kimi",
+      "model": "kimi-for-coding"
+    },
+    {
+      "name": "mimo",
+      "model": "mimo-v2.5-pro"
+    },
+    {
+      "name": "deepseek",
+      "model": "deepseek-v4-flash"
+    }
+  ],
+  "futs": [
+    {
+      "name": "small_source",
+      "source": "src/harness/heartbeat.py"
+    },
+    {
+      "name": "medium_source",
+      "source": "src/harness/coord/run_state.py"
+    },
+    {
+      "name": "large_source",
+      "source": "src/harness/coord/coordinator.py"
+    }
+  ],
+  "by_fut_matrix": {
+    "small_source": {
+      "kimi": "OK",
+      "mimo": "OK",
+      "deepseek": "OK"
+    },
+    "medium_source": {
+      "kimi": "OK",
+      "mimo": "EMPTY/FAIL",
+      "deepseek": "OK"
+    },
+    "large_source": {
+      "kimi": "OK",
+      "mimo": "OK",
+      "deepseek": "OK"
+    }
+  },
+  "by_engine": {
+    "kimi": {
+      "in": 7148,
+      "out": 14451,
+      "ok": 3,
+      "fail": 0
+    },
+    "mimo": {
+      "in": 7262,
+      "out": 2925,
+      "ok": 2,
+      "fail": 1
+    },
+    "deepseek": {
+      "in": 7729,
+      "out": 2630,
+      "ok": 3,
+      "fail": 0
+    }
+  },
+  "results": [
+    {
+      "fut": "small_source",
+      "source_path": "src/harness/heartbeat.py",
+      "source_bytes": 5695,
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "success": true,
+      "latency_ms": 48647,
+      "tokens_in": 1655,
+      "tokens_out": 5028,
+      "text_len": 200,
+      "text_preview": "{\n  \"summary\": \"Writes atomic heartbeat from state.json and renders human-readable status.\",\n  \"likely_failure\": \"read_h",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "small_source",
+      "source_path": "src/harness/heartbeat.py",
+      "source_bytes": 5695,
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "latency_ms": 23250,
+      "tokens_in": 1891,
+      "tokens_out": 1205,
+      "text_len": 166,
+      "text_preview": "{\n  \"summary\": \"Manages and displays dev-loop heartbeat liveness signals.\",\n  \"likely_failure\": \"Pydantic validation fai",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "small_source",
+      "source_path": "src/harness/heartbeat.py",
+      "source_bytes": 5695,
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "success": true,
+      "latency_ms": 5557,
+      "tokens_in": 1755,
+      "tokens_out": 392,
+      "text_len": 174,
+      "text_preview": "{\n  \"summary\": \"Passive liveness signal for dev manager, derived from state.json\",\n  \"likely_failure\": \"JSON decode erro",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "medium_source",
+      "source_path": "src/harness/coord/run_state.py",
+      "source_bytes": 1042,
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "success": true,
+      "latency_ms": 32730,
+      "tokens_in": 381,
+      "tokens_out": 1092,
+      "text_len": 177,
+      "text_preview": "{\n  \"summary\": \"Atomic JSON read/write helpers for Coordinator RunState.\",\n  \"likely_failure\": \"Silently returns None on",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "medium_source",
+      "source_path": "src/harness/coord/run_state.py",
+      "source_bytes": 1042,
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "success": false,
+      "latency_ms": 60774,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "text_len": 0,
+      "text_preview": "",
+      "parseable_json": false,
+      "error": "internal"
+    },
+    {
+      "fut": "medium_source",
+      "source_path": "src/harness/coord/run_state.py",
+      "source_bytes": 1042,
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "success": true,
+      "latency_ms": 25410,
+      "tokens_in": 407,
+      "tokens_out": 1934,
+      "text_len": 152,
+      "text_preview": "{\n  \"summary\": \"Atomic read/write helpers for RunState JSON.\",\n  \"likely_failure\": \"os.replace fails on Windows if dest ",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "large_source",
+      "source_path": "src/harness/coord/coordinator.py",
+      "source_bytes": 23026,
+      "engine": "kimi",
+      "model": "kimi-for-coding",
+      "success": true,
+      "latency_ms": 287373,
+      "tokens_in": 5112,
+      "tokens_out": 8331,
+      "text_len": 211,
+      "text_preview": "{\n  \"summary\": \"Orchestrates distributed spec-run planning, worker spawn, poll, and cleanup.\",\n  \"likely_failure\": \"Resu",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "large_source",
+      "source_path": "src/harness/coord/coordinator.py",
+      "source_bytes": 23026,
+      "engine": "mimo",
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "latency_ms": 28760,
+      "tokens_in": 5371,
+      "tokens_out": 1720,
+      "text_len": 213,
+      "text_preview": "{\n  \"summary\": \"Manages spec execution by coordinating worker processes and state transitions.\",\n  \"likely_failure\": \"Ra",
+      "parseable_json": true,
+      "error": null
+    },
+    {
+      "fut": "large_source",
+      "source_path": "src/harness/coord/coordinator.py",
+      "source_bytes": 23026,
+      "engine": "deepseek",
+      "model": "deepseek-v4-flash",
+      "success": true,
+      "latency_ms": 4631,
+      "tokens_in": 5567,
+      "tokens_out": 304,
+      "text_len": 189,
+      "text_preview": "{\n  \"summary\": \"Orchestrates spec runs: plan, spawn workers, detect stalls, cleanup.\",\n  \"likely_failure\": \"Duplicate wo",
+      "parseable_json": true,
+      "error": null
+    }
+  ]
+}
