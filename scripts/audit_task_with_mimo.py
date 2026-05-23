@@ -65,11 +65,19 @@ Message:
 
 {diffstat}
 
-# Diff (first 4000 chars)
+# Diff (first 16000 chars)
 
 ```
 {diff_excerpt}
 ```
+
+# Current state of modified files (post-commit)
+
+These are the FULL CURRENT CONTENTS of each modified file after the
+commit landed.  Use this to verify the implementation actually does
+what the diff suggests (the diff may be misleading or partial).
+
+{file_contents}
 
 # Your task
 
@@ -153,7 +161,30 @@ def git_commit_info(sha: str = "HEAD") -> dict:
         message = "(no message)"
     diffstat = _run(["show", "--stat", "--format=", full_sha]).strip()
     diff = _run(["show", "--format=", full_sha])
-    diff_excerpt = diff[:4000] + ("..." if len(diff) > 4000 else "")
+    # W6-A1.2-followup: raised from 4000 → 16000 chars after MiMo
+    # audit STOPped with "diff missing" complaint on a 203-line commit.
+    # MiMo's 131K input window has plenty of room for richer context.
+    diff_excerpt = diff[:16000] + ("..." if len(diff) > 16000 else "")
+    # Pull the current contents of each modified file so the auditor
+    # sees the actual post-commit state (not just delta).
+    file_list_raw = _run(["show", "--name-only", "--format=", full_sha]).strip()
+    modified_files = [p for p in file_list_raw.splitlines() if p.strip()]
+    file_contents_blocks: list[str] = []
+    # Limit total file-content budget to ~12KB so prompt+diff stays
+    # under MiMo's 60s gateway timeout for small reasoning tasks.
+    per_file_budget = 3000
+    for rel in modified_files[:4]:  # cap at 4 files
+        path = Path(rel)
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if len(content) > per_file_budget:
+            content = content[:per_file_budget] + f"\n... [+{len(content) - per_file_budget} chars truncated]"
+        file_contents_blocks.append(f"## {rel}\n\n```\n{content}\n```")
+    file_contents = "\n\n".join(file_contents_blocks) if file_contents_blocks else "(none)"
     return {
         "sha": sha_val,
         "author": author,
@@ -161,6 +192,7 @@ def git_commit_info(sha: str = "HEAD") -> dict:
         "message": message,
         "diffstat": diffstat,
         "diff_excerpt": diff_excerpt,
+        "file_contents": file_contents,
     }
 
 
@@ -194,10 +226,16 @@ def main() -> int:
         message=info["message"],
         diffstat=info["diffstat"][:2000],
         diff_excerpt=info["diff_excerpt"],
+        file_contents=info.get("file_contents", "(none)"),
     )
 
     print(f"[audit] task={args.task_id} sha={info['sha'][:12]} "
           f"prompt={len(prompt)} chars", flush=True)
+
+    # Primary: MiMo (operator-specified auditor).
+    # Fallback: DeepSeek (W5-MM streaming, reliable, pay-per-token but
+    # audits are infrequent + small).  Mirrors worker.py fallback chain.
+    auditor_used = "mimo"
     try:
         eng = get_engine("mimo", prefer_dpapi=False)
     except RuntimeError as exc:
@@ -208,10 +246,24 @@ def main() -> int:
     latency = int((time.monotonic() - started) * 1000)
 
     if not resp.success or not (resp.text or "").strip():
-        print(f"[audit] dispatch failed ({latency}ms): {resp.error}",
+        print(f"[audit] MiMo failed ({latency}ms): {resp.error}; "
+              f"falling back to DeepSeek...", file=sys.stderr)
+        try:
+            eng = get_engine("deepseek", prefer_dpapi=False)
+            fb_started = time.monotonic()
+            resp = eng.dispatch(prompt, "deepseek-v4-flash", {"max_tokens": 8_000})
+            latency += int((time.monotonic() - fb_started) * 1000)
+            auditor_used = "deepseek (fallback)"
+        except RuntimeError as exc:
+            print(f"DeepSeek init failed: {exc}", file=sys.stderr)
+            return 2
+
+    if not resp.success or not (resp.text or "").strip():
+        print(f"[audit] BOTH engines failed ({latency}ms): {resp.error}",
               file=sys.stderr)
         return 2
 
+    print(f"[audit] auditor: {auditor_used} ({latency}ms total)", flush=True)
     text = resp.text.strip()
     # Extract JSON
     m = re.search(r"\{[\s\S]*\}", text)
