@@ -1548,8 +1548,11 @@ def state_inspect(fmt: str, path: Path) -> None:
         click.echo(f"error: {exc}", err=True)
         sys.exit(1)
     except ConfigCorruption as exc:
-        click.echo(f"error: {exc.tag()}: {exc.message}", err=True)
-        sys.exit(exc.exit_code())
+        # W5-Y 2026-05-23: route through handle_harness_error so the
+        # L5 operator-escalation banner fires uniformly (instead of a
+        # one-line "error: tag" that observer scrapers can't grep for).
+        from harness.errors import handle_harness_error
+        handle_harness_error(exc, sys_exit=sys.exit)
 
 
 @state.command(name="snapshot")

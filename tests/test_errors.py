@@ -18,6 +18,8 @@ from harness.errors import (
     PacketTrap,
     SchemaViolation,
     WavePersistentlyFailing,
+    format_escalation_banner,
+    handle_harness_error,
 )
 
 
@@ -144,3 +146,70 @@ def test_repr_includes_tag() -> None:
     r = repr(err)
     assert "DispatchExhausted" in r
     assert "L3.dispatch.E_DISPATCH_EXHAUSTED" in r
+
+
+# ---------------------------------------------------------------------------
+# W5-Y operator-escalation contract (handle_harness_error / banner)
+# ---------------------------------------------------------------------------
+
+def test_l5_banner_contains_escalation_marker() -> None:
+    """L5 errors render the operator-escalation banner with a stable
+    grep-able marker.  Observer scrapers depend on this exact string."""
+    err = ConfigCorruption("state.json is mangled")
+    banner = format_escalation_banner(err)
+    assert "*** OPERATOR ESCALATION (L5) ***" in banner
+    assert "L5.config.E_CONFIG_CORRUPTION" in banner
+    assert "state.json is mangled" in banner
+
+
+def test_l3_summary_has_no_banner() -> None:
+    """L3 returns a single-line summary, NOT the L5 escalation banner.
+    Autonomous-loop handlers grep for the L5 marker to decide whether
+    to halt — L1-L4 must not trigger that path."""
+    err = DispatchExhausted("retry exhausted")
+    summary = format_escalation_banner(err)
+    assert "OPERATOR ESCALATION" not in summary
+    assert "[L3.dispatch.E_DISPATCH_EXHAUSTED]" in summary
+    assert "retry exhausted" in summary
+
+
+def test_handle_harness_error_writes_and_returns_code() -> None:
+    """handle_harness_error() writes the banner to the given writer
+    and returns the exit code, without calling sys.exit by default."""
+    written: list[str] = []
+
+    def _writer(s: str) -> int:
+        written.append(s)
+        return len(s)
+
+    err = AllEnginesUnreachable("no engines reachable")
+    code = handle_harness_error(err, stderr_writer=_writer)
+    assert code == 4  # L5 exit code
+    assert any("OPERATOR ESCALATION (L5)" in w for w in written)
+
+
+def test_handle_harness_error_invokes_sys_exit_when_provided() -> None:
+    """When sys_exit is supplied, the helper terminates after writing."""
+    written: list[str] = []
+    exit_codes: list[int] = []
+    err = DpapiUnreadable("DPAPI fail")
+    handle_harness_error(
+        err,
+        stderr_writer=lambda s: written.append(s) or len(s),
+        sys_exit=lambda c: exit_codes.append(c),
+    )
+    assert exit_codes == [4]
+    assert any("OPERATOR ESCALATION" in w for w in written)
+
+
+def test_handle_l3_does_not_trigger_escalation_marker() -> None:
+    """L3 routes through handle_harness_error() but the banner is the
+    short summary — exit code 1, no escalation marker."""
+    written: list[str] = []
+    err = EngineTimeout("read timeout 600s")
+    code = handle_harness_error(
+        err, stderr_writer=lambda s: written.append(s) or len(s),
+    )
+    assert code == 1
+    assert not any("OPERATOR ESCALATION" in w for w in written)
+    assert any("L3.engines.E_ENGINE_TIMEOUT" in w for w in written)

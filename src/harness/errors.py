@@ -30,6 +30,8 @@ __all__ = [
     "WorktreeMissing",
     "ALLOWED_DOMAINS",
     "ALLOWED_LEVELS",
+    "format_escalation_banner",
+    "handle_harness_error",
 ]
 
 Domain = Literal[
@@ -191,3 +193,63 @@ class WavePersistentlyFailing(HarnessError):
     level = 5
     domain = "dispatch"
     code = "E_WAVE_PERSISTENTLY_FAILING"
+
+
+# ---------------------------------------------------------------------------
+# W5-Y operator-escalation contract
+#
+# Memory directive 2026-05-20: "only L5 escalates to operator under
+# full-dev-authority directive; L1-L4 are handled autonomously by the
+# dev loop."  Concretize that contract as a callable so every code
+# path that catches a HarnessError can route it the same way:
+#
+#   try:
+#       ...
+#   except HarnessError as exc:
+#       handle_harness_error(exc)
+#
+# The banner format is stable so observer / log scrapers can grep for
+# "OPERATOR ESCALATION (L5)" reliably.
+# ---------------------------------------------------------------------------
+
+def format_escalation_banner(exc: HarnessError) -> str:
+    """Render the human-facing escalation banner for an L5 error.
+
+    Always returns the same shape — observer scrapers can grep for the
+    leading "*** OPERATOR ESCALATION (L5) ***" marker.  Lower-level
+    errors return a single-line summary (no banner).
+    """
+    if exc.level >= 5:
+        return (
+            "\n"
+            "*** OPERATOR ESCALATION (L5) ***\n"
+            f"  tag:     {exc.tag()}\n"
+            f"  domain:  {exc.domain}\n"
+            f"  code:    {exc.code}\n"
+            f"  message: {exc.message}\n"
+            "*** action: operator review required ***\n"
+        )
+    return f"[{exc.tag()}] {exc.message}"
+
+
+def handle_harness_error(
+    exc: HarnessError,
+    *,
+    stderr_writer: Any = None,
+    sys_exit: Any = None,
+) -> int:
+    """Print the escalation banner + return the exit code.
+
+    Does NOT call ``sys.exit`` by default — caller decides whether to
+    terminate or recover.  Pass ``sys_exit=sys.exit`` to force
+    termination.  ``stderr_writer`` defaults to ``sys.stderr.write``.
+
+    Returns the exit code (0 for L1-L2, 1 for L3, 3 for L4, 4 for L5).
+    """
+    import sys as _sys
+    write = stderr_writer or _sys.stderr.write
+    write(format_escalation_banner(exc) + "\n")
+    code = exc.exit_code()
+    if sys_exit is not None:
+        sys_exit(code)
+    return code
