@@ -1,0 +1,151 @@
+{
+  "started_at": "2026-05-23T06:20:37.253537+00:00",
+  "queue_elapsed_s": 1279,
+  "pilots": [
+    {
+      "label": "G1-mimo",
+      "spec": "spec/samples/pilot-G1-script-docstring.md",
+      "rid": "20260523T062040-020c",
+      "engine": "swarm/mimo",
+      "fallback": null,
+      "elapsed_s": 468,
+      "outcome": "completed",
+      "workers": [
+        {
+          "worker_id": "worker-1",
+          "state": "completed",
+          "files_modified": [
+            "scripts/verify_source_laden_3engines.py"
+          ],
+          "commit_sha": "1a18db02d8048cdaab981402ec7d65b3249b8a44"
+        }
+      ],
+      "engine_used": [
+        {
+          "step": "s1-edit",
+          "engine": "swarm/mimo"
+        }
+      ],
+      "run_exit": 0
+    },
+    {
+      "label": "G1-deepseek+mimo",
+      "spec": "spec/samples/pilot-G1-script-docstring.md",
+      "rid": "20260523T062845-d259",
+      "engine": "swarm/deepseek",
+      "fallback": "swarm/mimo",
+      "elapsed_s": 191,
+      "outcome": "completed",
+      "workers": [
+        {
+          "worker_id": "worker-1",
+          "state": "completed",
+          "files_modified": [
+            "scripts/verify_source_laden_3engines.py"
+          ],
+          "commit_sha": "1d2e90ec5785de0bd802cc3e85311a9ba15bc613"
+        }
+      ],
+      "engine_used": [
+        {
+          "step": "s1",
+          "engine": "swarm/deepseek"
+        }
+      ],
+      "run_exit": 0
+    },
+    {
+      "label": "G1-kimi+mimo",
+      "spec": "spec/samples/pilot-G1-script-docstring.md",
+      "rid": "20260523T063207-65b7",
+      "engine": "swarm/kimi",
+      "fallback": "swarm/mimo",
+      "elapsed_s": 152,
+      "outcome": "completed",
+      "workers": [
+        {
+          "worker_id": "worker-1",
+          "state": "completed",
+          "files_modified": [
+            "scripts/verify_source_laden_3engines.py"
+          ],
+          "commit_sha": "b941ea3f4edbf8d3e284cae68520df4c1e0c0440"
+        }
+      ],
+      "engine_used": [
+        {
+          "step": "s1",
+          "engine": "swarm/kimi"
+        }
+      ],
+      "run_exit": 0
+    },
+    {
+      "label": "G3-mimo+ds",
+      "spec": "spec/samples/pilot-G3-multiworker-independent.md",
+      "rid": "20260523T063459-fde4",
+      "engine": "swarm/mimo",
+      "fallback": "swarm/deepseek",
+      "elapsed_s": 236,
+      "outcome": "completed",
+      "workers": [
+        {
+          "worker_id": "worker-1",
+          "state": "completed",
+          "files_modified": [
+            "coord/coverage/W5_F_BUDGET_DIAGNOSIS.md"
+          ],
+          "commit_sha": "5f50c41bef19128c69de1f04ff3ca82d835b071e"
+        },
+        {
+          "worker_id": "worker-2",
+          "state": "completed",
+          "files_modified": [
+            "coord/coverage/W5_J_CRLF_BUG.md"
+          ],
+          "commit_sha": "e0d658f5a1ccc622d23540c869a25b1f8c93bc9d"
+        }
+      ],
+      "engine_used": [
+        {
+          "step": "s1",
+          "engine": "swarm/mimo"
+        },
+        {
+          "step": "s1",
+          "engine": "swarm/deepseek"
+        }
+      ],
+      "run_exit": 0
+    },
+    {
+      "label": "readme-mimo",
+      "spec": "spec/samples/pilot-readme-pilot-note.md",
+      "rid": "20260523T063910-7dae",
+      "engine": "swarm/mimo",
+      "fallback": null,
+      "elapsed_s": 150,
+      "outcome": "completed",
+      "workers": [
+        {
+          "worker_id": "worker-1",
+          "state": "completed",
+          "files_modified": [
+            "README.md"
+          ],
+          "commit_sha": "10b6c9e3919fa6e9e741c36d5a6577a4fdb42558"
+        }
+      ],
+      "engine_used": [
+        {
+          "step": "s1",
+          "engine": "swarm/mimo"
+        }
+      ],
+      "run_exit": 0
+    }
+  ],
+  "cost_delta_usd": 0.02999500000000002,
+  "tokens_in_delta": 16202,
+  "tokens_out_delta": 51452
+}
