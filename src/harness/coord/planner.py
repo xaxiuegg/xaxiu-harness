@@ -224,11 +224,20 @@ def plan(
         ) as tmp:
             tmp.write(prompt)
             tmp_path = tmp.name
+        # W5-EE 2026-05-23: dispatch_packet's force_engine accepts only
+        # raw concrete-engine names ("kimi", "deepseek", "anthropic",
+        # "mimo", "mock", "gemini"); planner verb accepts the broader
+        # swarm-prefixed taxonomy ("kimi-api", "claude", etc.).  Map
+        # planner names to dispatcher names so --engine kimi-api works.
+        _PLANNER_TO_DISPATCH = {
+            "kimi-api": "kimi",  # both hit the same Kimi HTTP API
+        }
+        dispatch_engine = _PLANNER_TO_DISPATCH.get(engine, engine)
         try:
             result = dispatch_packet(
                 project="harness-planner",
                 packet_path=tmp_path,
-                force_engine=engine if engine != "claude" else None,
+                force_engine=dispatch_engine if dispatch_engine != "claude" else None,
                 force_model=model,
                 # WIRE-TRUSTED-SOURCE (2026-05-22): operator-authored
                 # specs routinely reference DPAPI/env-var APIs by name
