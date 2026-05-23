@@ -14,6 +14,7 @@ Usage:
     response = engine.dispatch("Hello", "deepseek-v4-flash", {})
 """
 
+import json
 import time
 import os
 from pathlib import Path
@@ -305,68 +306,140 @@ class KimiConcrete(Engine):
         model: str,
         extra_args: Optional[dict[str, Any]] = None,
     ) -> EngineResponse:
+        """W5-V 2026-05-23: streaming-first with Kimi-quirk handling.
+
+        Three Kimi-specific issues this implementation handles:
+
+        1. **60-second server wall-clock**: Kimi's gateway closes the
+           connection at ~60s on non-stream requests for big packets
+           (3KB+ inputs).  Streaming bypasses this — server keeps the
+           connection alive as it emits incremental chunks.
+
+        2. **Thinking-budget starvation**: kimi-for-coding (and most
+           Kimi models on api.kimi.com) emit `reasoning_content` tokens
+           first then `content`.  Non-stream requests with tight
+           max_tokens consume the whole budget on reasoning, leaving 0
+           content.  Streaming + a generous max_tokens lets reasoning
+           finish + content emit incrementally.
+
+        3. **Non-standard SSE format**: Kimi sends `data:{...}` with
+           NO space after the colon (vs the standard `data: {...}`).
+           Parsers expecting the space silently emit 0 tokens.
+        """
         extra = extra_args or {}
 
         start = time.monotonic()
+        payload = self._build_payload(packet_content, model, extra)
+        payload["stream"] = True  # W5-V: always stream Kimi
+
+        url = _resolve_kimi_upstream()
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            # Kimi Code API enforces a User-Agent allowlist
+            "User-Agent": _make_kimi_user_agent(),
+        }
+
+        content_chunks: list[str] = []
+        reasoning_chunks: list[str] = []
+        finish_reason: str = ""
+        usage_info: dict | None = None
+
         try:
-            with httpx.Client(
-                verify=True,
-                timeout=_DEFAULT_TIMEOUT,
-            ) as client:
-                payload = self._build_payload(packet_content, model, extra)
-                response = client.post(
-                    _resolve_kimi_upstream(),
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        # Kimi Code API enforces a User-Agent allowlist —
-                        # see _make_kimi_user_agent docstring.
-                        "User-Agent": _make_kimi_user_agent(),
-                    },
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                text = _extract_chat_text(data)
-                tokens_in, tokens_out = _extract_openai_usage(data)
-                latency_ms = int((time.monotonic() - start) * 1000)
+            with httpx.Client(verify=True, timeout=_DEFAULT_TIMEOUT) as client:
+                with client.stream("POST", url, headers=headers, json=payload) as r:
+                    if r.status_code != 200:
+                        latency_ms = int((time.monotonic() - start) * 1000)
+                        return EngineResponse(
+                            success=False, text="", latency_ms=latency_ms,
+                            error=f"HTTP {r.status_code}",
+                        )
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        # W5-V: handle BOTH "data: " (standard) and "data:" (Kimi)
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                        elif line.startswith("data:"):
+                            data_str = line[5:]
+                        else:
+                            continue
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except (ValueError, json.JSONDecodeError):
+                            continue
+                        choices = chunk.get("choices") or []
+                        if choices:
+                            delta = choices[0].get("delta") or {}
+                            if delta.get("content"):
+                                content_chunks.append(delta["content"])
+                            if delta.get("reasoning_content"):
+                                reasoning_chunks.append(delta["reasoning_content"])
+                            fr = choices[0].get("finish_reason")
+                            if fr:
+                                finish_reason = fr
+                        if chunk.get("usage"):
+                            usage_info = chunk["usage"]
+            latency_ms = int((time.monotonic() - start) * 1000)
+            text = "".join(content_chunks)
+            tokens_in = int((usage_info or {}).get("prompt_tokens", 0))
+            tokens_out = int((usage_info or {}).get("completion_tokens", 0))
+            # If the server returned 200 but emitted ZERO parseable
+            # chunks (no content, no reasoning, no usage), the response
+            # was structurally invalid (e.g. malformed body, gateway
+            # filtered).  Surface as failure so callers / fallback chain
+            # can react.  Empty content alone (with usage block) is
+            # acceptable: server may have hit max_tokens during reasoning;
+            # that case still has usage_info populated and guards.py
+            # Rule 2 catches the empty-text via classify_response.
+            parsed_anything = (
+                bool(content_chunks) or bool(reasoning_chunks)
+                or usage_info is not None or bool(finish_reason)
+            )
+            if not parsed_anything:
                 return EngineResponse(
-                    success=True,
-                    text=text,
-                    latency_ms=latency_ms,
-                    error=None,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
+                    success=False, text="", latency_ms=latency_ms,
+                    error="parse_error_no_chunks",
                 )
+            return EngineResponse(
+                success=True, text=text, latency_ms=latency_ms,
+                error=None, tokens_in=tokens_in, tokens_out=tokens_out,
+            )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
+                success=False, text="", latency_ms=latency_ms,
                 error=f"HTTP {e.response.status_code}",
             )
         except httpx.TimeoutException:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
+                success=False, text="", latency_ms=latency_ms,
                 error="timeout",
             )
         except httpx.ConnectError:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
+                success=False, text="", latency_ms=latency_ms,
                 error="network",
+            )
+        except httpx.RemoteProtocolError:
+            # W5-V: server-disconnect mid-stream (happens occasionally
+            # at the 60s gateway timeout if reasoning hasn't yielded
+            # content yet).  Capture whatever partial content we have.
+            latency_ms = int((time.monotonic() - start) * 1000)
+            partial = "".join(content_chunks)
+            return EngineResponse(
+                success=bool(partial),
+                text=partial,
+                latency_ms=latency_ms,
+                error=None if partial else "kimi_remote_disconnect",
             )
         except Exception:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
+                success=False, text="", latency_ms=latency_ms,
                 error="internal",
             )
 

@@ -91,15 +91,21 @@ def test_deepseek_dispatch_populates_tokens(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_kimi_dispatch_populates_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W5-V: Kimi now streams.  Mock SSE chunks via stream-yielding response."""
+    import json as _json
     _patch_abstract(monkeypatch, KimiConcrete)
-    body = {
-        "choices": [{"message": {"content": "kimi-ok"}}],
-        "usage": {"prompt_tokens": 11, "completion_tokens": 22},
-    }
-    _swap_httpx(monkeypatch, lambda req: httpx.Response(200, json=body))
+    # Build SSE response body (Kimi format: "data:<json>\n" no space)
+    chunks = [
+        'data:{"choices":[{"delta":{"content":"kimi-ok"}}]}',
+        'data:{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":22}}',
+        'data:[DONE]',
+    ]
+    sse_body = "\n\n".join(chunks).encode("utf-8")
+    _swap_httpx(monkeypatch, lambda req: httpx.Response(200, content=sse_body))
     eng = KimiConcrete("kimi-key")
     resp = eng.dispatch("hi", "kimi-for-coding", {})
     assert resp.success is True
+    assert resp.text == "kimi-ok"
     assert resp.tokens_in == 11
     assert resp.tokens_out == 22
 

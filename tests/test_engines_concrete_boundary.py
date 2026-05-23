@@ -247,13 +247,20 @@ def test_resolve_kimi_upstream_fallback(monkeypatch: pytest.MonkeyPatch) -> None
 def test_kimi_success(
     monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete
 ) -> None:
+    """W5-V: Kimi streams (data:<json> SSE format, no space after colon)."""
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["headers"] = dict(request.headers)
         captured["body"] = json.loads(request.content)
-        return httpx.Response(200, json=KIMI_JSON_OK)
+        # Return SSE-streaming response (Kimi's non-standard 'data:<json>' format)
+        sse = (
+            'data:{"choices":[{"delta":{"content":"kimi-ok"}}]}\n\n'
+            'data:{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n'
+            'data:[DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
 
     monkeypatch.setattr(
         httpx, "Client", lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(transport=httpx.MockTransport(handler))
@@ -271,6 +278,8 @@ def test_kimi_success(
     assert captured["headers"]["user-agent"] == "claude-code/0.1.0"
     assert captured["body"]["model"] == "kimi-model"
     assert captured["body"]["messages"] == [{"role": "user", "content": "hello"}]
+    # W5-V: stream=true is always set for Kimi
+    assert captured["body"]["stream"] is True
 
 
 def test_kimi_401(
@@ -350,6 +359,8 @@ def test_kimi_timeout(
 def test_kimi_malformed_json(
     monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete
 ) -> None:
+    """W5-V: when stream returns 200 but no parseable chunks, surface as
+    parse_error_no_chunks so the fallback chain fires."""
     transport = _mock_transport(status_code=200, text_body="not json")
     monkeypatch.setattr(
         httpx, "Client", lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(transport=transport)
@@ -358,18 +369,25 @@ def test_kimi_malformed_json(
     resp = kimi_engine.dispatch("hello", "kimi-model", {})
 
     assert resp.success is False
-    assert resp.error == "internal"
+    assert resp.error == "parse_error_no_chunks"
 
 
 def test_kimi_routes_through_proxy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kimi_engine: KimiConcrete
 ) -> None:
+    """W5-V: stream proxy variant — same as test_kimi_success but with
+    HARNESS_PROXY_URL routing."""
     monkeypatch.setenv("HARNESS_PROXY_URL", "http://proxy-test:7879/v1/chat/completions")
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        return httpx.Response(200, json=KIMI_JSON_OK)
+        sse = (
+            'data:{"choices":[{"delta":{"content":"kimi-ok"}}]}\n\n'
+            'data:{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n'
+            'data:[DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
 
     monkeypatch.setattr(
         httpx, "Client", lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(transport=httpx.MockTransport(handler))
