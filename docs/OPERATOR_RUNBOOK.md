@@ -84,6 +84,20 @@ Re-run without `--dry-run` once you're happy with the preview.
 
 ---
 
+## When preflight runs slow
+
+Direct invocation of `harness preflight --skip-engines` and
+`harness today` typically completes in ~7s on a clean machine.
+Under contention (e.g. you're running them while a `harness
+dispatch` is in flight), expect them to run up to 2× slower; this
+is expected and the commands won't deadlock — they have bounded
+PowerShell-probe timeouts (5s, with graceful degrade).  If the
+operator-facing budget feels off (preflight regularly >15s, today
+regularly >20s), report it and run `harness preflight --skip-engines`
+with `--format json` to capture per-check timings.
+
+---
+
 ## When something looks weird
 
 These three commands answer "what's the harness doing?":

@@ -177,29 +177,119 @@ def extract_acceptance(plan_text: str, task_id: str) -> str | None:
     return am.group(1).strip()
 
 
-def git_commit_info(sha: str = "HEAD") -> dict:
-    """Pull SHA + author + date + message + diffstat + diff excerpt for a commit."""
-    def _run(args: list[str]) -> str:
+def _run_git(args: list[str]) -> str:
+    """Module-level git runner (was nested in git_commit_info)."""
+    try:
+        return subprocess.run(
+            ["git"] + args, capture_output=True, text=True, check=False,
+        ).stdout
+    except OSError:
+        return ""
+
+
+def resolve_commit_range(spec: str) -> list[str]:
+    """Translate ``spec`` into a list of commit SHAs (oldest first).
+
+    Accepts:
+        "abc1234"       -> [abc1234]
+        "abc..def"      -> commits in abc..def (oldest first; --reverse)
+        "since:N"       -> last N commits ending at HEAD (oldest first)
+        "HEAD~3..HEAD"  -> standard git range syntax also works
+
+    Returns at most 20 SHAs to keep the diff aggregate bounded
+    (prevents runaway audit prompts on very long ranges).
+    """
+    if spec.startswith("since:"):
         try:
-            return subprocess.run(
-                ["git"] + args, capture_output=True, text=True, check=False,
-            ).stdout
-        except OSError:
-            return ""
-    full_sha = _run(["rev-parse", sha]).strip()
-    info_lines = _run(["show", "--no-patch", "--format=%H%n%an%n%aI%n%s%n%n%b", full_sha]).splitlines()
+            n = int(spec[len("since:"):])
+        except ValueError:
+            return []
+        if n < 1:
+            return []
+        # git log -n N HEAD --format=%H (newest first), reverse for oldest first
+        out = _run_git(["log", "-n", str(min(n, 20)),
+                        "--format=%H", "HEAD"]).split()
+        return list(reversed(out))
+    if ".." in spec:
+        # git range syntax — git log <range> --reverse --format=%H
+        out = _run_git(["log", spec, "--reverse", "--format=%H"]).split()
+        return out[:20]
+    # Single SHA
+    full = _run_git(["rev-parse", spec]).strip()
+    return [full] if full else []
+
+
+def git_commit_info(sha: str = "HEAD") -> dict:
+    """Single-commit info — preserved for legacy callers.
+
+    For multi-commit deliverables use ``git_commits_info(shas)``.
+    """
+    return git_commits_info([sha])
+
+
+def git_commits_info(shas: list[str]) -> dict:
+    """Pull SHA + author + date + message + diffstat + diff excerpt
+    aggregated across *shas*.
+
+    W9-AUDIT-ANCHOR-MULTI-COMMIT 2026-05-24: previously single-anchor
+    only.  Multi-commit deliverables (e.g. W8-STOP-HOOK, W8-AUDIT-
+    PROMPT) were mis-audited because the auditor only saw the first
+    commit's diff.  This aggregates the diff + file content across
+    every SHA in the deliverable.
+    """
+    if not shas:
+        # Backward-compat: empty input behaves like HEAD lookup
+        shas = ["HEAD"]
+    _run = _run_git
+    # Resolve all SHAs first
+    full_shas: list[str] = []
+    for s in shas:
+        resolved = _run(["rev-parse", s]).strip()
+        if resolved:
+            full_shas.append(resolved)
+    if not full_shas:
+        full_shas = shas[:]
+
+    # Aggregate message: head commit's message + "+ N more commit(s)"
+    head_sha = full_shas[-1]  # newest in the range (or only)
+    info_lines = _run(["show", "--no-patch",
+                       "--format=%H%n%an%n%aI%n%s%n%n%b",
+                       head_sha]).splitlines()
     if len(info_lines) >= 4:
         sha_val = info_lines[0]
         author = info_lines[1]
         date = info_lines[2]
         message = "\n".join(info_lines[3:]).strip()
     else:
-        sha_val = full_sha
+        sha_val = head_sha
         author = "?"
         date = "?"
         message = "(no message)"
-    diffstat = _run(["show", "--stat", "--format=", full_sha]).strip()
-    diff = _run(["show", "--format=", full_sha])
+    if len(full_shas) > 1:
+        all_subjects = []
+        for s in full_shas:
+            subj = _run(["show", "--no-patch", "--format=%s", s]).strip()
+            if subj:
+                all_subjects.append(f"  - {s[:12]}: {subj}")
+        message = (
+            message
+            + f"\n\n[multi-commit deliverable — {len(full_shas)} commits]\n"
+            + "\n".join(all_subjects)
+        )
+
+    # Aggregate diffstat + diff across all commits (oldest first so
+    # the auditor sees the natural history order)
+    diffstat_parts = []
+    diff_parts = []
+    for s in full_shas:
+        ds = _run(["show", "--stat", "--format=", s]).strip()
+        if ds:
+            diffstat_parts.append(f"# {s[:12]}\n{ds}")
+        d = _run(["show", "--format=", s])
+        if d:
+            diff_parts.append(f"# === commit {s[:12]} ===\n{d}")
+    diffstat = "\n\n".join(diffstat_parts)
+    diff = "\n\n".join(diff_parts)
     # W6-A1.2-followup: raised from 4000 → 16000 chars after MiMo
     # audit STOPped with "diff missing" complaint on a 203-line commit.
     # W8-AUDIT-PROMPT 2026-05-23: raised from 16000 → 48000 chars after
@@ -221,10 +311,19 @@ def git_commit_info(sha: str = "HEAD") -> dict:
         )
     else:
         diff_excerpt = diff
-    # Pull the current contents of each modified file so the auditor
-    # sees the actual post-commit state (not just delta).
-    file_list_raw = _run(["show", "--name-only", "--format=", full_sha]).strip()
-    modified_files = [p for p in file_list_raw.splitlines() if p.strip()]
+    # Pull the current contents of each modified file across the
+    # whole range so the auditor sees the actual post-commit state
+    # (not just delta).  Take the union of files touched anywhere
+    # in the range; dedupe preserves first-seen order.
+    seen: set[str] = set()
+    modified_files: list[str] = []
+    for s in full_shas:
+        file_list_raw = _run(["show", "--name-only", "--format=", s]).strip()
+        for p in file_list_raw.splitlines():
+            p = p.strip()
+            if p and p not in seen:
+                seen.add(p)
+                modified_files.append(p)
     file_contents_blocks: list[str] = []
     # W8-AUDIT-PROMPT 2026-05-23: per-file budget raised 3000 → 8000;
     # file cap raised 4 → 10.  Same MiMo 131K-window justification as
@@ -488,7 +587,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("task_id", help="Wn task ID (e.g. A1, A2, W7-MUTATION-WORKER)")
     parser.add_argument("--commit", default="HEAD",
-                        help="Commit SHA to audit (default HEAD).")
+                        help="Commit SHA to audit (default HEAD).  "
+                        "Mutually exclusive with --commit-range / --since.")
+    parser.add_argument("--commit-range", default=None,
+                        help="W9-AUDIT-ANCHOR-MULTI-COMMIT: A..B git range "
+                        "syntax — audits the diff aggregated across every "
+                        "commit in the range (oldest first).  Use this for "
+                        "multi-commit deliverables that the single-anchor "
+                        "audit consistently STOPs on.")
+    parser.add_argument("--since", type=int, default=None,
+                        help="W9-AUDIT-ANCHOR-MULTI-COMMIT: last N commits "
+                        "ending at HEAD.  Equivalent to --commit-range "
+                        "HEAD~N..HEAD; capped at 20 commits.")
     parser.add_argument("--plan", default=None,
                         type=str,
                         help="Override the plan file.  Default: auto-pick "
@@ -500,6 +610,16 @@ def main() -> int:
                         "N=1 keeps legacy single-run behavior.  N>=3 "
                         "recommended for noise-sensitive verdicts.")
     args = parser.parse_args()
+
+    if sum(bool(x) for x in [
+            args.commit_range, args.since,
+            args.commit != "HEAD" and (args.commit_range or args.since)]) > 1:
+        # Tolerate --commit being the default while another anchor is set.
+        # Only error if --commit-range AND --since are BOTH set explicitly.
+        if args.commit_range and args.since:
+            print("--commit-range and --since are mutually exclusive",
+                  file=sys.stderr)
+            return 2
 
     if args.avg_of_n < 1:
         print(f"--avg-of-N must be >= 1 (got {args.avg_of_n})", file=sys.stderr)
@@ -518,7 +638,22 @@ def main() -> int:
         print(f"task {args.task_id} not found in plan", file=sys.stderr)
         return 2
 
-    info = git_commit_info(args.commit)
+    # Resolve commit anchor: --commit-range / --since override --commit
+    if args.commit_range:
+        shas = resolve_commit_range(args.commit_range)
+        if not shas:
+            print(f"--commit-range {args.commit_range} resolved to no "
+                  f"commits", file=sys.stderr)
+            return 2
+    elif args.since is not None:
+        shas = resolve_commit_range(f"since:{args.since}")
+        if not shas:
+            print(f"--since {args.since} resolved to no commits",
+                  file=sys.stderr)
+            return 2
+    else:
+        shas = [args.commit]
+    info = git_commits_info(shas)
     prompt = AUDIT_PROMPT.format(
         task_id=args.task_id,
         acceptance=acceptance,
@@ -531,8 +666,14 @@ def main() -> int:
         file_contents=info.get("file_contents", "(none)"),
     )
 
-    print(f"[audit] task={args.task_id} sha={info['sha'][:12]} "
-          f"prompt={len(prompt)} chars avg_of_n={args.avg_of_n}", flush=True)
+    anchor_label = (
+        f"range={args.commit_range}" if args.commit_range
+        else f"since={args.since}" if args.since
+        else f"sha={info['sha'][:12]}"
+    )
+    print(f"[audit] task={args.task_id} {anchor_label} "
+          f"commits={len(shas)} prompt={len(prompt)} chars "
+          f"avg_of_n={args.avg_of_n}", flush=True)
 
     # ---- run N audits (parallel if N>1) --------------------------------
     started = time.monotonic()

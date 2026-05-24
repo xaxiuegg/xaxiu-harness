@@ -190,3 +190,124 @@ def test_preflight_skip_engines_runs_under_budget_with_stubbed_io(monkeypatch):
     # Some checks (status_csv, secrets) will be 'fail' on stubbed
     # filesystem; just verify the aggregate doesn't blow the budget.
     # The contract is: NO check hangs.
+
+
+# -- Wall-clock budget tests (real subprocess; opt-in via marker) ---------
+
+
+@pytest.mark.slow
+def test_preflight_skip_engines_wall_clock_under_8s():
+    """Real subprocess: harness preflight --skip-engines must complete
+    in <8s wall-clock (W9-CLI-TIMEOUT-BUDGET criterion 1).  Skipped in
+    fast-test mode; run with `pytest -m slow` to exercise."""
+    import os
+    import subprocess as _sp
+    import sys
+    import time as _t
+    from pathlib import Path as _P
+    repo = _P(__file__).resolve().parents[1]
+    started = _t.monotonic()
+    proc = _sp.run(
+        [sys.executable, "-X", "utf8", "-m", "harness", "preflight",
+         "--skip-engines"],
+        cwd=repo, capture_output=True, text=True, timeout=20,
+        env={**os.environ, "PYTHONPATH": str(repo / "src")},
+    )
+    elapsed = _t.monotonic() - started
+    assert elapsed < 8.0, (
+        f"preflight --skip-engines took {elapsed:.1f}s wall-clock — "
+        f"expected <8s.  exit={proc.returncode}, "
+        f"stderr tail: {proc.stderr[-200:]}")
+
+
+@pytest.mark.slow
+def test_today_wall_clock_under_10s():
+    """Real subprocess: harness today must complete in <10s wall-clock
+    (W9-CLI-TIMEOUT-BUDGET criterion 2)."""
+    import os
+    import subprocess as _sp
+    import sys
+    import time as _t
+    from pathlib import Path as _P
+    repo = _P(__file__).resolve().parents[1]
+    started = _t.monotonic()
+    proc = _sp.run(
+        [sys.executable, "-X", "utf8", "-m", "harness", "today"],
+        cwd=repo, capture_output=True, text=True, timeout=20,
+        env={**os.environ, "PYTHONPATH": str(repo / "src")},
+    )
+    elapsed = _t.monotonic() - started
+    assert elapsed < 10.0, (
+        f"harness today took {elapsed:.1f}s wall-clock — "
+        f"expected <10s.  exit={proc.returncode}, "
+        f"stderr tail: {proc.stderr[-200:]}")
+
+
+@pytest.mark.slow
+def test_preflight_and_today_under_contention():
+    """5 concurrent invocations: each allowed up to 2× budget, no deadlock
+    (W9-CLI-TIMEOUT-BUDGET criterion 3)."""
+    import os
+    import subprocess as _sp
+    import sys
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from pathlib import Path as _P
+    repo = _P(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": str(repo / "src")}
+
+    def _run_one(cmd_args, label):
+        started = _t.monotonic()
+        proc = _sp.run(
+            [sys.executable, "-X", "utf8", "-m", "harness", *cmd_args],
+            cwd=repo, capture_output=True, text=True, timeout=30,
+            env=env,
+        )
+        return (label, _t.monotonic() - started, proc.returncode)
+
+    invocations = [
+        (("preflight", "--skip-engines"), "preflight"),
+    ] * 3 + [(("today",), "today")] * 2
+
+    started = _t.monotonic()
+    results = []
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = [pool.submit(_run_one, args, label)
+                   for args, label in invocations]
+        for f in as_completed(futures):
+            results.append(f.result())
+    total_elapsed = _t.monotonic() - started
+
+    for label, elapsed, rc in results:
+        budget_2x = 16.0 if label == "preflight" else 20.0
+        assert elapsed < budget_2x, (
+            f"{label} under contention took {elapsed:.1f}s — "
+            f"expected <{budget_2x}s (2× single-invocation budget).")
+    # Total elapsed bounded — no deadlock
+    assert total_elapsed < 30.0, (
+        f"Contention test wall time {total_elapsed:.1f}s — possible "
+        f"deadlock.")
+
+
+# -- W9-SILENT-EXCEPTION-AUDIT followup: _swallow_telemetry smoke ---------
+
+
+def test_swallow_telemetry_logs_at_debug_and_returns(caplog):
+    """W9-SILENT-EXCEPTION-AUDIT criterion 2a followup: verify the
+    dispatcher's swallow-telemetry helper produces a DEBUG log entry
+    and never raises.  Audit chose DEBUG over WARNING intentionally
+    because these sites fire per-dispatch and WARNING would flood
+    the operator log with noise on every successful dispatch."""
+    import logging
+    from harness.engines import dispatcher
+    caplog.set_level(logging.DEBUG, logger=dispatcher.logger.name)
+    exc = ValueError("synthetic telemetry failure")
+    # Should not raise
+    dispatcher._swallow_telemetry("test_label", exc)
+    # Should emit a DEBUG record
+    debug_records = [r for r in caplog.records
+                     if r.levelno == logging.DEBUG
+                     and "test_label" in r.getMessage()]
+    assert len(debug_records) >= 1
+    assert "ValueError" in debug_records[0].getMessage()
+    assert "synthetic telemetry failure" in debug_records[0].getMessage()

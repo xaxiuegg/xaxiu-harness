@@ -39,6 +39,7 @@ Commands:
   doctor               Preflight: check git, python, DPAPI, secrets,...
   engines              Query or modify the engine pool.
   engines-cooldowns    Show active engine cooldowns.
+  engines-heal         W8-ENGINES-HEAL: one-command recovery for dead /...
   engines-reliability  Show / publish engine reliability ranking from...
   env                  Check which API keys are set (reports per-key +...
   heartbeat            Passive dev-manager liveness signal for the operator.
@@ -52,8 +53,7 @@ Commands:
   morning-brief        W5-RR 2026-05-23: end-of-overnight DeepSeek...
   observer             Independent harness observer — authority audit,...
   orchestrator         W5-T: autonomous orchestrator (Path α:...
-  panic-dump           Capture a secret-scrubbed snapshot of harness...
-  preflight          
+  panic-dump      
 ```
 
 ## `harness preflight --skip-engines` output
@@ -61,20 +61,17 @@ Commands:
 ```
 harness preflight — autonomous-mode readiness gate
 ============================================================
-  [!] dead_engines         dead engines: anthropic:5, gemini:5  (18ms)
-          fix: Inspect state/engine_performance_log.jsonl; rotate keys or quarantine the affected engine.
-  [X] git_clean            modified tracked files present (3 entries)  (925ms)
-          fix: Commit or stash before going autonomous.
-  [OK] loops                dev loop task armed  (5160ms)
-  [OK] observer             4 observer task(s) armed  (5140ms)
-  [X] pytest_cache         last run had failures (lastfailed has 2 tokens)  (0ms)
-          fix: Run pytest, fix failures, then retry preflight.
-  [OK] status_csv           writable, last touched 0.3h ago  (0ms)
+  [OK] dead_engines         all engines below failure threshold  (19ms)
+  [!] git_clean            3 untracked files  (882ms)
+  [OK] loops                dev loop task armed  (4464ms)
+  [OK] observer             4 observer task(s) armed  (4347ms)
+  [OK] pytest_cache         last pytest run green  (0ms)
+  [OK] status_csv           writable, last touched 0.1h ago  (0ms)
 ============================================================
-  3 ok, 1 warn, 2 fail in 5161ms
+  5 ok, 1 warn, 0 fail in 4465ms
 
 ```
-Exit code: 4
+Exit code: 1
 
 ## `harness doctor` output
 
@@ -85,7 +82,7 @@ harness doctor — preflight diagnostics
   [OK] git              git installed + identity set
   [OK] dpapi            DPAPI read works
   [OK] secrets          engine keys available: dpapi=(none) env=['DEEPSEEK_API_KEY', 'KIMI_API_KEY', 'MIMO_API_KEY']
-  [OK] engine_reachability env=DEEPSEEK_API_KEY mimo=tokenplan
+  [OK] engine_reachability env=KIMI_API_KEY mimo=tokenplan
   [OK] env_var_inventory KIMI_API_KEY:SET, DEEPSEEK_API_KEY:SET, ANTHROPIC_API_KEY:UNSET, GEMINI_API_KEY:UNSET, MIMO_API_KEY:SET, OPENAI_API_KEY:UNSET
           fix: Set at least one engine API key in your environment
   [OK] coord_dir        coord/ is writable
@@ -95,7 +92,7 @@ overall: OK
 
 ```
 
-## STATUS.csv (269 rows)
+## STATUS.csv (296 rows)
 
 First 3 rows + last 5 rows:
 
@@ -104,11 +101,11 @@ ID,Category,Title,Status,Owner,Effort,Updated,Notes
 W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),shipped,Kimi+Claude,~45 min,2026-05-21,Commit 514945f; hybrid Kimi-CLI partial + Claude inline; 305/305 tests; 90% coverage
 W20-OBSERVER,Wave 5.6,Independent observer primitive (the check on dev-manager authority),shipped,Kimi via swarm,~60 min,2026-05-21,Kimi-CLI landed 6 module files (state/scheduler/cycle/audit_prompt/flags/__init__) + tests/test_observer.py (22KB; 41 tests) + cli.py observer group (12 subcommands) + manager.md Step 0 during 1200s timeout per feedback_kimi_cli_incremental_edits. Claude removed obsolete observer_tick stub test. 346/346 tests pass; 79% coverage on harness.observer.
 ...
-2026-05-23T211152Z,Dispatch,Dispatch 2026-05-23T211152Z,shipped,Claude,-,2026-05-23,task=3b7ff9adcfcb49c8a8d7d886b7bc2b5d; outcome=success
-2026-05-23T221153Z,Dispatch,Dispatch 2026-05-23T221153Z,shipped,Claude,-,2026-05-23,task=51e6315f0ba3496dbe8a6d49e2cbf802; outcome=success
-2026-05-23T231152Z,Dispatch,Dispatch 2026-05-23T231152Z,shipped,Claude,-,2026-05-23,task=3a15eb3dbbac46169f249843f304bc28; outcome=success
-2026-05-24T001152Z,Dispatch,Dispatch 2026-05-24T001152Z,shipped,Claude,-,2026-05-24,task=22a3b9aef3754187908cee5e1b770089; outcome=success
-2026-05-24T011152Z,Dispatch,Dispatch 2026-05-24T011152Z,shipped,Claude,-,2026-05-24,task=91c63d4f9da247e0bc9488ecbd0ba679; outcome=success
+W9-REDACTION-INTEGRITY-TEST,Security,Test that no secret pattern leaks to any output surface,todo,Claude,-,2026-05-24,"Surfaced by master audit (M09 SECURITY-POSTURE). Worst path: dispatch sends operator-controlled packet content to an LLM engine via proxy holding 4 API keys → prompt injection → engine exfiltrates key material into response → response logged or surfaced via retro/replay/today/panic-dump BEFORE redaction runs. Fix: enumerate every output surface, assert no known-secret-pattern (API key prefix, DPAPI blob, env var value) appears unredacted in any of their outputs. Memory file integrity check is a related sub-task."
+W9-PROXY-FAILURE-MATRIX,Production,Document + test proxy fail-open vs fail-closed for each failure mode,todo,Claude,-,2026-05-24,"Surfaced by master audit (M13 PROXY-SAFETY). The v2/A proxy is an opaque safety layer with zero proxy tests in the mutation kill-rate table. The defining auto-quarantine-on-flap feature was demonstrably silently-broken for an unknown duration. Acceptance: produce a failure-mode matrix for (single key revoked, all keys exhausted, circuit-breaker open, all engines quarantined, TLS handshake failure) documenting (a) observable behavior, (b) fail-open vs fail-closed, (c) operator action required. Add proxy mutation tests."
+W9-MUTATION-MANIFEST,Process,Track mutation coverage by module; auto-flag stale modules,todo,Claude,-,2026-05-24,Surfaced by master audit (M07 MUTATION-COVERAGE). The 5-module mutation kill rate is a static snapshot of 5 of ~20+ modules. W8 shipped 32 tests without re-running the sweep. Fix: mutation_targets.yaml listing every module + last-sweep SHA + ≥3 known-killer mutants per module. Any module shipping code without a passing sweep auto-flags. CI gate optional. Transforms the snapshot into an enforced tracker.
+W8-SESSION-HANDOFF,Process,Wave 9 session-handoff doc + master prompt authored,shipped,Claude,-,2026-05-24,"coord/SESSION_HANDOFF_2026-05-24.md — self-contained master prompt for next session. Captures: full-dev-authority + L5-only escalation, HEAD state (1576 tests + 14 W9 rows queued), panel-recommended W9 ordering (1=W9-AUDIT-NONDETERMINISM-AVG, 2=W9-MUTATION-CANARY, 3=W9-CLI-TIMEOUT-BUDGET + W9-PREFLIGHT-FIX-NOSTASH parallel, 4=W9-SILENT-EXCEPTION-AUDIT, 5=W9-READINESS-PANEL-RERUN), boot sequence, hook gotchas (CRLF false-positive + --fix auto-stash), stash recovery. Mirrors W6 SESSION_HANDOFF pattern."
+2026-05-24T051206Z,Dispatch,Dispatch 2026-05-24T051206Z,shipped,Claude,-,2026-05-24,task=e672e57d883649138df136c0b23d0445; outcome=success
 ```
 
 ## Test count

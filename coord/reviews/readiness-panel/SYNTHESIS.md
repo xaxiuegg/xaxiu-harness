@@ -1,6 +1,6 @@
 # Harness readiness — 10-reviewer synthesis
 
-_Dispatched: 10 personas, elapsed 163.0s_
+_Dispatched: 10 personas, elapsed 131.2s_
 
 State snapshot fed to each reviewer is at `_state_snapshot.md` in this directory.
 
@@ -10,173 +10,183 @@ State snapshot fed to each reviewer is at `_state_snapshot.md` in this directory
 
 ## Rubric
 
-1. **Install** — 2. The fresh-clone path forces ~8 operator decisions (which of 3 docs, install method, global flags, `doctor` vs. `preflight`, how to fix `git`/ `pytest`/ dead-engine failures); `preflight` fails on `pytest_cache` and `git_clean` with fixes requiring Python/git skills, and dead-engine remediation points to unreadable JSONL logs.
-2. **Daily run** — 3. `harness morning-brief` is a single obvious verb, but the first-run sequence is gated by red `preflight` checks that a non-technical operator cannot clear autonomously, creating toil before the briefing ever runs.
-3. **Observe** — 4. `morning-brief`, `dashboard-serve`, `STATUS.csv`, and `coord status` provide rich, engine-log-free visibility; the operator never needs to open `runs/` files by hand.
-4. **Recover** — 2. Remediation hints (`fix: Inspect state/engine_performance_log.jsonl`, `Run pytest, fix failures`) demand traceback literacy and log analysis; there is no `harness recover` automation to bridge the gap.
+1. **Install** — 2. Doc triad splits authority; operator faces conflicting gates (`doctor` OK vs `preflight` fail) and an unguided sequence of ≥5 decisions (which doc? `doctor`/`install`/`init`? fix `git_clean`? UNSET keys okay? brief now?). Non-technical users cannot self-remediate untracked-file failures.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. A non-technical operator can consume `morning-brief` and `STATUS.csv` once the system is green, but cannot independently clear `preflight` (pytest failures, dead-engine triage, git stashing) or install Python dependencies. They need a technical owner to prep the environment and handle any red preflight state.
+2. **Daily run** — 3. `morning-brief` is buried in a 30-verb CLI with no daily alias or checklist, forcing the operator to remember the exact incantation amid irrelevant commands.
+
+3. **Observe** — 4. STATUS.csv is readable; `dashboard-serve` and `observer` surfaces are usable without opening `runs/`. Engine root-cause still requires log literacy, but the panel is viable.
+
+4. **Recover** — 2. `engines-heal` covers engine death, but preflight false-positives and proxy failures lack operator-visible remediation; the `git_clean` warn→fail path has no CLI fix.
+
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The operator can read STATUS.csv and run CLI commands, but the first-run experience forces a high-stakes doc choice and a preflight git failure they cannot self-resolve. Once past the wall, daily observation is viable; recovery from non-engine failures is not.
 
 6. **Top 3 blockers**
-- `--operator` preflight mode that skips dev-only gates (`pytest_cache`) and auto-quarantines dead engines instead of asking the operator to read JSONL.
-- Single-page onboarding doc that collapses 20+ CLI verbs into an exact 3-command path: `install` → `doctor` → `morning-brief`.
-- `harness recover` command that automates safe fixes (git stash, engine quarantine) and presents plain-language confirmation instead of tracebacks or raw state files.
+   - **`GETTING_STARTED.md`** prescribing exact first-run sequence and explicitly excluding CLAUDE.md/SESSION_BOOTSTRAP.md from operator scope.
+   - **`harness preflight --operator`** (or profile-aware default) that suppresses `git_clean` blockers and explains fixes in plain language.
+   - **`harness day-start`** meta-command wrapping `preflight` + `morning-brief` + `observer status` into one daily report to eliminate decision fatigue.
 
 ### K2-documentation
 
 ## Rubric
 
-1. **Install** — 2. Preflight emits fixes, but "inspect JSONL" and "fix pytest failures" require dev skills; engine quarantine and test repair are not self-service for a non-coder.
-2. **Daily run** — 3. `morning-brief` and `heartbeat` exist, yet the CLI lists 25+ verbs with no daily sequence spelled out; the operator must hunt for the right ones.
-3. **Observe** — 4. `dashboard-serve`, `observer`, and STATUS.csv give visibility without opening `runs/`, but 269-row CSV lacks a plain-language summary for quick scanning.
-4. **Recover** — 2. Failures surface clearly, yet remediation text points to JSONL logs, git stash, and pytest runs rather than simple CLI verbs or click-to-fix actions.
+1. **Install** — **2**. `harness doctor` is readable, but `preflight` exits 1 on a cryptic `git_clean` warning with no remediation hint, and no simple first-run wizard output is shown.
+2. **Daily run** — **2**. `morning-brief` and `dashboard-serve` suggest routine awareness, yet the CLI presents 20+ undifferentiated commands with no obvious daily sequence or plain-language “what do I run today?” guide.
+3. **Observe** — **2**. Observer and dashboard primitives exist, but `STATUS.csv` is packed with ticket IDs, mutation metrics, and arcane module names; no evidence of a non-technical summary view.
+4. **Recover** — **2**. `engines-heal` and `doctor` are discoverable, but preflight warnings lack remediation steps and `STATUS.csv` explicitly flags undocumented proxy failure modes and missing recovery matrices.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The CLI surfaces problems in plain English and offers `morning-brief`, but a non-technical operator cannot act on engine quarantine, pytest failures, or JSONL logs without assistance. They could run the daily loop if a technical owner handled initial setup and kept preflight green, but self-recovery is out of reach.
+## Hand to a non-technical operator today?
+**WITH GUARDRAILS.** A motivated operator could run pre-canned commands like `morning-brief` and `dashboard-serve` if a technical user performs initial setup, hides the full `--help` surface, and provides a 1-page cheat sheet. They cannot self-install or self-recover from warnings like `git_clean` or dead engines without a runbook.
 
-6. **Top 3 blockers:**
-- `docs/operator-runbook.md` — one-page daily checklist (morning-brief → dashboard → observer) written for non-technical readers.
-- `harness preflight --fix` — auto-remediates dead engines (auto-quarantine), dirty git (auto-stash), and stale pytest cache without Python knowledge.
-- `harness status --today` — human-readable overnight summary replacing 269-row CSV archaeology.
+## Top 3 blockers
+- **Plain-language install runbook**: translate `preflight`/`doctor` outputs into “if you see X, do Y” steps.
+- **Simplified daily operator view**: collapse the 20+ CLI verbs into an opinionated daily checklist (e.g., `harness today`) instead of requiring the operator to navigate subcommands.
+- **Failure-mode recovery cards**: attach human-readable remediation to every `preflight` warning and `STATUS.csv` `todo` so the operator knows which single command to run next.
 
 ### K3-failure-modes
 
 ## Rubric
-1. **Install** — 2. Preflight fails on pytest cache and git state, and dead-engine remediation requires inspecting JSONL; a non-technical user cannot reach green unassisted.
-2. **Daily run** — 3. `morning-brief` and `heartbeat` exist, but no single obvious daily checklist is surfaced; operators must juggle verbs and flags.
-3. **Observe** — 3. STATUS.csv is readable, yet engine health and loop diagnostics still push operators toward JSONL/logs rather than a self-service dashboard.
-4. **Recover** — 2. Preflight prints "fix:" hints, but every common failure routes to actions (pytest, git, JSONL) a non-technical operator cannot execute alone.
 
-**Failure modes (first month)**
-- **Dead engines** — Error clear (`[!] dead_engines`); recovery ("inspect JSONL / quarantine") is opaque → **ping engineering**.
-- **Pytest cache blocking autonomy** — Error clear (`[X] pytest_cache`); recovery ("Run pytest, fix failures") requires coding → **ping engineering**.
-- **Git dirty state** — Error clear (`[X] git_clean`); recovery ("Commit or stash") is borderline for a non-technical user → **likely ping engineering**.
-- **Silent missing API keys** — Error unclear (`doctor` shows UNSET keys but overall OK); failure surfaces later with no obvious recovery → **ping engineering**.
-- **Mid-loop routing failure** — Error unclear (buried in `runs/` files); no CLI recovery path → **ping engineering**.
+**First-month failure modes**
+1. **Preflight halts on `git_clean` warning.** Error: visible (`3 untracked files`) but not actionable. Recovery: not obvious (stash? delete?). → Ping engineering.
+2. **Engine proxy fail-closed / key exhaustion.** Error: absent or engineering-level (W9-PROXY-FAILURE-MATRIX is todo). Recovery: undocumented. → Ping engineering.
+3. **Task Scheduler silent death.** Error: none; preflight only checks “armed,” not last-run health. Recovery: unclear. → Ping engineering.
+4. **Engine quarantine cascade.** Error: preflight notes dead engines. Recovery: `engines-heal` exists but is not suggested in output. → Ping engineering.
 
-**Hand to a non-technical operator today?** WITH GUARDRAILS. The daily verbs and STATUS.csv are accessible, but nearly every preflight failure mode routes to technical remediation the operator cannot execute alone. They can run the harness only if an engineer pre-clears the environment and stands by for escalations during the first month.
+1. **Install** — 2. Preflight exits 1 on a soft git warning with no `--fix` or plain-language hint, stalling non-technical users.
+2. **Daily run** — 3. `morning-brief` exists, but hidden Task Scheduler dependencies and lack of a single curated checklist add toil.
+3. **Observe** — 2. STATUS.csv mixes 296 wave and dispatch rows; no evidence the dashboard is deployed for non-technical readability.
+4. **Recover** — 1. Critical failures (proxy, engine death, silent exceptions) lack CLI-guided remediation or operator-facing runbooks.
 
-**Top 3 blockers**
-- `harness preflight --fix` flag to auto-stash git, reset pytest cache, and quarantine dead engines.
-- `harness operator-report` command translating every `[X]`/`[!]` into plain-language, copy-paste Windows/Task Scheduler instructions.
-- `docs/OPERATOR_RUNBOOK.md` with exact non-technical remediation steps and screenshots for each preflight failure.
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. Core verbs and checks exist, but the first month will repeatedly surface ambiguous preflight halts, opaque proxy failures, and silent scheduler deaths that require engineering escalation because self-service recovery paths are not yet wired or documented.
+
+6. **Top 3 blockers**
+   - `harness preflight --fix` or guided plain-language remediation for git/stash warnings.
+   - Shipped W9-PROXY-FAILURE-MATRIX plus `harness engines` surfacing one recommended recovery verb when quarantined.
+   - Operator-filtered status view (e.g., `harness status --operator`) that hides raw dispatch logs and surfaces only health and next actions.
 
 ### K4-cli-ergonomics
 
 ## Rubric
 
-1. **Install** — 2. `harness install` and `doctor` are helpful, but `preflight` fails on `pytest_cache` (expects the operator to run/fix Python tests) and `dead_engines` remediation requires inspecting a `.jsonl` log—both violate the no-code constraint.
-2. **Daily run** — 3. `morning-brief` is a well-named primitive, yet it is buried among 22 verbs with no single obvious “start my day” sequence or alias surfaced in the CLI.
-3. **Observe** — 3. `dashboard-serve`, `STATUS.csv`, and `observer` provide visibility, but there is no top-level `status`/`today` command; the operator must manually synthesize `coord`, `engines`, and `observer` output.
-4. **Recover** — 2. `preflight` and `doctor` surface hints, but fixes for engine death and pytest cache require code changes or structured-log forensics, leaving a non-technical operator stuck.
+1. **Install — 3** `doctor` reads clearly, but `preflight` is missing from `--help`, exits 1 on `git_clean` without a remediation hint, and requires the operator to reason about untracked files.
 
-## Operator readiness
+2. **Daily run — 3** `morning-brief` exists, yet there is no single obvious daily entry-point; the operator must guess whether to run `loop`, `loops`, `coord`, or just read the dashboard.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. They can run `harness install`, read `STATUS.csv`, and open the dashboard, but any `preflight` failure—especially `pytest_cache` or dead engines—requires Python debugging or JSONL inspection they cannot perform. A technical teammate must greenlight the first run and handle engine rotation.
+3. **Observe — 4** Dashboard, observer, and STATUS.csv provide good visibility, but the CLI lacks a unified `harness today` summary that surfaces all three for a non-technical user.
 
-## Top 3 blockers
+4. **Recover — 3** `engines-heal` and `doctor` cover some failures, but common stale states (untracked files, routing locks) lack a one-step remediation verb such as `harness fix` or `harness unlock`.
+
+5. **Hand to a non-technical operator today?** **WITH GUARDRAILS**. Installation and daily observation are possible, but the 60+ subcommand surface is overwhelming, verb naming is inconsistent (`loop` vs `loops`, hidden `preflight`), and recovery requires interpreting diagnostic badges rather than running a guided repair command. A printed runbook is mandatory.
 
 6. **Top 3 blockers**
-   - **`harness today` (or `status`) verb:** a single human-readable summary of loop health, last dispatch, and observer alerts, eliminating the need to manually join `coord`/`observer`/`engines` output.
-   - **`harness preflight --fix` / `harness quarantine`:** automated remediation for dead engines and stale pytest cache without asking the operator to touch source code or `.jsonl` logs.
-   - **`harness daily` alias:** one obvious entry point that composes `morning-brief`, loop liveness, and observer status; 22 verbs create decision paralysis for non-technical users.
+   - **`harness today` meta-command**: rolls up `preflight`, `observer`, and `coord status` into one daily operator summary.
+   - **`harness tidy` / `preflight --fix`**: auto-remediate `git_clean`, lock drift, and stale caches without manual git commands.
+   - **Discoverability fix for `preflight`**: surface it in `harness --help` and add a `--fix` flag so the readiness gate is findable and actionable.
 
 ### K5-honest-readiness
 
 ## Rubric
+1. **Install** — 2. Preflight exits 1 on untracked files with no actionable remediation; a non-technical user cannot clear the readiness gate.
+2. **Daily run** — 2. Twenty-plus verbs and cryptic flags (`--explore-on-uncertainty`) with no obvious single “start my day” command.
+3. **Observe** — 3. Dashboard and morning-brief exist, but output is jargon-heavy and the 296-row STATUS.csv is unfiltered noise.
+4. **Recover** — 2. `engines-heal` exists, yet preflight git warnings lack fix hints and open W9 proxy/redaction gaps leave critical failures undocumented.
 
-1. **Install** — 2. Preflight fails on dead engines, dirty git, and pytest cache; remediation requires inspecting JSONL logs and fixing Python tests, which is out of scope for a non-technical user.
-2. **Daily run** — 2. No documented daily sequence; CLI is crowded with verbs like `burst`, `lock`, and `orchestrator`, creating decision fatigue instead of a single obvious morning command.
-3. **Observe** — 3. `dashboard-serve` and `morning-brief` help, but STATUS.csv remains developer-centric (commit hashes, coverage %, UUIDs), so the operator lacks an at-a-glance human-readable pulse.
-4. **Recover** — 2. Failure messages point to logs and git stash/pytest fixes; there is no non-technical one-click remediation for dead engines or dirty repo states.
+5. **Hand to a non-technical operator today?** NO. The preflight readiness gate fails with an ambiguous git warning that would halt a non-technical user before day one. The CLI is a dense forest of expert flags rather than a guided workflow. Most critically, open security gaps (secret exfiltration path, undocumented proxy fail-open behavior) mean typical failures become silent data-loss events that a non-technical operator cannot detect or remediate.
 
-5. **Hand to a non-technical operator today?** NO. The harness boots into a failing preflight that demands git hygiene, pytest cleanup, and manual engine log inspection. The CLI vocabulary and STATUS.csv are written for developers, leaving a non-technical friend stuck before day one with no self-service path back to green.
-
-6. **Top 3 blockers**
-   - **Zero-friction installer**: A first-run wizard that auto-selects working engines, suppresses dev-only pytest/git checks, and writes Task Scheduler entries without requiring a green preflight.
-   - **Plain-language status view**: A `harness status --human` or dashboard pane that translates STATUS.csv into "what happened today / what's broken / what to click" without UUIDs or commit hashes.
-   - **One-click self-healing**: An `harness engines heal` command that auto-quarantines dead engines and fails over to live ones, eliminating JSONL log inspection and key rotation manual steps.
+6. **Top 3 blockers:** (1) A single `harness daily` verb that sequences morning-brief → dispatch → observer → status, hiding advanced flags. (2) A `harness preflight --fix` that auto-resolves git warnings, stash issues, and engine cooldowns without Python knowledge. (3) Ship W9-PROXY-FAILURE-MATRIX and W9-REDACTION-INTEGRITY-TEST and wire them into `harness doctor` so key-leak scenarios are caught and reported in plain language.
 
 ### M1-install
 
 ## Rubric
-1. **Install**: 3/5 — `harness doctor` and `harness install` provide a clear path, but dead engines (preflight) require troubleshooting API keys and state files, likely needing help.
-2. **Daily run**: 2/5 — Morning sequence (`preflight` → `loop`) is logical, but fixing `dead_engines` and `git_clean` failures isn't obvious without guidance; the non-technical operator can't parse the engine log.
-3. **Observe**: 3/5 — `dashboard-serve`, `heartbeat`, and `STATUS.csv` give visibility, but correlating issues (e.g., from `observer` or `preflight`) into a simple "is it healthy?" view isn't automatic.
-4. **Recover**: 2/5 — `preflight` lists fixes like rotating keys or stashing, but the operator lacks `doctor --fix` or one-command key rotation; dead engines and pytest failures require Python debugging.
 
-**5. Hand to a non-technical operator today?** NO.
-The operator can run commands, but the preflight failures (dead engines, dirty git, test failures) require inspecting JSONL logs, rotating API keys at the provider level, and debugging Python tests—tasks beyond their capability. Without a "fix" or "health-check" command that automatically resolves common issues (like `harness doctor --fix`), they will get stuck immediately.
+**Install (3/5):** `harness install` with a first-run wizard and `harness doctor` diagnostics are strong scaffolding. However, env-var setup (`KIMI_API_KEY`, `DEEPSEEK_API_KEY`) has no visible wizard step — the operator must know *where* to set Windows environment variables, which is non-trivial without guidance. DPAPI says "read works" but the *seeding* step (writing keys into DPAPI initially) isn't shown — likely undocumented for the happy path. Exit code 1 on `preflight` due to a git warning will alarm a non-technical operator who doesn't know `1 ≠ fail`.
 
-**6. Top 3 blockers**
-1. **`harness doctor --fix`** (missing): Should auto-stash git, rotate/quarantine dead engines, and skip failed tests.
-2. **Key rotation CLI** (missing): `harness engines rotate <engine>` to refresh keys without env-var editing.
-3. **Preflight ignore/override** (missing): `harness preflight --force` to bypass non-critical warnings for initial runs.
+**Daily run (3/5):** `harness morning-brief` plus `harness coord status` is a reasonable two-command cadence, and `harness dashboard-serve` exists for visual monitoring. The `--profile non_technical` flag reduces verbosity. But the *default* flags (mode, escalation-threshold, explore-on-uncertainty) aren't obviously set once — the operator must either always pass flags or edit a config file. A `daily` or `start` verb that loads a saved profile is missing.
+
+**Observe (4/5):** Observer primitives, heartbeat, STATUS.csv, dashboard, and `morning-brief` all target the non-technical lens directly. The 296-row STATUS.csv is readable in Excel. Engine cooldowns/reliability have dedicated verbs. Only gap: no `--watch` or live-updating view for dispatch runs.
+
+**Recover (2/5):** `engines-heal` is a good one-command recovery. But the proxy failure matrix (W9, still `todo`) means proxy failures are opaque. `preflight` exit-code ambiguity hides real problems. No `harness fix --auto` verb that resolves common warnings (e.g., git clean) without the operator understanding git.
+
+## 5. Hand to a non-technical operator today?
+
+**WITH GUARDRAILS.** The CLI surface is rich and `--profile non_technical` exists, but three critical seams require hand-holding: (a) initial env-var population has no guided path, (b) DPAPI seeding is invisible in the snapshot, and (c) preflight's warning-vs-failure semantics will confuse anyone who doesn't know exit codes. A 30-minute pairing session would cover it; alone, expect 90+ minutes of floundering.
+
+## 6. Top 3 blockers
+
+1. **`harness install --wizard` must demo env-var setting end-to-end** — show the exact Windows Settings dialog or auto-populate from a `.env` file.
+2. **`harness preflight` needs human-readable pass/fail** — replace exit code 1 for warnings with "PASS with notes"; save exit 1 for actual failures.
+3. **`harness quickstart` verb** — a single command that runs `doctor` → `install` → `init` → `preflight` with progress narration in `non_technical` profile, replacing the 4-step sequence the operator must currently memorize.
 
 ### M2-daily-workflow
 
 ## Rubric
 
-1. **Install** — 3/5: `harness install` + wizard exists, but `preflight` failures (dead engines, dirty git) require troubleshooting beyond "press a button."
-2. **Daily run** — 4/5: `harness morning-brief` is the obvious start, but 2/6 preflight checks failing today adds cognitive load for diagnosis.
-3. **Observe** — 5/5: `dashboard-serve` + `heartbeat` + `coord status` + `STATUS.csv` give clear, non-log-dependent visibility.
-4. **Recover** — 3/5: CLI fix hints exist, but "rotate keys or quarantine" and "commit or stash" assume technical knowledge the operator lacks.
+1. **Install — 4/5.** Doctor/preflight are comprehensive and readable; `install` verb exists. Deduction: the `git_clean` warning in preflight output would confuse a non-technical operator ("what do I do?"). Needs a `harness clean` or actionable message.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS.
-   Reasoning: The core workflow (install, morning brief, observe dashboard, read STATUS.csv) is accessible. However, recovery from today's preflight failures (engine rotation, git operations) requires technical support. The system is ready for supervised use but not fully self-service for error recovery.
+2. **Daily run — 3/5.** `morning-brief` is the right concept, but the operator's sequence isn't scripted or documented. CLI options (`--mode`, `--engine-fill`) add cognitive load. Needs a `harness daily` wrapper or a one-page "Your Morning" card.
+
+3. **Observe — 3/5.** `dashboard-serve` exists but it's unclear if it shows real-time status without reading files. `morning-brief` gives a snapshot. STATUS.csv is human-readable but 296 rows are overwhelming. No `harness status --summary` for quick pulse.
+
+4. **Recover — 4/5.** `engines-heal`, clear escalation thresholds (`L1-L5`), `preflight` with explicit `[!]` vs `[OK]`. `doctor` output is actionable. Deduction: recovery path for the `git_clean` warning is missing from CLI help.
+
+5. **Hand to a non-technical operator today?** **WITH GUARDRAILS.** The system has strong diagnostics (`doctor`, `preflight`, `morning-brief`) and clear escalation definitions, but the daily workflow lacks a curated, minimal command sequence. A non-technical operator could survive with a one-page guide and the dashboard, but would likely stall on warnings (git_clean) or misconfigure flags (`--engine-fill`). Install is near-ready; runtime operation needs a guided "safe mode" default.
 
 6. **Top 3 blockers:**
-   1. `preflight` fix hints need a `--non-technical` mode that offers copy-paste commands or "ask for help" escalation.
-   2. Intermittent dead engines (anthropic, gemini) suggest missing auto-quarantine or `harness engines --auto-fix`.
-   3. No `harness morning-brief --summary` that outputs a plain-English "green/yellow/red" with next action.
+   1. **`harness daily` script** — a single command that runs preflight, morning-brief, and prints a 10-line summary with today's focus (from STATUS.csv `todo` rows). Moves daily run score +1.
+   2. **`harness status --summary`** — dashboard/CLI verb showing: engine health, last loop run, active escalations, top 3 todo items. Moves observe score +1.
+   3. **Actionable warnings** — every `[!]` in preflight/doctor should have a `fix:` hint or `harness fix <issue>` verb. Removes install/recover friction.
 
 ### M3-error-recovery
 
 ## Rubric
 
-1. **Install** — 2/5 — Preflight fails on `dead_engines` and `git_clean`. Fix for dead engines points to a JSONL log the operator cannot parse. Git fix is clear (`git stash`). Preflight is a blocker gate, so a fresh clone would not go green.
-2. **Daily run** — 3/5 — `harness morning-brief` is obvious. However, preflight (likely a morning prerequisite) will fail until the operator resolves technical issues, which is not low-toil.
-3. **Observe** — 5/5 — STATUS.csv, dashboard, and CLI (`status`, `heartbeat`) provide full visibility without needing to read raw files or logs.
-4. **Recover** — 1/5 — Critical failure: `pytest_cache` fix says "Run pytest, fix failures, then retry." The operator cannot debug or fix Python test failures. This blocks them dead. The `dead_engines` fix also requires reading a performance log and potentially rotating API keys—a technical task.
+1. **Install** — 3/5. Preflight exits with code 1 on a non-fatal warning (untracked files), which could confuse a non-technical operator who expects green=all clear.
+2. **Daily run** — 4/5. The morning sequence (`doctor`, `preflight`, `morning-brief`) is clear and CLI-driven. Low toil.
+3. **Observe** — 3/5. `status`, `heartbeat`, and `dashboard-serve` exist, but a typical failure (e.g., an engine timeout) isn't guaranteed to surface as a clear, actionable item in the dashboard without the operator knowing to run `engines-heal` or check logs.
+4. **Recover** — 2/5. A Python traceback from an unexpected exception (e.g., a network blip causing a module error) would block the operator dead. They can't interpret it. The `engines-heal` and `panic-dump` commands are recovery tools, but the path *to* them from an opaque error is unclear.
 
-5. **Hand to a non-technical operator today?** NO.
-The operator would be immediately blocked by the `pytest_cache` preflight failure. The remediation path ("fix failures") requires Python debugging, which is outside their capabilities. Without a single command to reset or clear this state (e.g., `harness preflight --clear-failures`), the harness is unusable for them.
+5. **Hand to a non-technical operator today?** **WITH GUARDRAILS**. The operator can run the daily commands and use the dashboard for visibility. However, any failure that results in a raw Python exception will halt them. They need a "handle" for every common error type that avoids tracebacks and points to a CLI recovery command, or a reliable on-call Python-savvy backup.
 
-6. **Top 3 blockers**
-    1. **`pytest_cache` failure remediation** — Needs a `harness fix tests` command that runs tests and either clears the cache on pass or presents a non-technical-friendly summary on failure.
-    2. **`dead_engines` remediation** — Needs `harness engines quarantine <engine>` or a clear CLI command to rotate/reload keys, hiding the JSONL log.
-    3. **Escalation contract for L5 (Python bugs)** — Need a concrete `harness panic-dump` + support-send workflow so the operator knows exactly what to do (e.g., "run `harness support send`") when a Python traceback surfaces, rather than just seeing an error.
+6. **Top 3 blockers**:
+   - **Standardize error surfacing.** All exceptions must be caught and rendered as a non-technical "operator packet" with a severity (e.g., `[L4]`), a plain-English summary, and a recommended CLI fix (e.g., `Run 'harness engines-heal --engine DeepSeek'`).
+   - **Add a `harness recover` command.** A single entry point that runs a sequence of checks (`doctor`, `engines-heal`, `preflight`) and presents a pass/fail summary, giving the operator one command to try first.
+   - **Make the escalation threshold contract explicit in output.** The `--escalation-threshold` setting should be printed in the `doctor` or `preflight` header so the operator knows what level of issue will surface vs. be silently handled.
 
 ### M4-observability
 
 ## Rubric
-1. **Install — 2/5** — Preflight fails (dead engines, test failures) requiring Python/git debugging beyond YAML/CLI skills.
-2. **Daily run — 4/5** — `dashboard-serve`, `morning-brief`, and `heartbeat` exist; sequence is logical if preflight is green.
-3. **Observe — 3/5** — STATUS.csv, dashboard, and observer flags are good surfaces, but engine health and test failures require inspecting `state/` logs.
-4. **Recover — 2/5** — Remediation hints exist in `doctor`/`preflight` output but require understanding "rotate keys," "fix failures," or reading `lastfailed`.
 
-## 5. Hand to a non-technical operator today? **NO**
-The harness has strong observability surfaces (STATUS.csv, dashboard, observer flags) and the CLI is well-structured for a non-technical operator. However, the current snapshot shows actionable blockers—dead engines and test failures—that the operator cannot resolve with their allowed skills (YAML edits, CLI commands, Task Scheduler). The remediation messages ("rotate keys," "run pytest, fix failures") are too vague for someone who cannot read logs or author Python. Without first clearing these blockers and ensuring `harness preflight` passes green, handing this over would leave the operator stuck on day one.
+1. **Install** — 4/5. `doctor` and `preflight` are clean CLI commands with clear OK/FAIL output. But `git_clean` warning with exit code 1 requires knowing what "3 untracked files" means and whether it's safe to ignore — a non-technical operator won't know.
 
-## 6. Top 3 blockers
-1. **Dead engines** — Provide a one-command `harness engines-quarantine` or key-rotation wizard that the operator can run without inspecting `state/` files.
-2. **Test failures** — Either auto-fix or surface a clear "acknowledge and skip" path for the operator, since they cannot debug pytest.
-3. **Preflight verbosity** — Transform "modified tracked files" and "last run had failures" into guided CLI flows (e.g., `harness preflight --fix`) that handle or explain each issue interactively.
+2. **Daily run** — 4/5. `morning-brief` + `harness loop` + dashboard-serve is a clear three-command sequence. The --help is legible. Missing: a single `harness start-my-day` wrapper that chains them, or a morning checklist in a non-technical-friendly format.
+
+3. **Observe** — 3/5. This is the crux. Dashboard at 7878 + STATUS.csv + observer flags + morning-brief give surfaces — but STATUS.csv's "Notes" column is wall-of-text technical prose (commit SHAs, module names, KB counts). The observer's authority audit output format is unknown from the snapshot. The operator *can* see status, but interpreting it requires reading dense technical notes or clicking through a dashboard whose UX isn't described. The gap: no evidence of a human-readable "what happened overnight" narrative that the morning-brief actually produces in plain language.
+
+4. **Recover** — 3/5. `engines-heal` exists, `engines-cooldowns` exists, `doctor` diagnoses env issues. But the W9 rows expose real gaps: proxy fail-open/fail-closed behavior is undocumented, silent exceptions aren't audited, and a non-technical operator facing a traceback has no `harness fix-it` or structured remediation flow. Recovery paths exist for engines; they're thin for everything else.
+
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The CLI surface is rich and the `doctor`/`preflight` commands gate startup. But observability relies on STATUS.csv whose Notes column reads like engineer commit logs, not operator guidance. The morning-brief may or may not produce plain-language output — the snapshot doesn't confirm it. An operator can *install and start the loop*, but would struggle to interpret what's happening or recover from non-engine failures without hand-holding.
+
+6. **Top 3 blockers**
+   - **`harness today` or morning-brief that outputs a plain-language "here's what happened, here's what needs attention"** — right now STATUS.csv Notes are developer prose, not operator guidance.
+   - **`harness explain <ID>` that translates a STATUS.csv row into "what is this, is it blocking me, what do I do"** — closing the interpretability gap for the 296-row tracker.
+   - **`harness fix-it` or structured remediation for common non-engine failures** (git dirty, observer flag raised, loop stalled) — right now only engine recovery has CLI verbs.
 
 ### M5-trust
 
 ## Rubric
 
-1. **Install** (2/5): Preflight fails with two blockers: dirty git state and pytest failures. Fix instructions require Python/debugging (run pytest, commit). Non-technical operator cannot resolve without assistance.
+1. **Install (4/5):** Preflight exits code 1 due to git untracked files. Doctor shows all OK. A non-technical operator could follow CLI commands but might be confused by the non-zero exit. Missing explicit "run `git clean`" guidance.
 
-2. **Daily run** (3/5): `morning-brief` command exists, but sequence isn't obvious. Requires knowing to run preflight first, which currently fails. No clear "start my day" script.
+2. **Daily run (4/5):** `harness morning-brief` and `harness loop start` are clear. The operator can install via Task Scheduler. However, the expected morning sequence (brief → loop status → dashboard) isn't documented as a single "runbook" in the operator's language.
 
-3. **Observe** (4/5): STATUS.csv is operator-readable. Dashboard command exists. Observer commands available but not simplified for non-technical use.
+3. **Observe (3/5):** `dashboard-serve` exists, but the snapshot doesn't confirm it's designed for non-technical readability. `observer` output likely requires parsing logs. STATUS.csv is readable, but real-time loop health isn't surfaced in a simple CLI summary.
 
-4. **Recover** (2/5): Remediation paths are technical. "Run pytest, fix failures" and "rotate keys or quarantine engine" require Python/engine knowledge. No simplified recovery CLI for common issues.
+4. **Recover (3/5):** `engines-heal` and `preflight` are recovery commands. However, the git warning requires understanding version control. The `panic-dump` output likely contains traces. No clear "If you see error X, run command Y" table for common failures like engine cooldowns.
 
-5. **Hand to non-technical operator?** NO. The preflight failures block autonomous use, and recovery requires technical intervention. Without resolving git state and test failures, the operator cannot safely start the loop. The trust contract isn't established because the operator cannot verify the system is in a clean state.
+5. **Hand to a non-technical operator today?** **WITH GUARDRAILS.**
+   The core CLI is robust with observer, heal, and status commands. A non-technical operator can install, start the loop, and check status. However, the lack of a plain-English runbook, non-obvious git warning resolution, and potential need to interpret observer logs for recovery means a technical "guardian" should be available for troubleshooting beyond basic operations.
 
-6. **Top 3 blockers**:
-   - **`harness fix --non-technical`** command that auto-commits stashes and runs pytest via CI, providing plain-language results.
-   - **`harness loop --start`** wrapper that runs preflight, fails clearly with dashboard instructions if red, then starts with safe defaults (L5 escalation, conservative mode).
-   - **`harness recover --common`** that handles dead engines (rotate keys automatically) and git state (stash changes) with non-technical explanations.
+6. **Top 3 blockers:**
+   1. **Operator Runbook:** A `HARNESS_QUICKSTART.md` with the exact 3-command daily sequence (install → start → observe) and explicit remediation for the git warning.
+   2. **Recovery Guide:** A `harness recover --what` command or a section in the runbook mapping `preflight` warnings and common `observer` flags to specific CLI fixes.
+   3. **Simple Health Dashboard:** Enhance `harness loop status` or add `harness health` to output a plain-text summary: loop state, last observer pass/fail, and any active cooldowns—no file digging required.

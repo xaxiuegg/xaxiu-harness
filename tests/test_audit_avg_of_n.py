@@ -253,3 +253,192 @@ def test_resolve_plan_path_w7_routes_to_wave7_plan():
 def test_resolve_plan_path_override_wins():
     path = audit._resolve_plan_path("W9-FOO", "spec/custom-plan.md")
     assert path == Path("spec/custom-plan.md")
+
+
+# -- W9-AUDIT-ANCHOR-MULTI-COMMIT ------------------------------------------
+
+
+def test_resolve_commit_range_single_sha_returns_one_entry(monkeypatch):
+    """A single SHA should round-trip to a 1-entry list via rev-parse."""
+    captured: list[list[str]] = []
+
+    def _fake(args, **kw):
+        captured.append(list(args))
+        class _R:
+            stdout = "abc1234567890" if "rev-parse" in args else ""
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    shas = audit.resolve_commit_range("abc1234")
+    assert shas == ["abc1234567890"]
+    assert ["git", "rev-parse", "abc1234"] in captured
+
+
+def test_resolve_commit_range_range_syntax_returns_oldest_first(monkeypatch):
+    """A..B should invoke git log --reverse + return list oldest first."""
+    captured: list[list[str]] = []
+
+    def _fake(args, **kw):
+        captured.append(list(args))
+        class _R:
+            stdout = "sha1\nsha2\nsha3\n"
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    shas = audit.resolve_commit_range("abc..def")
+    assert shas == ["sha1", "sha2", "sha3"]
+    # Verify --reverse was passed for oldest-first ordering
+    last_call = captured[-1]
+    assert "--reverse" in last_call
+    assert "abc..def" in last_call
+
+
+def test_resolve_commit_range_since_n(monkeypatch):
+    """since:N should call git log -n N + reverse the output."""
+    def _fake(args, **kw):
+        class _R:
+            stdout = "newsha\nmidsha\noldsha\n"  # log newest-first
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    shas = audit.resolve_commit_range("since:3")
+    # Reversed: oldest first
+    assert shas == ["oldsha", "midsha", "newsha"]
+
+
+def test_resolve_commit_range_since_invalid_returns_empty(monkeypatch):
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": ""})())
+    assert audit.resolve_commit_range("since:notanumber") == []
+    assert audit.resolve_commit_range("since:0") == []
+    assert audit.resolve_commit_range("since:-3") == []
+
+
+def test_resolve_commit_range_caps_at_20(monkeypatch):
+    """Both since:N and A..B path should cap result at 20 SHAs."""
+    long_output = "\n".join(f"sha{i:04d}" for i in range(50)) + "\n"
+    monkeypatch.setattr(
+        audit.subprocess, "run",
+        lambda args, **kw: type("R", (), {"stdout": long_output})(),
+    )
+    shas_range = audit.resolve_commit_range("a..b")
+    assert len(shas_range) == 20
+
+
+def test_git_commits_info_single_sha_falls_back_to_legacy(monkeypatch):
+    """git_commit_info(sha) should delegate to git_commits_info([sha])."""
+    captured: list[list[str]] = []
+
+    def _fake(args, **kw):
+        captured.append(list(args))
+        class _R:
+            if "rev-parse" in args:
+                stdout = "abc123456789"
+            elif "show" in args and "--no-patch" in args:
+                stdout = "abc123456789\nClaude\n2026-05-24\ntest subject\n\ntest body"
+            elif "--stat" in args:
+                stdout = " file.py | 1 +\n"
+            elif "--name-only" in args:
+                stdout = "src/foo.py\n"
+            else:
+                stdout = "diff --git a/src/foo.py b/src/foo.py\n"
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    info = audit.git_commit_info("abc123")
+    assert info["sha"] == "abc123456789"
+    assert "Claude" == info["author"]
+    assert info["diff_excerpt"]
+
+
+def test_git_commits_info_multi_commit_aggregates_diffs(monkeypatch):
+    """Two-commit deliverable should produce a diff with both commit
+    delimiters present + a multi-commit message header."""
+    call_counter = {"i": 0}
+
+    def _fake(args, **kw):
+        i = call_counter["i"]
+        call_counter["i"] += 1
+        class _R:
+            stdout = ""
+        # The new flow does rev-parse for each input SHA first
+        if "rev-parse" in args:
+            sha_arg = args[2]
+            _R.stdout = sha_arg + "_full"
+            return _R()
+        if "show" in args and "--no-patch" in args and "--format=%H%n" in args[3]:
+            _R.stdout = "sha1_full\nClaude\n2026-05-24\nfirst subject\n\nbody"
+            return _R()
+        if "show" in args and "--no-patch" in args and "--format=%s" in args[3]:
+            sha = args[-1]
+            _R.stdout = f"subj for {sha}"
+            return _R()
+        if "show" in args and "--stat" in args:
+            sha = args[-1]
+            _R.stdout = f" file_{sha[:4]}.py | 1 +\n"
+            return _R()
+        if "show" in args and "--name-only" in args:
+            sha = args[-1]
+            _R.stdout = f"src/file_{sha[:4]}.py\n"
+            return _R()
+        # default: bare git show for diff
+        sha = args[-1]
+        _R.stdout = f"diff --git a/src/file_{sha[:4]}.py b/src/file_{sha[:4]}.py\n"
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    info = audit.git_commits_info(["sha1", "sha2"])
+    # Two-commit message includes the "multi-commit deliverable" header
+    assert "multi-commit deliverable" in info["message"]
+    assert "2 commits" in info["message"]
+    # Diff contains both commit delimiters
+    assert "commit sha1_full" in info["diff_excerpt"]
+    assert "commit sha2_full" in info["diff_excerpt"]
+
+
+def test_git_commits_info_dedupes_files_across_commits(monkeypatch):
+    """If two commits touch the same file, the file_contents block
+    should show that file once, not twice."""
+    def _fake(args, **kw):
+        class _R:
+            stdout = ""
+        if "rev-parse" in args:
+            _R.stdout = args[2] + "_full"
+            return _R()
+        if "show" in args and "--no-patch" in args:
+            _R.stdout = "sha_full\nClaude\n2026-05-24\nsubj\n\nbody"
+            return _R()
+        if "show" in args and "--stat" in args:
+            _R.stdout = " file.py | 1 +\n"
+            return _R()
+        if "show" in args and "--name-only" in args:
+            # Same file in both commits
+            _R.stdout = "src/duplicated.py\n"
+            return _R()
+        _R.stdout = "diff content\n"
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    info = audit.git_commits_info(["sha1", "sha2"])
+    # Only one file_contents block even though it was touched twice
+    # (we can't directly read modified_files but file_contents should
+    # have one ## src/duplicated.py header at most)
+    content = info["file_contents"]
+    # If the file exists on disk: count headers; if not: file_contents is "(none)"
+    assert content.count("## src/duplicated.py") <= 1
+
+
+def test_git_commits_info_empty_falls_back_to_HEAD(monkeypatch):
+    """Empty SHA list defaults to ['HEAD'] for legacy safety."""
+    calls: list[list[str]] = []
+
+    def _fake(args, **kw):
+        calls.append(list(args))
+        class _R:
+            stdout = "HEAD_RESOLVED"
+        return _R()
+
+    monkeypatch.setattr(audit.subprocess, "run", _fake)
+    audit.git_commits_info([])
+    # First call should rev-parse HEAD
+    assert any("HEAD" in c and "rev-parse" in c for c in calls)

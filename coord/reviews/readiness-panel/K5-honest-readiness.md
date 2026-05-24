@@ -1,15 +1,11 @@
-<!-- name=K5-honest-readiness latency_ms=38908 error='' -->
+<!-- name=K5-honest-readiness latency_ms=95004 error='' -->
 
 ## Rubric
+1. **Install** — 2. Preflight exits 1 on untracked files with no actionable remediation; a non-technical user cannot clear the readiness gate.
+2. **Daily run** — 2. Twenty-plus verbs and cryptic flags (`--explore-on-uncertainty`) with no obvious single “start my day” command.
+3. **Observe** — 3. Dashboard and morning-brief exist, but output is jargon-heavy and the 296-row STATUS.csv is unfiltered noise.
+4. **Recover** — 2. `engines-heal` exists, yet preflight git warnings lack fix hints and open W9 proxy/redaction gaps leave critical failures undocumented.
 
-1. **Install** — 2. Preflight fails on dead engines, dirty git, and pytest cache; remediation requires inspecting JSONL logs and fixing Python tests, which is out of scope for a non-technical user.
-2. **Daily run** — 2. No documented daily sequence; CLI is crowded with verbs like `burst`, `lock`, and `orchestrator`, creating decision fatigue instead of a single obvious morning command.
-3. **Observe** — 3. `dashboard-serve` and `morning-brief` help, but STATUS.csv remains developer-centric (commit hashes, coverage %, UUIDs), so the operator lacks an at-a-glance human-readable pulse.
-4. **Recover** — 2. Failure messages point to logs and git stash/pytest fixes; there is no non-technical one-click remediation for dead engines or dirty repo states.
+5. **Hand to a non-technical operator today?** NO. The preflight readiness gate fails with an ambiguous git warning that would halt a non-technical user before day one. The CLI is a dense forest of expert flags rather than a guided workflow. Most critically, open security gaps (secret exfiltration path, undocumented proxy fail-open behavior) mean typical failures become silent data-loss events that a non-technical operator cannot detect or remediate.
 
-5. **Hand to a non-technical operator today?** NO. The harness boots into a failing preflight that demands git hygiene, pytest cleanup, and manual engine log inspection. The CLI vocabulary and STATUS.csv are written for developers, leaving a non-technical friend stuck before day one with no self-service path back to green.
-
-6. **Top 3 blockers**
-   - **Zero-friction installer**: A first-run wizard that auto-selects working engines, suppresses dev-only pytest/git checks, and writes Task Scheduler entries without requiring a green preflight.
-   - **Plain-language status view**: A `harness status --human` or dashboard pane that translates STATUS.csv into "what happened today / what's broken / what to click" without UUIDs or commit hashes.
-   - **One-click self-healing**: An `harness engines heal` command that auto-quarantines dead engines and fails over to live ones, eliminating JSONL log inspection and key rotation manual steps.
+6. **Top 3 blockers:** (1) A single `harness daily` verb that sequences morning-brief → dispatch → observer → status, hiding advanced flags. (2) A `harness preflight --fix` that auto-resolves git warnings, stash issues, and engine cooldowns without Python knowledge. (3) Ship W9-PROXY-FAILURE-MATRIX and W9-REDACTION-INTEGRITY-TEST and wire them into `harness doctor` so key-leak scenarios are caught and reported in plain language.

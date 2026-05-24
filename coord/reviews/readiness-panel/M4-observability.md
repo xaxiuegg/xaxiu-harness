@@ -1,15 +1,18 @@
-<!-- name=M4-observability latency_ms=16042 error='' -->
+<!-- name=M4-observability latency_ms=24042 error='' -->
 
 ## Rubric
-1. **Install — 2/5** — Preflight fails (dead engines, test failures) requiring Python/git debugging beyond YAML/CLI skills.
-2. **Daily run — 4/5** — `dashboard-serve`, `morning-brief`, and `heartbeat` exist; sequence is logical if preflight is green.
-3. **Observe — 3/5** — STATUS.csv, dashboard, and observer flags are good surfaces, but engine health and test failures require inspecting `state/` logs.
-4. **Recover — 2/5** — Remediation hints exist in `doctor`/`preflight` output but require understanding "rotate keys," "fix failures," or reading `lastfailed`.
 
-## 5. Hand to a non-technical operator today? **NO**
-The harness has strong observability surfaces (STATUS.csv, dashboard, observer flags) and the CLI is well-structured for a non-technical operator. However, the current snapshot shows actionable blockers—dead engines and test failures—that the operator cannot resolve with their allowed skills (YAML edits, CLI commands, Task Scheduler). The remediation messages ("rotate keys," "run pytest, fix failures") are too vague for someone who cannot read logs or author Python. Without first clearing these blockers and ensuring `harness preflight` passes green, handing this over would leave the operator stuck on day one.
+1. **Install** — 4/5. `doctor` and `preflight` are clean CLI commands with clear OK/FAIL output. But `git_clean` warning with exit code 1 requires knowing what "3 untracked files" means and whether it's safe to ignore — a non-technical operator won't know.
 
-## 6. Top 3 blockers
-1. **Dead engines** — Provide a one-command `harness engines-quarantine` or key-rotation wizard that the operator can run without inspecting `state/` files.
-2. **Test failures** — Either auto-fix or surface a clear "acknowledge and skip" path for the operator, since they cannot debug pytest.
-3. **Preflight verbosity** — Transform "modified tracked files" and "last run had failures" into guided CLI flows (e.g., `harness preflight --fix`) that handle or explain each issue interactively.
+2. **Daily run** — 4/5. `morning-brief` + `harness loop` + dashboard-serve is a clear three-command sequence. The --help is legible. Missing: a single `harness start-my-day` wrapper that chains them, or a morning checklist in a non-technical-friendly format.
+
+3. **Observe** — 3/5. This is the crux. Dashboard at 7878 + STATUS.csv + observer flags + morning-brief give surfaces — but STATUS.csv's "Notes" column is wall-of-text technical prose (commit SHAs, module names, KB counts). The observer's authority audit output format is unknown from the snapshot. The operator *can* see status, but interpreting it requires reading dense technical notes or clicking through a dashboard whose UX isn't described. The gap: no evidence of a human-readable "what happened overnight" narrative that the morning-brief actually produces in plain language.
+
+4. **Recover** — 3/5. `engines-heal` exists, `engines-cooldowns` exists, `doctor` diagnoses env issues. But the W9 rows expose real gaps: proxy fail-open/fail-closed behavior is undocumented, silent exceptions aren't audited, and a non-technical operator facing a traceback has no `harness fix-it` or structured remediation flow. Recovery paths exist for engines; they're thin for everything else.
+
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The CLI surface is rich and the `doctor`/`preflight` commands gate startup. But observability relies on STATUS.csv whose Notes column reads like engineer commit logs, not operator guidance. The morning-brief may or may not produce plain-language output — the snapshot doesn't confirm it. An operator can *install and start the loop*, but would struggle to interpret what's happening or recover from non-engine failures without hand-holding.
+
+6. **Top 3 blockers**
+   - **`harness today` or morning-brief that outputs a plain-language "here's what happened, here's what needs attention"** — right now STATUS.csv Notes are developer prose, not operator guidance.
+   - **`harness explain <ID>` that translates a STATUS.csv row into "what is this, is it blocking me, what do I do"** — closing the interpretability gap for the 296-row tracker.
+   - **`harness fix-it` or structured remediation for common non-engine failures** (git dirty, observer flag raised, loop stalled) — right now only engine recovery has CLI verbs.

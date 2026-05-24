@@ -1,18 +1,19 @@
-<!-- name=M5-trust latency_ms=36419 error='' -->
+<!-- name=M5-trust latency_ms=27125 error='' -->
 
 ## Rubric
 
-1. **Install** (2/5): Preflight fails with two blockers: dirty git state and pytest failures. Fix instructions require Python/debugging (run pytest, commit). Non-technical operator cannot resolve without assistance.
+1. **Install (4/5):** Preflight exits code 1 due to git untracked files. Doctor shows all OK. A non-technical operator could follow CLI commands but might be confused by the non-zero exit. Missing explicit "run `git clean`" guidance.
 
-2. **Daily run** (3/5): `morning-brief` command exists, but sequence isn't obvious. Requires knowing to run preflight first, which currently fails. No clear "start my day" script.
+2. **Daily run (4/5):** `harness morning-brief` and `harness loop start` are clear. The operator can install via Task Scheduler. However, the expected morning sequence (brief → loop status → dashboard) isn't documented as a single "runbook" in the operator's language.
 
-3. **Observe** (4/5): STATUS.csv is operator-readable. Dashboard command exists. Observer commands available but not simplified for non-technical use.
+3. **Observe (3/5):** `dashboard-serve` exists, but the snapshot doesn't confirm it's designed for non-technical readability. `observer` output likely requires parsing logs. STATUS.csv is readable, but real-time loop health isn't surfaced in a simple CLI summary.
 
-4. **Recover** (2/5): Remediation paths are technical. "Run pytest, fix failures" and "rotate keys or quarantine engine" require Python/engine knowledge. No simplified recovery CLI for common issues.
+4. **Recover (3/5):** `engines-heal` and `preflight` are recovery commands. However, the git warning requires understanding version control. The `panic-dump` output likely contains traces. No clear "If you see error X, run command Y" table for common failures like engine cooldowns.
 
-5. **Hand to non-technical operator?** NO. The preflight failures block autonomous use, and recovery requires technical intervention. Without resolving git state and test failures, the operator cannot safely start the loop. The trust contract isn't established because the operator cannot verify the system is in a clean state.
+5. **Hand to a non-technical operator today?** **WITH GUARDRAILS.**
+   The core CLI is robust with observer, heal, and status commands. A non-technical operator can install, start the loop, and check status. However, the lack of a plain-English runbook, non-obvious git warning resolution, and potential need to interpret observer logs for recovery means a technical "guardian" should be available for troubleshooting beyond basic operations.
 
-6. **Top 3 blockers**:
-   - **`harness fix --non-technical`** command that auto-commits stashes and runs pytest via CI, providing plain-language results.
-   - **`harness loop --start`** wrapper that runs preflight, fails clearly with dashboard instructions if red, then starts with safe defaults (L5 escalation, conservative mode).
-   - **`harness recover --common`** that handles dead engines (rotate keys automatically) and git state (stash changes) with non-technical explanations.
+6. **Top 3 blockers:**
+   1. **Operator Runbook:** A `HARNESS_QUICKSTART.md` with the exact 3-command daily sequence (install → start → observe) and explicit remediation for the git warning.
+   2. **Recovery Guide:** A `harness recover --what` command or a section in the runbook mapping `preflight` warnings and common `observer` flags to specific CLI fixes.
+   3. **Simple Health Dashboard:** Enhance `harness loop status` or add `harness health` to output a plain-text summary: loop state, last observer pass/fail, and any active cooldowns—no file digging required.

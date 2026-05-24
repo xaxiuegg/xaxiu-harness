@@ -1,15 +1,18 @@
-<!-- name=K1-onboarding-friction latency_ms=162950 error='' -->
+<!-- name=K1-onboarding-friction latency_ms=93391 error='' -->
 
 ## Rubric
 
-1. **Install** — 2. The fresh-clone path forces ~8 operator decisions (which of 3 docs, install method, global flags, `doctor` vs. `preflight`, how to fix `git`/ `pytest`/ dead-engine failures); `preflight` fails on `pytest_cache` and `git_clean` with fixes requiring Python/git skills, and dead-engine remediation points to unreadable JSONL logs.
-2. **Daily run** — 3. `harness morning-brief` is a single obvious verb, but the first-run sequence is gated by red `preflight` checks that a non-technical operator cannot clear autonomously, creating toil before the briefing ever runs.
-3. **Observe** — 4. `morning-brief`, `dashboard-serve`, `STATUS.csv`, and `coord status` provide rich, engine-log-free visibility; the operator never needs to open `runs/` files by hand.
-4. **Recover** — 2. Remediation hints (`fix: Inspect state/engine_performance_log.jsonl`, `Run pytest, fix failures`) demand traceback literacy and log analysis; there is no `harness recover` automation to bridge the gap.
+1. **Install** — 2. Doc triad splits authority; operator faces conflicting gates (`doctor` OK vs `preflight` fail) and an unguided sequence of ≥5 decisions (which doc? `doctor`/`install`/`init`? fix `git_clean`? UNSET keys okay? brief now?). Non-technical users cannot self-remediate untracked-file failures.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. A non-technical operator can consume `morning-brief` and `STATUS.csv` once the system is green, but cannot independently clear `preflight` (pytest failures, dead-engine triage, git stashing) or install Python dependencies. They need a technical owner to prep the environment and handle any red preflight state.
+2. **Daily run** — 3. `morning-brief` is buried in a 30-verb CLI with no daily alias or checklist, forcing the operator to remember the exact incantation amid irrelevant commands.
+
+3. **Observe** — 4. STATUS.csv is readable; `dashboard-serve` and `observer` surfaces are usable without opening `runs/`. Engine root-cause still requires log literacy, but the panel is viable.
+
+4. **Recover** — 2. `engines-heal` covers engine death, but preflight false-positives and proxy failures lack operator-visible remediation; the `git_clean` warn→fail path has no CLI fix.
+
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The operator can read STATUS.csv and run CLI commands, but the first-run experience forces a high-stakes doc choice and a preflight git failure they cannot self-resolve. Once past the wall, daily observation is viable; recovery from non-engine failures is not.
 
 6. **Top 3 blockers**
-- `--operator` preflight mode that skips dev-only gates (`pytest_cache`) and auto-quarantines dead engines instead of asking the operator to read JSONL.
-- Single-page onboarding doc that collapses 20+ CLI verbs into an exact 3-command path: `install` → `doctor` → `morning-brief`.
-- `harness recover` command that automates safe fixes (git stash, engine quarantine) and presents plain-language confirmation instead of tracebacks or raw state files.
+   - **`GETTING_STARTED.md`** prescribing exact first-run sequence and explicitly excluding CLAUDE.md/SESSION_BOOTSTRAP.md from operator scope.
+   - **`harness preflight --operator`** (or profile-aware default) that suppresses `git_clean` blockers and explains fixes in plain language.
+   - **`harness day-start`** meta-command wrapping `preflight` + `morning-brief` + `observer status` into one daily report to eliminate decision fatigue.

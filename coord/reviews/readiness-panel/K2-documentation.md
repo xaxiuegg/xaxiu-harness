@@ -1,15 +1,16 @@
-<!-- name=K2-documentation latency_ms=102951 error='' -->
+<!-- name=K2-documentation latency_ms=106047 error='' -->
 
 ## Rubric
 
-1. **Install** — 2. Preflight emits fixes, but "inspect JSONL" and "fix pytest failures" require dev skills; engine quarantine and test repair are not self-service for a non-coder.
-2. **Daily run** — 3. `morning-brief` and `heartbeat` exist, yet the CLI lists 25+ verbs with no daily sequence spelled out; the operator must hunt for the right ones.
-3. **Observe** — 4. `dashboard-serve`, `observer`, and STATUS.csv give visibility without opening `runs/`, but 269-row CSV lacks a plain-language summary for quick scanning.
-4. **Recover** — 2. Failures surface clearly, yet remediation text points to JSONL logs, git stash, and pytest runs rather than simple CLI verbs or click-to-fix actions.
+1. **Install** — **2**. `harness doctor` is readable, but `preflight` exits 1 on a cryptic `git_clean` warning with no remediation hint, and no simple first-run wizard output is shown.
+2. **Daily run** — **2**. `morning-brief` and `dashboard-serve` suggest routine awareness, yet the CLI presents 20+ undifferentiated commands with no obvious daily sequence or plain-language “what do I run today?” guide.
+3. **Observe** — **2**. Observer and dashboard primitives exist, but `STATUS.csv` is packed with ticket IDs, mutation metrics, and arcane module names; no evidence of a non-technical summary view.
+4. **Recover** — **2**. `engines-heal` and `doctor` are discoverable, but preflight warnings lack remediation steps and `STATUS.csv` explicitly flags undocumented proxy failure modes and missing recovery matrices.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The CLI surfaces problems in plain English and offers `morning-brief`, but a non-technical operator cannot act on engine quarantine, pytest failures, or JSONL logs without assistance. They could run the daily loop if a technical owner handled initial setup and kept preflight green, but self-recovery is out of reach.
+## Hand to a non-technical operator today?
+**WITH GUARDRAILS.** A motivated operator could run pre-canned commands like `morning-brief` and `dashboard-serve` if a technical user performs initial setup, hides the full `--help` surface, and provides a 1-page cheat sheet. They cannot self-install or self-recover from warnings like `git_clean` or dead engines without a runbook.
 
-6. **Top 3 blockers:**
-- `docs/operator-runbook.md` — one-page daily checklist (morning-brief → dashboard → observer) written for non-technical readers.
-- `harness preflight --fix` — auto-remediates dead engines (auto-quarantine), dirty git (auto-stash), and stale pytest cache without Python knowledge.
-- `harness status --today` — human-readable overnight summary replacing 269-row CSV archaeology.
+## Top 3 blockers
+- **Plain-language install runbook**: translate `preflight`/`doctor` outputs into “if you see X, do Y” steps.
+- **Simplified daily operator view**: collapse the 20+ CLI verbs into an opinionated daily checklist (e.g., `harness today`) instead of requiring the operator to navigate subcommands.
+- **Failure-mode recovery cards**: attach human-readable remediation to every `preflight` warning and `STATUS.csv` `todo` so the operator knows which single command to run next.

@@ -34,6 +34,11 @@ harness = "harness.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: real-subprocess wall-clock tests (W9-CLI-TIMEOUT-BUDGET).  Selectable with `pytest -m slow`; deselect with `pytest -m 'not slow'`.",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
