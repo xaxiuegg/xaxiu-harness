@@ -28,6 +28,7 @@ from harness._constants import API_KEY_ENV_VARS
 from harness.engines.base import Engine, EngineResponse
 from harness.engines.gemini import GeminiConcrete
 from harness.engines.mock import MockEngine
+from harness.engines.transport import StreamingTransport
 from harness.secrets import dpapi
 
 
@@ -174,7 +175,7 @@ def _extract_anthropic_usage(response_data: dict) -> tuple[int, int]:
 # Concrete engine classes
 # ---------------------------------------------------------------------------
 
-class DeepSeekConcrete(Engine):
+class DeepSeekConcrete(StreamingTransport):
     """Concrete engine for DeepSeek chat completions.
 
     Endpoint: https://api.deepseek.com/v1/chat/completions
@@ -183,109 +184,21 @@ class DeepSeekConcrete(Engine):
         - ``--no-thinking`` (bool) – force temperature=0.0 and ``thinking: False``.
         - If model name ends with ``-flash`` the same behaviour is applied
           automatically (v1.2 HIGH-7 mitigation for v4-flash packet traps).
+
+    W7-B1-RETROFIT 2026-05-23: refactored to inherit from
+    StreamingTransport.  Dispatch loop, SSE parsing, [DONE] terminator,
+    chunk aggregation, error mapping all live in the base class.  Only
+    the endpoint URL, headers, and payload shape are engine-specific.
     """
 
-    def dispatch(
-        self,
-        packet_content: str,
-        model: str,
-        extra_args: Optional[dict[str, Any]] = None,
-    ) -> EngineResponse:
-        # W5-MM 2026-05-23: stream=true gives DeepSeek 4× faster total
-        # latency (10.6s → 2.8s) and 13× faster TTFB (10.6s → 0.8s) on
-        # deepseek-v4-flash, measured via scripts/probe_deepseek_streaming.py.
-        # Same SSE parsing as Kimi (W5-V): accept both "data: " and
-        # "data:" prefix variants, break on [DONE], aggregate content
-        # chunks + usage.
-        extra = extra_args or {}
-        payload = self._build_payload(packet_content, model, extra)
-        payload["stream"] = True  # W5-MM: always stream DeepSeek
+    def _endpoint_url(self) -> str:
+        return "https://api.deepseek.com/v1/chat/completions"
 
-        url = "https://api.deepseek.com/v1/chat/completions"
-        headers = {
+    def _headers(self) -> dict[str, str]:
+        return {
             "Authorization": f"Bearer {self._api_key}",
             "User-Agent": _make_user_agent(),
         }
-
-        start = time.monotonic()
-        content_chunks: list[str] = []
-        usage_info: dict | None = None
-        finish_reason: str = ""
-
-        try:
-            with httpx.Client(verify=True, timeout=_DEFAULT_TIMEOUT) as client:
-                with client.stream("POST", url, headers=headers, json=payload) as r:
-                    if r.status_code != 200:
-                        latency_ms = int((time.monotonic() - start) * 1000)
-                        return EngineResponse(
-                            success=False, text="", latency_ms=latency_ms,
-                            error=f"HTTP {r.status_code}",
-                        )
-                    for line in r.iter_lines():
-                        if not line:
-                            continue
-                        # W5-V/W5-MM: handle both standard "data: " and
-                        # no-space "data:" SSE prefixes.
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                        elif line.startswith("data:"):
-                            data_str = line[5:]
-                        else:
-                            continue
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                        except (ValueError, json.JSONDecodeError):
-                            continue
-                        choices = chunk.get("choices") or []
-                        if choices:
-                            delta = choices[0].get("delta") or {}
-                            if delta.get("content"):
-                                content_chunks.append(delta["content"])
-                            fr = choices[0].get("finish_reason")
-                            if fr:
-                                finish_reason = fr
-                        if chunk.get("usage"):
-                            usage_info = chunk["usage"]
-            latency_ms = int((time.monotonic() - start) * 1000)
-            text = "".join(content_chunks)
-            tokens_in = int((usage_info or {}).get("prompt_tokens", 0))
-            tokens_out = int((usage_info or {}).get("completion_tokens", 0))
-            # Empty body w/ no usage block → structurally invalid response
-            parsed_anything = (
-                bool(content_chunks) or usage_info is not None or bool(finish_reason)
-            )
-            if not parsed_anything:
-                return EngineResponse(
-                    success=False, text="", latency_ms=latency_ms,
-                    error="parse_error_no_chunks",
-                )
-            return EngineResponse(
-                success=True, text=text, latency_ms=latency_ms,
-                error=None, tokens_in=tokens_in, tokens_out=tokens_out,
-            )
-        except httpx.HTTPStatusError as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error=f"HTTP {e.response.status_code}",
-            )
-        except httpx.TimeoutException:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms, error="timeout",
-            )
-        except httpx.ConnectError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms, error="network",
-            )
-        except Exception:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms, error="internal",
-            )
 
     @staticmethod
     def _build_payload(
@@ -324,100 +237,78 @@ class DeepSeekConcrete(Engine):
         }
 
 
-class KimiConcrete(Engine):
+class KimiConcrete(StreamingTransport):
     """Concrete engine for Kimi (Moonshot) chat completions.
 
     Endpoint: https://api.moonshot.cn/v1/chat/completions
 
     Honoured `extra_args`:
         - ``temperature`` (float) – defaults to 0.6 if not provided.
+
+    W7-B1-RETROFIT 2026-05-23: refactored to inherit from
+    StreamingTransport.  Kimi-specific behavior is preserved via three
+    overridable hooks:
+      - ``_process_delta`` also captures ``reasoning_content``
+      - ``_finalize_response`` sets ``reasoning_only`` when content is
+        empty but reasoning is present (W7-KIMI-REASONING-EMPTY)
+      - ``_handle_remote_protocol_error`` rescues partial content on
+        the 60-second mid-stream disconnect (W5-V)
+
+    Three Kimi-specific issues the streaming-first dispatch handles
+    (all now in the base class except as noted):
+
+    1. **60-second server wall-clock**: Kimi's gateway closes the
+       connection at ~60s on non-stream requests for big packets
+       (3KB+ inputs).  Streaming bypasses this.
+
+    2. **Thinking-budget starvation**: kimi-for-coding emits
+       ``reasoning_content`` first then ``content``.  Non-stream
+       requests with tight max_tokens consume the whole budget on
+       reasoning.  Streaming + W7-KIMI-MAX-TOKENS-FLOOR mitigate.
+
+    3. **Non-standard SSE format**: Kimi sends ``data:{...}`` with NO
+       space after the colon.  StreamingTransport handles both prefix
+       variants (W5-V wiring fix).
     """
 
-    def dispatch(
-        self,
-        packet_content: str,
-        model: str,
-        extra_args: Optional[dict[str, Any]] = None,
-    ) -> EngineResponse:
-        """W5-V 2026-05-23: streaming-first with Kimi-quirk handling.
+    def _endpoint_url(self) -> str:
+        return _resolve_kimi_upstream()
 
-        Three Kimi-specific issues this implementation handles:
-
-        1. **60-second server wall-clock**: Kimi's gateway closes the
-           connection at ~60s on non-stream requests for big packets
-           (3KB+ inputs).  Streaming bypasses this — server keeps the
-           connection alive as it emits incremental chunks.
-
-        2. **Thinking-budget starvation**: kimi-for-coding (and most
-           Kimi models on api.kimi.com) emit `reasoning_content` tokens
-           first then `content`.  Non-stream requests with tight
-           max_tokens consume the whole budget on reasoning, leaving 0
-           content.  Streaming + a generous max_tokens lets reasoning
-           finish + content emit incrementally.
-
-        3. **Non-standard SSE format**: Kimi sends `data:{...}` with
-           NO space after the colon (vs the standard `data: {...}`).
-           Parsers expecting the space silently emit 0 tokens.
-        """
-        extra = extra_args or {}
-
-        start = time.monotonic()
-        payload = self._build_payload(packet_content, model, extra)
-        payload["stream"] = True  # W5-V: always stream Kimi
-
-        url = _resolve_kimi_upstream()
-        headers = {
+    def _headers(self) -> dict[str, str]:
+        return {
             "Authorization": f"Bearer {self._api_key}",
             # Kimi Code API enforces a User-Agent allowlist
             "User-Agent": _make_kimi_user_agent(),
         }
 
-        content_chunks: list[str] = []
-        reasoning_chunks: list[str] = []
-        finish_reason: str = ""
-        usage_info: dict | None = None
+    def _process_delta(self, delta: dict, accumulated: dict) -> None:
+        """Override the default to also capture ``reasoning_content``.
 
-        try:
-            with httpx.Client(verify=True, timeout=_DEFAULT_TIMEOUT) as client:
-                with client.stream("POST", url, headers=headers, json=payload) as r:
-                    if r.status_code != 200:
-                        latency_ms = int((time.monotonic() - start) * 1000)
-                        return EngineResponse(
-                            success=False, text="", latency_ms=latency_ms,
-                            error=f"HTTP {r.status_code}",
-                        )
-                    for line in r.iter_lines():
-                        if not line:
-                            continue
-                        # W5-V: handle BOTH "data: " (standard) and "data:" (Kimi)
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                        elif line.startswith("data:"):
-                            data_str = line[5:]
-                        else:
-                            continue
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                        except (ValueError, json.JSONDecodeError):
-                            continue
-                        choices = chunk.get("choices") or []
-                        if choices:
-                            delta = choices[0].get("delta") or {}
-                            if delta.get("content"):
-                                content_chunks.append(delta["content"])
-                            if delta.get("reasoning_content"):
-                                reasoning_chunks.append(delta["reasoning_content"])
-                            fr = choices[0].get("finish_reason")
-                            if fr:
-                                finish_reason = fr
-                        if chunk.get("usage"):
-                            usage_info = chunk["usage"]
-            latency_ms = int((time.monotonic() - start) * 1000)
-            text = "".join(content_chunks)
-            tokens_in = int((usage_info or {}).get("prompt_tokens", 0))
-            tokens_out = int((usage_info or {}).get("completion_tokens", 0))
+        Kimi emits reasoning tokens BEFORE user-facing content; we
+        keep both so :meth:`_finalize_response` can set
+        ``reasoning_only`` (W7-KIMI-REASONING-EMPTY) when reasoning
+        exhausts the budget."""
+        if delta.get("content"):
+            accumulated.setdefault("content_chunks", []).append(
+                delta["content"]
+            )
+        if delta.get("reasoning_content"):
+            accumulated.setdefault("reasoning_chunks", []).append(
+                delta["reasoning_content"]
+            )
+
+    def _finalize_response(
+        self,
+        accumulated: dict,
+        latency_ms: int,
+        usage_info: Optional[dict],
+        finish_reason: str,
+    ) -> EngineResponse:
+        content_chunks = accumulated.get("content_chunks", [])
+        reasoning_chunks = accumulated.get("reasoning_chunks", [])
+        text = "".join(content_chunks)
+        tokens_in = int((usage_info or {}).get("prompt_tokens", 0))
+        tokens_out = int((usage_info or {}).get("completion_tokens", 0))
             # If the server returned 200 but emitted ZERO parseable
             # chunks (no content, no reasoning, no usage), the response
             # was structurally invalid (e.g. malformed body, gateway
@@ -426,71 +317,45 @@ class KimiConcrete(Engine):
             # acceptable: server may have hit max_tokens during reasoning;
             # that case still has usage_info populated and guards.py
             # Rule 2 catches the empty-text via classify_response.
-            parsed_anything = (
-                bool(content_chunks) or bool(reasoning_chunks)
-                or usage_info is not None or bool(finish_reason)
-            )
-            if not parsed_anything:
-                return EngineResponse(
-                    success=False, text="", latency_ms=latency_ms,
-                    error="parse_error_no_chunks",
-                )
-            # W7-KIMI-REASONING-EMPTY 2026-05-23: detect the case where
-            # Kimi spent its entire max_tokens budget on reasoning
-            # tokens and emitted ZERO user-facing content.  Pre-fix:
-            # callers saw success=True text='' with no signal to retry;
-            # the W6-PANEL retry sequence hit this for 4 of 5 Kimi
-            # reviewers because the panel script passed max_tokens=4000
-            # (or 2500 on retry) and reasoning_content ate the budget.
-            # Surface a distinct reasoning_only=True flag so the
-            # dispatcher's fallback chain + operator-facing callers can
-            # detect and retry with a larger budget instead of relaying
-            # the empty response downstream.
-            reasoning_only = (
-                len(content_chunks) == 0
-                and len(reasoning_chunks) > 0
-            )
-            return EngineResponse(
-                success=True, text=text, latency_ms=latency_ms,
-                error=None, tokens_in=tokens_in, tokens_out=tokens_out,
-                reasoning_only=reasoning_only,
-            )
-        except httpx.HTTPStatusError as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
+        parsed_anything = (
+            bool(content_chunks) or bool(reasoning_chunks)
+            or usage_info is not None or bool(finish_reason)
+        )
+        if not parsed_anything:
             return EngineResponse(
                 success=False, text="", latency_ms=latency_ms,
-                error=f"HTTP {e.response.status_code}",
+                error="parse_error_no_chunks",
             )
-        except httpx.TimeoutException:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="timeout",
-            )
-        except httpx.ConnectError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="network",
-            )
-        except httpx.RemoteProtocolError:
-            # W5-V: server-disconnect mid-stream (happens occasionally
-            # at the 60s gateway timeout if reasoning hasn't yielded
-            # content yet).  Capture whatever partial content we have.
-            latency_ms = int((time.monotonic() - start) * 1000)
-            partial = "".join(content_chunks)
-            return EngineResponse(
-                success=bool(partial),
-                text=partial,
-                latency_ms=latency_ms,
-                error=None if partial else "kimi_remote_disconnect",
-            )
-        except Exception:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="internal",
-            )
+        # W7-KIMI-REASONING-EMPTY 2026-05-23: detect the case where
+        # Kimi spent its entire max_tokens budget on reasoning tokens
+        # and emitted ZERO user-facing content.  Surface a distinct
+        # reasoning_only=True flag so callers can retry with a larger
+        # budget instead of relaying empty text downstream.
+        reasoning_only = (
+            len(content_chunks) == 0
+            and len(reasoning_chunks) > 0
+        )
+        return EngineResponse(
+            success=True, text=text, latency_ms=latency_ms,
+            error=None, tokens_in=tokens_in, tokens_out=tokens_out,
+            reasoning_only=reasoning_only,
+        )
+
+    def _handle_remote_protocol_error(
+        self, accumulated: dict, latency_ms: int,
+    ) -> Optional[EngineResponse]:
+        """W5-V partial-content rescue.
+
+        Server-disconnect mid-stream happens occasionally at the 60s
+        gateway timeout when reasoning hasn't yielded content yet.
+        Return whatever partial content was already streamed."""
+        partial = "".join(accumulated.get("content_chunks", []))
+        return EngineResponse(
+            success=bool(partial),
+            text=partial,
+            latency_ms=latency_ms,
+            error=None if partial else "kimi_remote_disconnect",
+        )
 
     @staticmethod
     def _build_payload(
