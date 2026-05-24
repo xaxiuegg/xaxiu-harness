@@ -41,21 +41,28 @@ def _default_ledger_path() -> Path:
 
 
 def record_run(results: Iterable[PreflightCheck],
-               ledger_path: Path | None = None) -> int:
+               ledger_path: Path | None = None,
+               prune_older_than_days: int | None = 7) -> int:
     """Append one row per timed check to the ledger.  Returns # rows written.
 
     Skips checks with duration_ms=0 (untimed; would pollute percentiles).
     Empty input is a no-op (no file created).
+
+    W11 audit fix (K01/K07/K10): when ``prune_older_than_days`` is set
+    (default 7), entries older than that cutoff are dropped before the
+    new rows are written.  Keeps the JSONL bounded so percentile
+    computation stays O(recent-window) rather than O(all-time).  Set
+    to None to disable pruning (tests + audit retention scenarios).
     """
     if ledger_path is None:
         ledger_path = _default_ledger_path()
     rows: list[dict] = []
-    now = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     for r in results:
         if r.duration_ms <= 0:
             continue
         rows.append({
-            "timestamp": now,
+            "timestamp": now_iso,
             "name": r.name,
             "severity": r.severity,
             "duration_ms": r.duration_ms,
@@ -63,10 +70,57 @@ def record_run(results: Iterable[PreflightCheck],
     if not rows:
         return 0
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    # W11 audit fix (K01/K07/K10): prune in-place before appending.
+    if prune_older_than_days is not None and ledger_path.exists():
+        try:
+            prune_old_entries(ledger_path,
+                              max_age_days=prune_older_than_days)
+        except OSError:
+            # Pruning failure is non-fatal; we still want the new rows
+            # to land.  The ledger may not exist after a failed prune,
+            # which is fine (open(..., "a") will recreate).
+            pass
     with ledger_path.open("a", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
     return len(rows)
+
+
+def prune_old_entries(ledger_path: Path,
+                       max_age_days: int = 7) -> int:
+    """Drop entries older than ``max_age_days`` from the ledger.
+
+    Returns the number of rows removed.  Atomic via temp-file rename
+    so a kill mid-prune leaves the original intact.
+    """
+    if not ledger_path.exists():
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    kept: list[str] = []
+    removed = 0
+    for line in ledger_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+            ts_raw = row.get("timestamp")
+            if not isinstance(ts_raw, str):
+                kept.append(line)  # malformed → keep (don't lose data)
+                continue
+            ts = _parse_ts(ts_raw)
+            if ts is None or ts >= cutoff:
+                kept.append(line)
+            else:
+                removed += 1
+        except json.JSONDecodeError:
+            kept.append(line)  # keep malformed; aggregator skips it
+    if removed == 0:
+        return 0
+    tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
+    tmp.write_text("\n".join(kept) + ("\n" if kept else ""),
+                    encoding="utf-8")
+    tmp.replace(ledger_path)
+    return removed
 
 
 # -- summary ------------------------------------------------------------
@@ -189,9 +243,15 @@ def latency_summary(ledger_path: Path | None = None,
 
 
 def latency_table(ledger_path: Path | None = None,
-                   since_hours: float | None = None) -> str:
-    """Render an operator-friendly table sorted by p95 desc (slowest first)."""
-    s = latency_summary(ledger_path=ledger_path, since_hours=since_hours)
+                   since_hours: float | None = None,
+                   check_name: str | None = None) -> str:
+    """Render an operator-friendly table sorted by p95 desc (slowest first).
+
+    W11 audit fix (K03): ``check_name`` filter now flows through the
+    pretty path too (was previously honored only by --format json).
+    """
+    s = latency_summary(ledger_path=ledger_path, since_hours=since_hours,
+                         check_name=check_name)
     if s["count"] == 0:
         return ("No preflight latency samples recorded yet.\n"
                 "Run `harness preflight` to populate the ledger.")

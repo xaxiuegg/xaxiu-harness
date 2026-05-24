@@ -40,6 +40,11 @@ class ObserverState(BaseModel):
     flags_acknowledged: int = 0
     status: str = "uninitialized"
     installed_at: str | None = None
+    # W11-L5-OUTPUT-CONTRACT: watchdog tracks consecutive restart
+    # failures; reaching the threshold (default 3) triggers an L5
+    # escalation banner in the restart_observer message.  Reset to 0
+    # on a successful restart.
+    consecutive_restart_failures: int = 0
 
 
 # ---------------------------------------------------------------------------

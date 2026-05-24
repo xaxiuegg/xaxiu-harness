@@ -281,3 +281,96 @@ def test_latency_summary_payload_is_compact(tmp_path):
     assert len(serialized) < 2000, (
         f"latency summary {len(serialized)} bytes — too big"
     )
+
+
+# -- W11-PER-CHECK-LATENCY-OBSERVABILITY audit fixes --------------------
+
+
+def test_prune_old_entries_drops_rows_older_than_cutoff(tmp_path):
+    """K01/K07/K10: ledger must auto-prune to stay bounded."""
+    ledger = tmp_path / "l.jsonl"
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=14)).isoformat()
+    recent = (now - timedelta(hours=1)).isoformat()
+    entries = [
+        {"timestamp": old, "name": "n", "severity": "ok", "duration_ms": 999},
+        {"timestamp": recent, "name": "n", "severity": "ok", "duration_ms": 100},
+    ]
+    _write_ledger(ledger, entries)
+    removed = pl.prune_old_entries(ledger, max_age_days=7)
+    assert removed == 1
+    remaining = ledger.read_text(encoding="utf-8").splitlines()
+    # Only the recent entry survives
+    parsed = [json.loads(l) for l in remaining if l.strip()]
+    assert len(parsed) == 1
+    assert parsed[0]["duration_ms"] == 100
+
+
+def test_prune_keeps_malformed_lines_safe(tmp_path):
+    """Pruner must not lose malformed lines just because timestamp parse failed."""
+    ledger = tmp_path / "l.jsonl"
+    now = datetime.now(timezone.utc).isoformat()
+    ledger.write_text(
+        f'{{"timestamp": "{now}", "name": "n", "duration_ms": 100, '
+        f'"severity": "ok"}}\n'
+        f'not json garbage\n',
+        encoding="utf-8",
+    )
+    pl.prune_old_entries(ledger, max_age_days=7)
+    remaining = ledger.read_text(encoding="utf-8").splitlines()
+    # The malformed line is kept (data preservation > prune aggression)
+    assert any("not json" in line for line in remaining)
+
+
+def test_record_run_prunes_old_entries_by_default(tmp_path):
+    """record_run with default prune_older_than_days=7 should drop old."""
+    ledger = tmp_path / "l.jsonl"
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=30)).isoformat()
+    _write_ledger(ledger, [{
+        "timestamp": old, "name": "old_check",
+        "severity": "ok", "duration_ms": 5000,
+    }])
+    new_results = [PreflightCheck(name="fresh", severity="ok",
+                                    message="", duration_ms=100)]
+    pl.record_run(new_results, ledger_path=ledger)
+    rows = [json.loads(l) for l in ledger.read_text("utf-8").splitlines()]
+    # Old entry pruned; only the fresh one remains
+    names = {r["name"] for r in rows}
+    assert names == {"fresh"}
+
+
+def test_record_run_can_disable_prune(tmp_path):
+    """Tests + audit retention scenarios disable prune by passing None."""
+    ledger = tmp_path / "l.jsonl"
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=30)).isoformat()
+    _write_ledger(ledger, [{
+        "timestamp": old, "name": "old", "severity": "ok",
+        "duration_ms": 100,
+    }])
+    new_results = [PreflightCheck(name="fresh", severity="ok",
+                                    message="", duration_ms=50)]
+    pl.record_run(new_results, ledger_path=ledger,
+                   prune_older_than_days=None)
+    rows = [json.loads(l) for l in ledger.read_text("utf-8").splitlines()]
+    # Both old + new kept
+    names = {r["name"] for r in rows}
+    assert names == {"old", "fresh"}
+
+
+def test_latency_table_check_name_filter_works(tmp_path):
+    """K03: --check-name was dropped on the floor in pretty path."""
+    ledger = tmp_path / "l.jsonl"
+    now = datetime.now(timezone.utc).isoformat()
+    entries = [
+        {"timestamp": now, "name": "engine:kimi",
+         "severity": "ok", "duration_ms": 500},
+        {"timestamp": now, "name": "git_clean",
+         "severity": "ok", "duration_ms": 100},
+    ]
+    _write_ledger(ledger, entries)
+    text = pl.latency_table(ledger_path=ledger, check_name="engine:kimi")
+    assert "engine:kimi" in text
+    # git_clean must NOT appear when filter is active
+    assert "git_clean" not in text

@@ -2201,12 +2201,17 @@ def preflight_cmd(fmt: str, skip_engines: bool,
     # W11-PER-CHECK-LATENCY-OBSERVABILITY: persist per-check timings
     # to the rolling ledger so `harness preflight-latency` can answer
     # "is preflight slow today?" without grepping logs.  Best-effort
-    # — a failed ledger write must NOT block the preflight return.
+    # — a failed ledger write must NOT block the preflight return,
+    # but per W11 audit fix (K04 / W9-SILENT-EXCEPTION-AUDIT) the
+    # failure is reported to stderr so it does not pass silently.
     try:
         from harness.preflight_latency import record_run as _record_lat
         _record_lat(results)
-    except Exception:
-        pass
+    except OSError as exc:
+        click.echo(
+            f"warn: preflight latency ledger write failed: {exc}",
+            err=True,
+        )
 
     if fmt == "json":
         click.echo(json.dumps({
@@ -2214,6 +2219,23 @@ def preflight_cmd(fmt: str, skip_engines: bool,
             "checks": [dataclasses.asdict(r) for r in results],
         }, indent=2))
     else:
+        # W11-L5-OUTPUT-CONTRACT 2026-05-25: when any check is a FAIL,
+        # render an L5 ESCALATION banner FIRST so the operator's eye
+        # catches the severity before scanning the per-check table.
+        fails = [r for r in results if r.severity == "fail"]
+        if fails:
+            from harness.l5_escalation import render_l5_banner
+            first = fails[0]
+            multi = "" if len(fails) == 1 else f" (+{len(fails) - 1} more)"
+            click.echo(render_l5_banner(
+                code=f"L5.preflight.{first.name.upper().replace(':', '_')}",
+                summary=f"preflight check '{first.name}' FAILED{multi}: "
+                        f"{first.message}",
+                action=first.fix or "run `harness preflight --fix` to "
+                                     "attempt auto-remediation",
+                evidence=[f"{r.name}: {r.message}" for r in fails[:5]],
+            ))
+            click.echo("")
         glyph = {"ok": "[OK]", "warn": "[!]", "fail": "[X]"}
         click.echo("harness preflight — autonomous-mode readiness gate")
         click.echo("=" * 60)
@@ -2278,7 +2300,38 @@ def preflight_latency_cmd(fmt: str, since_hours: float | None,
         s = latency_summary(since_hours=since_hours, check_name=check_name)
         click.echo(json.dumps(s, indent=2))
     else:
-        click.echo(latency_table(since_hours=since_hours))
+        # W11 audit fix (K03): --check-name now flows through the
+        # pretty codepath too, not just JSON.
+        click.echo(latency_table(since_hours=since_hours,
+                                  check_name=check_name))
+
+
+@cli.command(name="l5-banner-demo", hidden=True)
+def l5_banner_demo_cmd() -> None:
+    """W11-L5-OUTPUT-CONTRACT: render a sample L5 ESCALATION banner.
+
+    Operator-visible smoke test: lets you preview what an L5 banner
+    looks like without triggering a real escalation.  Hidden verb (it's
+    documentation, not production functionality).
+    """
+    from harness.l5_escalation import render_l5_banner
+    click.echo(render_l5_banner(
+        code="L5.observer.OBSERVER_RESTART_LOOP",
+        summary=(
+            "observer scheduler restart failed 3 consecutive times — "
+            "the watchdog cannot self-recover"
+        ),
+        action=(
+            "Inspect scheduler manually: on Windows run "
+            "`Get-ScheduledTask -TaskName XaxiuHarnessObserver*`; "
+            "on Linux/Mac run `crontab -l | grep HARNESS_OBSERVER`."
+        ),
+        evidence=[
+            "latest register message: PowerShell exit code 1",
+            "cadence: every 60 min",
+            "daily retro at: 23:00",
+        ],
+    ))
 
 
 @cli.command(name="today")

@@ -183,11 +183,19 @@ def restart_observer(observer_dir: Path | None = None) -> tuple[bool, str]:
     Reads existing cadence_minutes + daily_retro_time from observer state,
     calls unregister (best effort), then register.  Returns (ok, message).
 
+    W11-L5-OUTPUT-CONTRACT: records the outcome via
+    l5_escalation.record_restart_outcome.  On the 3rd consecutive
+    failure (or beyond), the returned message PREPENDS a visible L5
+    ESCALATION banner so the operator sees the severity immediately
+    instead of just another "(ok=False, msg=...)" return.
+
     Used by:
       - `harness observer restart` CLI verb
       - the dashboard banner's click-to-restart link
       - the agent's harness SDK (auto-recovery)
     """
+    from harness import l5_escalation
+
     try:
         state = observer_state.read_state(observer_dir=observer_dir)
     except Exception as exc:
@@ -202,6 +210,39 @@ def restart_observer(observer_dir: Path | None = None) -> tuple[bool, str]:
         daily_time=state.daily_retro_time,
         include_chat=True,
     )
+    # Persist outcome + read back the consecutive-failure count.  Wrap
+    # in try/except so a state-write failure doesn't mask the original
+    # restart success/failure that the caller cares about.
+    try:
+        failure_count = l5_escalation.record_restart_outcome(
+            ok, observer_dir=observer_dir,
+        )
+    except Exception:
+        failure_count = 0
+
     if not ok:
-        return False, f"restart failed during register: {msg}"
+        base_msg = f"restart failed during register: {msg}"
+        if l5_escalation.should_escalate_to_l5(failure_count):
+            banner = l5_escalation.render_l5_banner(
+                code="L5.observer.OBSERVER_RESTART_LOOP",
+                summary=(
+                    f"observer scheduler restart failed "
+                    f"{failure_count} consecutive times — "
+                    f"the watchdog cannot self-recover"
+                ),
+                action=(
+                    "Inspect scheduler manually: on Windows run "
+                    "`Get-ScheduledTask -TaskName XaxiuHarnessObserver*`; "
+                    "on Linux/Mac run `crontab -l | grep HARNESS_OBSERVER`. "
+                    "Then run `harness observer install-scheduler` with "
+                    "elevated privileges if needed."
+                ),
+                evidence=[
+                    f"latest register message: {msg}",
+                    f"cadence: every {state.cadence_minutes} min",
+                    f"daily retro at: {state.daily_retro_time}",
+                ],
+            )
+            return False, banner + "\n" + base_msg
+        return False, base_msg
     return True, f"observer restarted: {msg}"
