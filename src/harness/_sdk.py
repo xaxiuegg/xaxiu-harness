@@ -206,24 +206,86 @@ def retrieve(dispatch_id: str,
     return chunks
 
 
-def budget_status() -> dict:
+def budget_status(*, since_hours: float | None = None,
+                  ledger_path=None) -> dict:
     """Return the current session's offload + cost telemetry.
 
-    Returns a dict with:
-        session_tokens_total: int
-        session_cost_total: float
-        offload_ratio: float in [0, 1] — harness-engine tokens / total
+    W11-AGENT-TELEMETRY 2026-05-25 implementation.
+
+    Returns a dict:
+        session_tokens_total: int (input + output across all engines)
+        session_cost_total: float USD
+        offload_ratio: float in [0, 1] — subscription / (subscription+paid)
         remaining_budget_usd: float — COST_MAX_PER_SESSION minus spent
         dispatches_fired: int
-        engines_used: dict[engine_name, count]
-        avg_cost_per_token: float
-        cost_max_per_session_usd: float
+        engines_used: dict[engine_name, dispatch_count]
+        avg_cost_per_token: float (0.0 when no tokens recorded)
+        cost_max_per_session_usd: float (from env or default 5.0)
+        window_hours: float | None — None = entire ledger
 
-    Cheap to call; the agent can poll between dispatches without
-    significant context cost (the dict is small).  Implementation
-    lives behind W11-AGENT-TELEMETRY + W11-PYTHON-SDK-API-IMPL.
+    Args:
+        since_hours: Window in hours; None = entire ledger.
+        ledger_path: Override the ledger path (for tests).
+
+    Cheap to call; payload stays <2KB so agents can poll between
+    dispatches without context cost.
     """
-    raise NotImplementedError(
-        "harness.budget_status() is pending W11-AGENT-TELEMETRY "
-        "(Wave 11-C) + W11-PYTHON-SDK-API-IMPL (Wave 11-D)."
-    )
+    import os as _os
+    from datetime import datetime, timedelta, timezone
+    from harness import budget as _budget
+
+    # Subscription engines have zero marginal cost
+    SUBSCRIPTION_ENGINES = frozenset({
+        "kimi", "kimi-api", "mimo", "mimo-pro",
+        "swarm/kimi", "swarm/kimi-api", "swarm/mimo",
+        "mimo-sub", "mimo-pro-sub",
+    })
+
+    since_iso = None
+    if since_hours is not None and since_hours > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        since_iso = cutoff.isoformat()
+
+    summary = _budget.summary(ledger_path=ledger_path, since_iso=since_iso)
+    total_in = sum(s["total_input_tokens"] for s in summary.values())
+    total_out = sum(s["total_output_tokens"] for s in summary.values())
+    total_tokens = int(total_in + total_out)
+    total_cost = round(sum(s["total_cost_usd"] for s in summary.values()), 6)
+    dispatches = int(sum(s["dispatches"] for s in summary.values()))
+
+    engines_used = {engine: int(s["dispatches"])
+                    for engine, s in summary.items()}
+
+    # Offload ratio: subscription tokens / (subscription + paid tokens)
+    sub_tokens = 0
+    paid_tokens = 0
+    for engine, s in summary.items():
+        eng_total = int(s["total_input_tokens"] + s["total_output_tokens"])
+        if engine in SUBSCRIPTION_ENGINES:
+            sub_tokens += eng_total
+        else:
+            paid_tokens += eng_total
+    if sub_tokens + paid_tokens > 0:
+        offload_ratio = round(sub_tokens / (sub_tokens + paid_tokens), 4)
+    else:
+        offload_ratio = 0.0
+
+    try:
+        cost_max = float(_os.environ.get("COST_MAX_PER_SESSION", "5.00"))
+    except ValueError:
+        cost_max = 5.00
+    remaining = round(cost_max - total_cost, 6)
+
+    avg_per_token = round(total_cost / total_tokens, 8) if total_tokens else 0.0
+
+    return {
+        "session_tokens_total": total_tokens,
+        "session_cost_total": total_cost,
+        "offload_ratio": offload_ratio,
+        "remaining_budget_usd": remaining,
+        "dispatches_fired": dispatches,
+        "engines_used": engines_used,
+        "avg_cost_per_token": avg_per_token,
+        "cost_max_per_session_usd": cost_max,
+        "window_hours": since_hours,
+    }

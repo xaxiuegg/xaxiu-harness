@@ -166,11 +166,15 @@ def test_retrieve_implemented_raises_result_not_found_on_missing_id(tmp_path):
         harness.retrieve("never-existed", project_root=str(tmp_path))
 
 
-def test_budget_status_stub_raises_notimplemented_with_pointer():
-    with pytest.raises(NotImplementedError) as exc_info:
-        harness.budget_status()
-    assert "W11-AGENT-TELEMETRY" in str(exc_info.value) or \
-           "W11-PYTHON-SDK-API-IMPL" in str(exc_info.value)
+def test_budget_status_implemented_returns_dict(tmp_path):
+    """W11-AGENT-TELEMETRY 2026-05-25: budget_status() now IMPLEMENTED.
+    Replaces the prior stub-raises-NotImplementedError test."""
+    empty_ledger = tmp_path / "empty.jsonl"
+    empty_ledger.write_text("", encoding="utf-8")
+    result = harness.budget_status(ledger_path=empty_ledger)
+    assert isinstance(result, dict)
+    assert "offload_ratio" in result
+    assert "session_tokens_total" in result
 
 
 # -- Type stub file exists + parses --------------------------------------
