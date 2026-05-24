@@ -114,6 +114,52 @@ on its own — the verdict line tells you whether to proceed.
 
 ---
 
+## Where do API keys live? (DPAPI)
+
+The harness needs API keys for the engines you use: Kimi
+(KIMI_API_KEY), DeepSeek (DEEPSEEK_API_KEY), MiMo (MIMO_API_KEY),
+and optionally Anthropic + Gemini.  Storing those keys is the
+first thing the wizard does.
+
+**Where they live:** Windows DPAPI (Data Protection API).  This is
+the same secure store Edge uses for saved passwords — only your
+Windows user can decrypt them.  Files: `%APPDATA%\harness\state\secrets.json`
+(encrypted blob).
+
+**How to set them up (recommended):**
+
+```powershell
+harness env-wizard
+```
+
+This walks each key one-by-one, asks you to paste a value (or skip),
+and stores it via DPAPI.  The prompt hides input so the key isn't
+echoed back.  Re-run any time with `--overwrite` to replace a key.
+
+**How to check what's set:**
+
+```powershell
+harness env
+```
+
+Shows `SET` or `MISSING` per key.  Never prints values.
+
+**How to rotate a key:**
+
+1. Get a new key from the vendor's console.
+2. Run `harness env-wizard --overwrite` and paste the new value when
+   prompted for that engine's key.  The wizard replaces the DPAPI
+   entry atomically.
+
+**If DPAPI breaks:**
+
+If `harness preflight` reports a FAIL on the `dpapi` check, that's
+an L5 escalation — DPAPI access is broken for your Windows user
+(rare; usually a profile corruption or domain-account migration).
+Stop and ask engineering.
+
+---
+
 ## When something looks weird
 
 These three commands answer "what's the harness doing?":

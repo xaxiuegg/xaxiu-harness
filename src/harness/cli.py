@@ -1139,6 +1139,126 @@ def env(show_set: bool) -> None:
     sys.exit(0)
 
 
+_ENV_WIZARD_KEYS: list[tuple[str, str]] = [
+    # (env_var_name, plain-language purpose)
+    ("KIMI_API_KEY",      "Kimi (Moonshot) — primary agentic engine"),
+    ("DEEPSEEK_API_KEY",  "DeepSeek — V-file-spanning + math-heavy work"),
+    ("MIMO_API_KEY",      "MiMo — audit + brainstorm panels"),
+    ("ANTHROPIC_API_KEY", "Anthropic — Claude API fallback (optional)"),
+    ("GEMINI_API_KEY",    "Gemini — secondary engine (optional)"),
+]
+
+
+@cli.command(name="env-wizard")
+@click.option("--overwrite", is_flag=True, default=False,
+              help="Re-prompt for keys that are already set (default: "
+                   "skip set keys and only prompt for missing ones).")
+@click.option("--non-interactive", is_flag=True, default=False,
+              help="Print the wizard plan without prompting; used by tests "
+                   "and dry-run.")
+def env_wizard_cmd(overwrite: bool, non_interactive: bool) -> None:
+    """W10-ENV-VAR-WIZARD: guided API-key population.
+
+    Walks through each required API key, prompts the operator to
+    paste a value (or skip), and stores it in DPAPI via
+    ``harness.secrets.dpapi.encrypt_secret``.  After each entry,
+    runs a presence probe to confirm.
+
+    Idempotent: re-running shows current state.  Pass ``--overwrite``
+    to re-prompt for keys that are already set.
+
+    Operator-friendly: no Python knowledge required.  The wizard
+    explains each key in plain language (what it's for, whether
+    it's required).  Operators can paste keys; values are hidden
+    in the prompt and never echoed back.
+
+    Per [[user_non_technical_role]] memory: the operator can run
+    CLI commands + paste values but cannot read tracebacks.  The
+    wizard surfaces errors with one-line "what to do" messages.
+    """
+    from harness.secrets.dpapi import has_secret, encrypt_secret
+
+    click.echo("=" * 60)
+    click.echo("  harness env-wizard — API key setup")
+    click.echo("=" * 60)
+    click.echo(
+        "\nFor each engine, you'll see whether a key is already set.\n"
+        "If MISSING, paste your key (or press Enter to skip).\n"
+        "Keys are stored securely via Windows DPAPI — only your\n"
+        "Windows user can decrypt them.\n"
+    )
+
+    set_count = 0
+    new_count = 0
+    skip_count = 0
+
+    for key_name, purpose in _ENV_WIZARD_KEYS:
+        env_present = bool(os.environ.get(key_name))
+        dpapi_present = has_secret(key_name)
+        present = env_present or dpapi_present
+        status = "SET" if present else "MISSING"
+        source = ""
+        if env_present and dpapi_present:
+            source = "  (env + DPAPI)"
+        elif env_present:
+            source = "  (env)"
+        elif dpapi_present:
+            source = "  (DPAPI)"
+
+        click.echo(f"\n[{status}] {key_name}{source}")
+        click.echo(f"        {purpose}")
+
+        if present and not overwrite:
+            click.echo("        -> already set, skipping (pass --overwrite "
+                       "to re-prompt)")
+            set_count += 1
+            continue
+
+        if non_interactive:
+            click.echo("        -> would prompt (non-interactive mode; "
+                       "skipping)")
+            skip_count += 1
+            continue
+
+        # Prompt for value (hide input so the key isn't echoed)
+        value = click.prompt(
+            f"        Paste {key_name} (or empty to skip)",
+            hide_input=True,
+            default="",
+            show_default=False,
+        )
+        value = value.strip()
+        if not value:
+            click.echo("        -> skipped (empty input)")
+            skip_count += 1
+            continue
+
+        try:
+            encrypt_secret(key_name, value)
+        except Exception as exc:
+            click.echo(f"        [X] failed to store key: {exc}",
+                       err=True)
+            click.echo("        -> retry the wizard once you've resolved "
+                       "the DPAPI issue", err=True)
+            sys.exit(4)
+
+        # Confirm
+        if has_secret(key_name):
+            click.echo(f"        [OK] {key_name} stored in DPAPI")
+            new_count += 1
+        else:
+            click.echo(f"        [X] {key_name} write reported ok but "
+                       f"presence probe failed", err=True)
+            sys.exit(4)
+
+    click.echo("\n" + "=" * 60)
+    click.echo(f"  Wizard complete: {set_count} already-set, "
+               f"{new_count} newly stored, {skip_count} skipped")
+    click.echo("=" * 60)
+    click.echo("\nVerify with: `harness env`")
+    sys.exit(0)
+
+
 @cli.group(name="adapter")
 def adapter() -> None:
     """Manage harness adapters (generate, list, validate)."""
