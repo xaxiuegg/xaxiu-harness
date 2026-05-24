@@ -2306,6 +2306,29 @@ def preflight_latency_cmd(fmt: str, since_hours: float | None,
                                   check_name=check_name))
 
 
+@cli.command(name="cost-today")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty",
+              help="Output format.")
+@click.option("--since-hours", type=float, default=24.0,
+              help="Window in hours (default 24 = today).  Use 0 for all-time.")
+def cost_today_cmd(fmt: str, since_hours: float) -> None:
+    """W11-COST-VISIBILITY-WIDGET: 'this session cost $X' surface.
+
+    Operator-facing summary showing total spend vs budget, subscription-
+    vs-paid breakdown, and offload ratio.  Designed for the operator who
+    asked 'how much did this cost me today?' without grepping the
+    dispatch ledger.
+    """
+    from harness.cost_widget import cost_widget_dict, format_cost_widget
+    window = None if since_hours <= 0 else since_hours
+    if fmt == "json":
+        w = cost_widget_dict(since_hours=window)
+        click.echo(json.dumps(w, indent=2))
+    else:
+        click.echo(format_cost_widget(since_hours=window))
+
+
 @cli.command(name="l5-banner-demo", hidden=True)
 def l5_banner_demo_cmd() -> None:
     """W11-L5-OUTPUT-CONTRACT: render a sample L5 ESCALATION banner.
