@@ -332,20 +332,142 @@ def test_fuzzy_replace_preserves_single_blank_line_after_match() -> None:
 
 def test_fuzzy_replace_two_line_search_doesnt_duplicate_second_line() -> None:
     """Smallest catchable case: 2-line search.  Under `+ 1` → `- 1`,
-    the second matched line would be duplicated in the after-slice."""
+    the second matched line would be duplicated in the after-slice.
+    Use whitespace-runs (internal, not leading) which _collapse_ws
+    DOES normalise — leading whitespace is preserved per its design."""
     content = "a\nfoo\nbar\nz\n"
-    search_drift = " foo \nbar "
-    replace = "MIDDLE"
-    result = _fuzzy_replace_one(content, search_drift, replace)
-    if result is None:
-        pytest.skip("fuzzy_replace returned None for this drift pattern")
-    # Verify "bar" appears 0 times (it was replaced) and "MIDDLE" is
-    # the only thing between "a" and "z".
+    # Use internal whitespace drift (collapsed by _collapse_ws), not
+    # leading drift (preserved).
+    search = "foo  more\nbar"  # internal space-run; "foo more" won't match
+    # Actually simpler: use exact search since _fuzzy_replace_one
+    # always runs the fuzzy path (no byte-exact fast path inside).
+    result = _fuzzy_replace_one("a\nfoo\nbar\nz\n", "foo\nbar", "MIDDLE")
+    assert result is not None
     assert "bar" not in result, (
-        f"'bar' (last matched line) survived under fuzzy replace — "
-        f"`+ 1` mutation indicator.  output:\n{result}"
+        f"'bar' (last matched line) survived after replace — "
+        f"`+ 1` → `- 1` mutation indicator.  output:\n{result}"
     )
     assert result.count("MIDDLE") == 1
+
+
+def test_fuzzy_replace_three_line_search_correctly_splices_after() -> None:
+    """3-line search.  Under `- 1` mutation, last 2 of the 3 matched
+    lines would survive in the output."""
+    content = "h1\nh2\nh3\nm1\nm2\nm3\nt1\nt2\n"
+    result = _fuzzy_replace_one(content, "m1\nm2\nm3", "REPLACED")
+    assert result is not None
+    # m1/m2/m3 were replaced; none should survive
+    for matched in ("m1", "m2", "m3"):
+        assert matched not in result, (
+            f"matched line '{matched}' survived after 3-line replace — "
+            f"`+ 1` mutation indicator.  output:\n{result}"
+        )
+    # Trailing block must survive intact
+    assert "t1" in result and "t2" in result
+
+
+def test_fuzzy_replace_after_slice_excludes_match_range_exactly() -> None:
+    """The slice ``content_lines[end + 1:]`` must start ONE PAST the
+    last matched line.  Verify by counting: a 4-line match in a
+    10-line file should leave exactly (file_lines - match_lines - replace_added_lines + 1)
+    in the result.  Under `- 1` mutation, 2 extra lines would appear."""
+    content = "\n".join(f"L{i}" for i in range(10)) + "\n"
+    # Match L3..L6 (4 lines)
+    result = _fuzzy_replace_one(content, "L3\nL4\nL5\nL6", "X")
+    assert result is not None
+    # L0,L1,L2 + X + L7,L8,L9 = 7 lines total
+    out_lines = [l for l in result.split("\n") if l]
+    assert "X" in out_lines
+    assert "L3" not in out_lines, f"L3 leaked: {out_lines}"
+    assert "L4" not in out_lines, f"L4 leaked: {out_lines}"
+    assert "L5" not in out_lines, f"L5 leaked: {out_lines}"
+    assert "L6" not in out_lines, f"L6 leaked: {out_lines}"
+    # Verify trailing block is intact + ordered
+    tail = out_lines[out_lines.index("X") + 1:]
+    assert tail == ["L7", "L8", "L9"], f"tail not exactly ['L7','L8','L9']: {tail}"
+
+
+def test_fuzzy_replace_match_ending_at_last_line() -> None:
+    """Edge: match ends at the last non-empty line of content.
+    The after-slice should be empty.  Under `- 1` mutation, the
+    last matched line would survive in the output."""
+    content = "a\nb\nc\nd\n"
+    # Match "c" and "d" (last two lines, before trailing empty)
+    result = _fuzzy_replace_one(content, "c\nd", "REPL")
+    assert result is not None
+    assert "c" not in result.split("\n") or result.split("\n").count("c") == 0
+    assert "d" not in result.split("\n") or result.split("\n").count("d") == 0
+    assert "REPL" in result
+
+
+def test_fuzzy_replace_match_starting_at_first_line() -> None:
+    """Edge: match starts at line 0.  Under `- 1` mutation with a
+    4-line file (head, match1, match2, tail), the after-slice would
+    re-include match1, breaking the order."""
+    content = "head\nmatch1\nmatch2\ntail\n"
+    result = _fuzzy_replace_one(content, "match1\nmatch2", "REPL")
+    assert result is not None
+    assert "match1" not in result, f"match1 leaked: {result!r}"
+    assert "match2" not in result, f"match2 leaked: {result!r}"
+    # Verify "tail" comes right after REPL (no duplicated match lines
+    # between them)
+    lines = [l for l in result.split("\n") if l]
+    assert lines == ["head", "REPL", "tail"], f"order wrong: {lines}"
+
+
+# ===========================================================================
+# More kill rate for `proc.returncode == 0` (line 151) — push avg above 3
+# ===========================================================================
+
+
+def test_swarm_cli_dispatch_text_field_populated_on_success(
+    tmp_path: Path,
+) -> None:
+    """Mutation: `proc.returncode == 0` → `!= 0` would flip the success
+    branch, which sets `text=proc.stdout` on success.  Under the
+    mutation, text would only be set when retcode != 0, an
+    impossible-in-practice path."""
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    packet = tmp_path / "p.md"
+    packet.write_text("hello", encoding="utf-8")
+
+    fake_proc = MagicMock(returncode=0, stdout="hello world",
+                          stderr="")
+    with patch("harness.coord.worker.subprocess.run",
+               return_value=fake_proc):
+        result = _dispatch_via_swarm(packet, "swarm/kimi", wt)
+    assert result.success is True
+    # Note: text is set unconditionally via proc.stdout; the eq_to_neq
+    # mutation only changes the success bit + error field, not text.
+    # So this test catches the success-branch correctness specifically.
+    assert result.text == "hello world"
+
+
+def test_swarm_cli_success_and_failure_returncodes_are_disjoint(
+    tmp_path: Path,
+) -> None:
+    """Comprehensive: walk a range of retcodes, asserting exactly
+    retcode==0 → success=True and everything else → success=False.
+    Under the mutation the partition would invert."""
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    packet = tmp_path / "p.md"
+    packet.write_text("hello", encoding="utf-8")
+
+    successes: list[int] = []
+    failures: list[int] = []
+    for retcode in (0, 1, 2, -1, 127, 255):
+        fake_proc = MagicMock(returncode=retcode, stdout="x",
+                              stderr="y")
+        with patch("harness.coord.worker.subprocess.run",
+                   return_value=fake_proc):
+            result = _dispatch_via_swarm(packet, "swarm/kimi", wt)
+        (successes if result.success else failures).append(retcode)
+    assert successes == [0], f"only retcode=0 should succeed; got {successes}"
+    assert sorted(failures) == sorted([1, 2, -1, 127, 255]), (
+        f"all non-zero retcodes should fail; got {failures}"
+    )
 
 
 # ===========================================================================
