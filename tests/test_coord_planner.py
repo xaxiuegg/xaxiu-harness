@@ -342,3 +342,196 @@ def test_plan_strict_paths_override_llm_output(tmp_path: Path) -> None:
             project_root=tmp_path, skip_lint=True,
         )
     assert result.strict_paths == ["coord/operator/required.md"]
+
+
+# ---------------------------------------------------------------------------
+# W7-SPEC-DRIFT: _extract_single_worker_directive + post-hoc enforcement
+# ---------------------------------------------------------------------------
+
+
+def test_extract_single_worker_directive_free_form_must_be_done() -> None:
+    """The canonical 'MUST be done by ONE worker' sentence is detected."""
+    from harness.coord.planner import _extract_single_worker_directive
+    spec = (
+        "# Foo\n\n"
+        "**This change MUST be done by ONE worker (single write_set\n"
+        "covering BOTH files)...**\n"
+    )
+    assert _extract_single_worker_directive(spec) is True
+
+
+def test_extract_single_worker_directive_structured_yaml() -> None:
+    """``## Planner Guidance`` + ``single_worker: true`` is detected."""
+    from harness.coord.planner import _extract_single_worker_directive
+    spec = (
+        "# Foo\n\n"
+        "## Planner Guidance\n\n"
+        "- single_worker: true\n"
+        "- some other directive\n"
+    )
+    assert _extract_single_worker_directive(spec) is True
+
+
+def test_extract_single_worker_directive_case_insensitive() -> None:
+    """Both forms tolerate case variants."""
+    from harness.coord.planner import _extract_single_worker_directive
+    assert _extract_single_worker_directive(
+        "must be done by one worker"
+    ) is True
+    assert _extract_single_worker_directive(
+        "## planner guidance\nSINGLE_WORKER: TRUE\n"
+    ) is True
+
+
+def test_extract_single_worker_directive_alternate_phrasings() -> None:
+    """The free-form regex tolerates 'by a single worker' and 'in ONE worker'
+    too — common synonyms that operators might use."""
+    from harness.coord.planner import _extract_single_worker_directive
+    assert _extract_single_worker_directive(
+        "this MUST be done by a single worker"
+    ) is True
+    assert _extract_single_worker_directive(
+        "this MUST be done in ONE worker"
+    ) is True
+
+
+def test_extract_single_worker_directive_absent_in_normal_spec() -> None:
+    """Specs that don't declare the directive return False."""
+    from harness.coord.planner import _extract_single_worker_directive
+    spec = (
+        "# Foo\n\n"
+        "## Goal\n\nDo a thing.\n\n"
+        "## Acceptance\n\nIt works.\n"
+    )
+    assert _extract_single_worker_directive(spec) is False
+
+
+def test_extract_single_worker_directive_structured_in_wrong_section() -> None:
+    """``single_worker: true`` outside a ## Planner Guidance section
+    is ignored — operators must put it in the right place."""
+    from harness.coord.planner import _extract_single_worker_directive
+    spec = (
+        "## Goal\n\n"
+        "single_worker: true (in the wrong section)\n\n"
+        "## Acceptance\n\nIt works.\n"
+    )
+    assert _extract_single_worker_directive(spec) is False
+
+
+def test_plan_single_worker_directive_accepts_single_task(
+    tmp_path: Path,
+) -> None:
+    """When the spec declares single_worker and the LLM emits 1 task,
+    plan() succeeds."""
+    spec = tmp_path / "s.md"
+    spec.write_text(
+        "## Planner Guidance\n- single_worker: true\n\n## Goal\nDo it.\n",
+        encoding="utf-8",
+    )
+    plan_data = _valid_plan_dict("20260523T180000-test")
+    # _valid_plan_dict has 1 task by default — happy path
+    assert len(plan_data["tasks"]) == 1
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        return_value=_make_dispatch_result(json.dumps(plan_data)),
+    ):
+        result = plan(
+            spec, run_id="20260523T180000-test",
+            project_root=tmp_path, skip_lint=True,
+        )
+    assert len(result.tasks) == 1
+
+
+def test_plan_single_worker_directive_rejects_multi_task(
+    tmp_path: Path,
+) -> None:
+    """When the spec declares single_worker and the LLM emits 2+ tasks,
+    plan() retries with feedback and ultimately raises ValueError when
+    retries are exhausted."""
+    spec = tmp_path / "s.md"
+    spec.write_text(
+        "**This change MUST be done by ONE worker.**\n\n## Goal\nDo it.\n",
+        encoding="utf-8",
+    )
+    plan_data = _valid_plan_dict("20260523T180001-test")
+    # Force 2 tasks — should be rejected
+    second_task = dict(plan_data["tasks"][0])
+    second_task["worker_id"] = "worker-2"
+    second_task["write_set"] = ["src/bar.py"]
+    second_task["test_set"] = ["tests/test_bar.py"]
+    second_task["steps"] = [dict(second_task["steps"][0])]
+    second_task["steps"][0]["target_files"] = ["src/bar.py"]
+    plan_data["tasks"].append(second_task)
+
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        return_value=_make_dispatch_result(json.dumps(plan_data)),
+    ):
+        with pytest.raises(ValueError) as exc_info:
+            plan(
+                spec, run_id="20260523T180001-test",
+                project_root=tmp_path, skip_lint=True,
+                max_retries=1,
+            )
+    assert "single_worker" in str(exc_info.value)
+    assert "2 tasks" in str(exc_info.value)
+
+
+def test_plan_without_directive_allows_multi_task(
+    tmp_path: Path,
+) -> None:
+    """Without the single_worker directive, multi-task plans are
+    accepted normally."""
+    spec = tmp_path / "s.md"
+    spec.write_text("## Goal\nDo two things in parallel.\n", encoding="utf-8")
+    plan_data = _valid_plan_dict("20260523T180002-test")
+    second_task = dict(plan_data["tasks"][0])
+    second_task["worker_id"] = "worker-2"
+    second_task["write_set"] = ["src/bar.py"]
+    second_task["test_set"] = ["tests/test_bar.py"]
+    second_task["steps"] = [dict(second_task["steps"][0])]
+    second_task["steps"][0]["target_files"] = ["src/bar.py"]
+    plan_data["tasks"].append(second_task)
+
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        return_value=_make_dispatch_result(json.dumps(plan_data)),
+    ):
+        result = plan(
+            spec, run_id="20260523T180002-test",
+            project_root=tmp_path, skip_lint=True,
+        )
+    assert len(result.tasks) == 2
+
+
+def test_plan_single_worker_prompt_prepends_directive(
+    tmp_path: Path,
+) -> None:
+    """When single_worker is required, the planner prompt MUST include
+    the explicit OPERATOR DIRECTIVE banner (so the LLM sees it before
+    reading the schema example which shows 2 tasks)."""
+    spec = tmp_path / "s.md"
+    spec.write_text(
+        "**This change MUST be done by ONE worker.**\n\n## Goal\nx.\n",
+        encoding="utf-8",
+    )
+    plan_data = _valid_plan_dict("20260523T180003-test")
+    captured: dict = {}
+
+    def _capture_packet(**kwargs):
+        from pathlib import Path as _P
+        captured["prompt"] = _P(kwargs["packet_path"]).read_text(
+            encoding="utf-8"
+        )
+        return _make_dispatch_result(json.dumps(plan_data))
+
+    with patch(
+        "harness.engines.dispatcher.dispatch_packet",
+        side_effect=_capture_packet,
+    ):
+        plan(
+            spec, run_id="20260523T180003-test",
+            project_root=tmp_path, skip_lint=True,
+        )
+    assert "OPERATOR DIRECTIVE" in captured.get("prompt", "")
+    assert "SINGLE-WORKER REQUIRED" in captured.get("prompt", "")

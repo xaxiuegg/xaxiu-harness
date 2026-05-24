@@ -89,6 +89,59 @@ def _new_run_id() -> str:
     return f"{ts}-{salt}"
 
 
+def _extract_single_worker_directive(spec_text: str) -> bool:
+    """W7-SPEC-DRIFT 2026-05-23: detect the operator's
+    "must be done by ONE worker" directive in a spec.
+
+    Two recognised forms:
+
+    1. Structured directive in a ``## Planner Guidance`` section:
+
+           ## Planner Guidance
+           - single_worker: true
+
+    2. Free-form sentence (case-insensitive):
+
+           **This change MUST be done by ONE worker...**
+
+    The directive exists because multi-worker plans risk cross-worker
+    contract drift: worker-1 implements A while worker-2 writes tests
+    against B (discovered during W6-A1 — different short labels vs
+    full names + an extra API key).  When the operator wants tight
+    coupling (e.g. tests + implementation in one file pair), they
+    declare it; the planner is required to honor it.
+
+    Returns ``True`` if any recognised form is present.
+    """
+    # Form 2: free-form sentence pattern.  Liberal regex — handle
+    # bold markdown wrapping + various phrasings ("by ONE worker",
+    # "by a single worker", "in ONE worker").
+    free_form = re.compile(
+        r"(?i)must\s+be\s+done\s+(?:by|in)\s+(?:one|a\s+single)\s+worker",
+    )
+    if free_form.search(spec_text):
+        return True
+    # Form 1: structured directive.  Locate "## Planner Guidance"
+    # header (case-insensitive) and scan the section body for
+    # ``single_worker: true`` (with optional surrounding whitespace
+    # or markdown list bullets).
+    header_re = re.compile(r"(?im)^##\s+planner[_\s]*guidance\s*$")
+    m = header_re.search(spec_text)
+    if not m:
+        return False
+    section_start = m.end()
+    next_header = re.search(r"(?m)^##\s+", spec_text[section_start:])
+    section_end = (
+        section_start + next_header.start() if next_header
+        else len(spec_text)
+    )
+    section_body = spec_text[section_start:section_end]
+    structured = re.compile(
+        r"(?im)single_worker\s*:\s*true",
+    )
+    return bool(structured.search(section_body))
+
+
 def _extract_strict_paths(spec_text: str) -> list[str]:
     """Parse a `## Strict Paths` section from the spec markdown.
 
@@ -202,6 +255,10 @@ def plan(
     spec_text = Path(spec_path).read_text(encoding="utf-8")
     root = project_root or Path.cwd()
     repo_tree = _read_repo_tree(root)
+    # W7-SPEC-DRIFT 2026-05-23: detect operator's single-worker
+    # directive so we can both nudge the LLM via the prompt AND
+    # enforce post-hoc on the generated plan.
+    single_worker_required = _extract_single_worker_directive(spec_text)
     # Battle-test 2026-05-21: `WavePlan.model_json_schema()` produces a
     # 4.8 KB nested JSON schema that overwhelmed Kimi Code (server
     # disconnect mid-response).  A hand-rolled compact example with
@@ -212,6 +269,19 @@ def plan(
         repo_tree=repo_tree,
         schema_excerpt=_PLANNER_SCHEMA_EXAMPLE,
     )
+    if single_worker_required:
+        # Prepend a hard directive at the top of the prompt so the LLM
+        # sees it before reading the schema example (which shows 2
+        # tasks).  Post-hoc validation catches LLMs that ignore this.
+        prompt = (
+            "# OPERATOR DIRECTIVE — SINGLE-WORKER REQUIRED\n\n"
+            "The spec below explicitly requires this change to be done\n"
+            "by ONE worker (either via `single_worker: true` in a\n"
+            "## Planner Guidance section, or via a 'MUST be done by\n"
+            "ONE worker' sentence in the body).  Emit EXACTLY 1 entry\n"
+            "in `tasks[]`.  Splitting across workers will be rejected.\n\n"
+            f"{prompt}"
+        )
 
     # Dispatch via harness.engines.dispatcher
     from harness.engines.dispatcher import dispatch_packet
@@ -275,7 +345,7 @@ def plan(
         if operator_strict_paths:
             data["strict_paths"] = operator_strict_paths
         try:
-            return WavePlan.model_validate(data)
+            plan_obj = WavePlan.model_validate(data)
         except ValidationError as exc:
             last_error = exc
             # Add the validation error as feedback in next retry's prompt
@@ -284,6 +354,29 @@ def plan(
                 f"# Fix the issues and re-emit.\n"
             )
             continue
+        # W7-SPEC-DRIFT 2026-05-23: post-hoc single-worker enforcement.
+        # If the operator declared single_worker required and the LLM
+        # still emitted multiple tasks, reject this attempt and retry
+        # with explicit feedback.  This is the safety net behind the
+        # prompt-level directive — LLMs occasionally ignore even
+        # explicit instructions.
+        if single_worker_required and len(plan_obj.tasks) != 1:
+            last_error = ValueError(
+                "spec declared single_worker required, but planner "
+                f"emitted {len(plan_obj.tasks)} tasks.  This is the "
+                "W7-SPEC-DRIFT class of failure: cross-worker contract "
+                "drift caused W6-A1's initial run to produce "
+                "incompatible test+implementation files."
+            )
+            prompt = (
+                f"{prompt}\n\n# Previous attempt violated single-worker "
+                f"directive (emitted {len(plan_obj.tasks)} tasks; "
+                "operator requires EXACTLY 1).  Re-emit with all the "
+                "work folded into one tasks[] entry — combine write_set, "
+                "read_set, and steps into a single worker.\n"
+            )
+            continue
+        return plan_obj
 
     assert last_error is not None
     raise last_error
