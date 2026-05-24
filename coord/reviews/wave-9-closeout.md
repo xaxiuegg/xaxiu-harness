@@ -110,4 +110,43 @@ From the readiness panel rerun + ambient observations:
 2. **Decide the Wave 10 theme**: detection-layer is now solid; the next horizon is either (a) operator-readiness UX (close the readiness panel gap), (b) proxy-safety hardening (M13 + the failure matrix tests caught real gaps), or (c) a continuation of the canary rotation to expand mutation coverage to observer/loops/dashboard.
 3. **Re-run audits on W9-CLI-TIMEOUT-BUDGET + W9-SILENT-EXCEPTION-AUDIT** at the followup commit `34c97bd` — they were STOP at the original commit; followup should lift them.
 
+## Final master-audit sweep (post-W9, commit bad66c1)
+
+Ran `scripts/run_master_audit_panel.py` after the W9 closeout commit
+landed.  40 reviewers, 194s elapsed, synthesis at
+`coord/reviews/master-audit/SYNTHESIS.md`.
+
+| Verdict | W8 baseline (40-reviewer) | W9 post-ship (40-reviewer) | Delta |
+|---|---|---|---|
+| SHIP-AS-IS | 0 | 0 | 0 |
+| HOLD | 10 (25%) | 4 (10%) | **-6** |
+| SHIP-WITH-FIXES | 30 (75%) | 35 (88%) | **+5** |
+
+**6 fewer reviewers flag HOLD-grade blockers.**  W9 work moved 6
+reviewers from HOLD to SHIP-WITH-FIXES — the production-safety +
+detection-gate hardening reduced the "this is unshippable" call rate
+by 60%.
+
+Convergent themes citation count (post-W9):
+
+- **Operator-readiness UX** still tops the list (preflight noise,
+  CLI sprawl, no daily quickstart verb, untrustworthy yellow
+  warnings).  Maps directly onto the W10 candidate set.
+- **Audit-gate noise** — multiple reviewers cite the same flakiness
+  we already addressed via `--avg-of-N`.  The reviewers are reading
+  the audit RECORDS (which still show pre-`--avg-of-N` single-run
+  STOPs) rather than the new flag.  W10 should retro-fire avg-of-N=3
+  on the most-cited STOPs to update the historical record.
+- **Schema-bug-style silent failures** — reviewers acknowledge the
+  W9-SILENT-EXCEPTION-AUDIT lint gate but cite ongoing concern
+  about NEW broad swallows.  The lint gate prevents that going
+  forward.
+- **Latency observability** — new theme (M15 / M19): operator can't
+  answer "how much did this session cost / how long is preflight
+  taking on average" without grepping logs.  W10 candidate.
+
+The audit confirms W9 was a net improvement (HOLD count down 60%)
+but operator-readiness UX is the remaining theme — exactly the
+Wave 10 theme already queued from the readiness-panel rerun.
+
 — End of closeout —

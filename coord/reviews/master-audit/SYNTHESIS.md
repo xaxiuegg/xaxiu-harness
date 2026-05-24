@@ -1,6 +1,6 @@
 # Master audit — 40-reviewer synthesis
 
-_Dispatched: 40 personas (20 MiMo + 20 Kimi), elapsed 181.1s_
+_Dispatched: 40 personas (20 MiMo + 20 Kimi), elapsed 193.9s_
 
 State snapshot fed to each reviewer is at `_state_snapshot.md` in this directory.
 
@@ -11,789 +11,769 @@ _OK responses: 40/40_
 
 ### K01-ONBOARDING
 
-_latency: 49538ms_
+_latency: 135941ms_
 
 ## Score
-1. **Correctness**: 2 — W8 shipped operator readiness, yet `preflight --skip-engines` and `today` both timeout on the live Windows box; the runbook cannot compensate for a hung binary.
-2. **Robustness**: 1 — Fresh clone → run preflight → 30 s deadlock with no fallback or diagnostic. The queued silent-stash bug (W9-PREFLIGHT-FIX-NOSTASH) adds surprise data loss on recovery.
-3. **Operator-usability**: 1 — A non-technical user must choose `--mode`, `--profile`, and parse 30+ verbs before validation; then step one hangs. Evidence shows ~100 % first-attempt failure rate.
-4. **Test discipline**: 2 — 1 576 tests miss the Windows first-run integration hang and the CRLF hook false-positive (W9-ONCOMMIT-HOOK-CRLF).
-5. **Risk**: 5 — Complete onboarding blockage for the target operator profile; a clear ship-blocker.
+1. **Correctness** — 3/5. Preflight returns 0 fails but surfaces three unrelated warnings; a “successful” run still leaves the fresh clone in an unusable state (unregistered loops, dead engines, observer timeout).
+2. **Robustness** — 3/5. `--fix` and `engines-heal` exist, yet the onboarding path scatters recovery across disparate commands rather than one resilient funnel.
+3. **Operator-usability** — 2/5. A non-technical operator must independently decide to ignore warnings, run `--fix`, run `loop start`, or debug an observer timeout before the first healthy tick; DPAPI seeding is invisible and `--profile non_technical` is not the default.
+4. **Test discipline** — 2/5. 1,576 unit tests pass, but the golden-path “clone → first green preflight” integration for a non-technical operator is unguarded.
+5. **Risk** — 4/5. High probability the operator misses loop registration or DPAPI setup, misinterprets warnings as errors, and abandons or misconfigures the harness.
 
-## Plus
-6. **Top blocker**: A `harness doctor --first-run` fast-path that skips DPAPI/git-depth checks known to hang under Windows Store Python, surfaces dirty-state warnings without stashing, and confirms the CLI is responsive before any comprehensive gate runs.
-7. **Verdict**: HOLD. No fresh operator can complete clone-to-first-green-preflight today without technical rescue.
+6. **Top blocker** — Wire `harness install` (already labeled a “first-run wizard”) into `preflight` so a fresh clone detects an uninitialized state and routes the operator through one idempotent command that sets the non-technical profile, registers the loop task, seeds DPAPI, and quarantines dead engines.
+7. **Verdict** — SHIP-WITH-FIXES. The recovery primitives exist, but the hand-off from clone to first trustworthy preflight still demands debugging rather than reading.
 
 ### K02-DOCS-CLARITY
 
-_latency: 63680ms_
+_latency: 59650ms_
 
 ## Score
 
-1. **Correctness — 2**  
-   Docs claim operator readiness, yet CLI commands timeout and MiMo returned persistent STOP on W8-STOP-HOOK and W8-AUDIT-PROMPT.
+1. **Correctness — 3**  
+   CLI help and `harness today` are accurate, but the runbook omits DPAPI seeding paths and stop-hook behavior still confuses auditors, so docs do not fully match system reality.
 
-2. **Robustness — 2**  
-   No visible operator-facing docs cover failure modes (timeouts, stash recovery, CRLF hook bug), so a non-technical user has no escape hatch.
+2. **Robustness — 3**  
+   Recovery flows (`preflight --fix`, `engines-heal`) are documented, yet the runbook lacks guidance on DPAPI/key-loss failure modes and hook noise, leaving operators unprepared for common faults.
 
 3. **Operator-usability — 3**  
-   Runbook and human-friendly commands exist, but the operator cannot trust them while undocumented timeout and data-loss paths remain.
+   Plain-language CLI output is strong, but a non-technical operator still cannot onboard cold: the runbook hides where secrets come from and `--profile non_technical` is not the default.
 
-4. **Test discipline — 2**  
-   Doc quality hinges on non-deterministic MiMo audits; no deterministic doc-regression tests (e.g., runbook walkthrough scripts) are evident.
+4. **Test discipline — 1**  
+   No automated regression tests for README, runbook, or spec clarity; the only guard is the non-deterministic MiMo audit, which is process, not test coverage.
 
 5. **Risk — 4**  
-   Unverified runbook + silent stash behavior + CLI timeouts create a high chance of operator confusion or data loss within 30 days.
+   A docs gap that blocks a non-technical operator from rotating keys or understanding hook noise is a near-term ship-blocker for unsupervised operation.
 
 6. **Top blocker**  
-   OPERATOR_RUNBOOK.md must be manually validated end-to-end and include a "Known Issues & Recovery" section for the stash, timeout, and CRLF hook bugs.
+   Add the DPAPI seeding section and `--profile non_technical` default instructions to `docs/OPERATOR_RUNBOOK.md` (the W10 todo already flagged) so setup and recovery are fully visible.
 
-7. **Verdict**  
-   SHIP-WITH-FIXES — operator-readiness scaffolding exists, but documented behavior does not yet match reality closely enough for safe handoff.
+7. **Verdict — SHIP-WITH-FIXES**  
+   Operator-facing surfaces are 80 % there, but the remaining 20 % are exactly the gaps that strand a non-technical user on first contact.
 
 ### K03-FAILURE-MODES
 
-_latency: 120024ms_
+_latency: 123251ms_
 
 ## Score
-1. **Correctness — 3**: Spec implemented, but silent stash and 30 s Windows timeouts are operator-safety gaps.
-2. **Robustness — 2**: Timeouts, CRLF hook false-positives, and historically swallowed exceptions let failures cascade.
-3. **Operator-usability — 3**: Runbook exists, yet daily commands timeout and `--fix` destroys uncommitted work without warning.
-4. **Test discipline — 3**: 1 576 tests cover logic, but Windows CLI timeouts and Bash hook CRLF behavior lack coverage.
-5. **Risk — 4**: First-week operator faces data loss or morning blindness; blast radius is immediate productivity halt.
+1. **Correctness** — 3 — Core fix/heal flows work after the schema patch, but persistent STOPs on hook noise and audit prompt mean spec edges still fail MiMo validation.
+2. **Robustness** — 2 — Bare `except Exception: continue` in quarantine paths silently swallowed a Pydantic schema violation, a catastrophic failure-mode pattern that will recur under engine churn.
+3. **Operator-usability** — 3 — Runbook and plain-language status exist, yet a non-technical operator faces immediate warning fatigue from dead-engine alerts, observer timeouts, and unregistered loops.
+4. **Test discipline** — 3 — 1576 tests pass and mutation gate is green, but the schema/quarantine mismatch between dict stubs and Pydantic production reveals a critical cross-form integration hole.
+5. **Risk** — 4 — Silent swallowing + non-technical operator + daily engine death/cooldown churn creates high-probability, unrecoverable first-week failure modes with ship-blocking blast radius.
 
-**Failure modes (freq×impact, sorted):**
-1. **Preflight/`today` 30 s timeout** — daily blindness; retry/skip engines; 5–10 min.
-2. **`preflight --fix` silent stash** — lost uncommitted changes; `git stash pop`; 5–30 min.
-3. **CRLF commit-hook false-pos** — commits blocked; bypass hook; 5–15 min.
-4. **Dead-engine quarantine loop** — zero dispatch; `engines-heal`; 10–20 min.
-5. **MiMo audit flip** — confidence erosion; accept-as-shipped precedent; 15–45 min.
-6. **Verb-tree overload** — wrong destructive command; runbook + reverse; 10–30 min.
-7. **Secret/DPAPI expiry** — total outage; re-seed keys; 10–30 min.
+6. **Top blocker** — Land a single hardening PR that replaces every bare `except Exception: continue` in preflight/heal paths with typed error surfacing and adds a Pydantic-native integration test for `engine_health` quarantine writes.
 
-6. **Top blocker**: Ship W9-PREFLIGHT-FIX-NOSTASH (replace auto-stash with a loud confirmation prompt).
-7. **Verdict**: SHIP-WITH-FIXES — W9 queued patches are small, localized, and required for first-week operator survival.
+7. **Verdict** — SHIP-WITH-FIXES — Operator scaffolding is in place, but silent failure modes and persistent audit/hook STOPs guarantee a non-technical operator hits an unrecoverable fault within days.
 
 ### K04-CLI-ERGONOMICS
 
-_latency: 79372ms_
+_latency: 90785ms_
 
 ## Score
 
-1. **Correctness** — 2/5. Inconsistent hyphenation (`spec-init` vs `init`, `engines-heal` vs `engines heal`) fractures the command taxonomy.
-2. **Robustness** — 2/5. `preflight` and `today` silently hard-timeout after 30s with no progress indicator or partial output.
-3. **Operator-usability** — 2/5. Flat, alphabetical dump of 30+ verbs offers no grouping; non-technical operators cannot map intent to command.
-4. **Test discipline** — 2/5. No visible CLI integration tests for the W8 operator-facing verbs that demonstrably hang in production.
-5. **Risk** — 4/5. High probability of operator mis-invocation, abandoned readiness checks, and escalation fatigue from hung commands.
+1. **Correctness — 2/5** Taxonomy is broken: ~38 top-level verbs (lens spec expected 22), `loop`/`loops` collide, `engines-heal` mirrors `engines heal`, and `doctor`/`preflight` overlap.
+2. **Robustness — 2/5** No visible typo correction or subcommand-Levenshtein guard; plausible mis-typings like `harness engine cooldowns` fail opaquely.
+3. **Operator-usability — 2/5** Non-technical operator faces an undifferentiated flat list; `spec-init`, `spec-register`, `spec-verify` are separate incantations instead of a `spec` family, and `--help` lacks workflow grouping.
+4. **Test discipline — 1/5** 1,576 tests pass, yet no CLI-ergonomics regression coverage is evidenced (no `--help` snapshot tests, no subcommand-discovery assertions).
+5. **Risk — 4/5** Every wave adds top-level verbs rather than nesting; operator-readiness foundation from W8 will be undermined by CLI sprawl.
 
-**Discoverability (3 verbs)**
-- `coord` — 4/5. Subcommands (`plan, run, integrate, status`) are discoverable directly in the top-level description.
-- `engines` — 2/5. `heal` is a hidden subcommand shadowed by top-level `engines-heal`/`engines-cooldowns` aliases.
-- `observer` — 2/5. One-line help teases "authority audit" but buries 12 subcommands behind a second `--help` layer.
+**Three-verb discoverability spot-check:**
+- `engines`: 1/5 — `heal`, `cooldowns`, `reliability` are hidden as hyphenated top-level aliases, not listed under `engines`.
+- `observer`: 2/5 — 12 subcommands exist but top-level `--help` only gives an abstract tagline.
+- `coord`: 4/5 — `plan`, `run`, `integrate`, `status` are explicitly advertised in the short help.
 
-**Top blocker** — Unify all engine operations under `harness engines {heal|cooldowns|reliability}` and remove the hyphenated top-level aliases so intent maps to a single namespace.
+**Top blocker:** Reify a true noun/verb hierarchy (`harness engines heal`, `harness spec init`) and prune duplicate top-level aliases; group `--help` by operator workflow.
 
-**Verdict** — SHIP-WITH-FIXES. W8 capabilities are operationally necessary, but the CLI surface is actively hostile to the non-technical operator it was built for.
+**Verdict:** SHIP-WITH-FIXES. W8 operator-readiness gains are real, but the flat CLI surface is a self-inflicted maze that will trap the non-technical operator.
 
 ### K05-HONEST-READINESS
 
-_latency: 55061ms_
+_latency: 78523ms_
 
 ## Score
-1. **Correctness** — 2 — `preflight --skip-engines` and `today` both timeout and fail; a schema bug silently broke every quarantine write until W8 follow-through.
-2. **Robustness** — 2 — `preflight --fix` auto-stashes work without confirmation or recovery instructions; the operator cannot survive a hang or data loss alone.
-3. **Operator-usability** — 2 — The two commands a non-technical operator needs most hang indefinitely; a single-page runbook is dwarfed by a 30+ verb CLI.
-4. **Test discipline** — 3 — High count missed the `EngineHealth` Literal mismatch that neutered quarantine; mutation rates mask real gaps.
-5. **Risk** — 4 — Day-one hangs on readiness and status checks plus silent stash data loss make 30-day unsupervised operation dangerous.
 
-6. **Top blocker** — Make `harness preflight` and `harness today` complete reliably in <10s, remove auto-stash from `--fix`, and add an integration test enforcing both.
-7. **Verdict** — HOLD — The operator’s two most critical commands timeout, the audit gate is a coin-flip, and silent stash behavior guarantees data loss for a non-technical user.
+1. **Correctness — 3/5.** The schema bug proved quarantine silently failed; persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT show spec gaps remain unclosed.
+2. **Robustness — 2/5.** Observer probe times out by default, dead engines warn on every preflight, and the old `except Exception: continue` pattern shows failure modes were masked, not handled.
+3. **Operator-usability — 2/5.** The runbook is readable, but a non-technical operator seeing daily yellow warnings for dead engines and observer timeouts will not know whether to restart, ignore, or escalate.
+4. **Test discipline — 3/5.** 1576 tests are theater when the audit gate gives different verdicts on identical commits; persistent STOP rows mean regressions can hide in noise.
+5. **Risk — 4/5.** Thirty days of unsupervised operation guarantees the operator will learn to dismiss warnings, then miss the next load-bearing failure because signal-to-noise is broken.
+
+6. **Top blocker.** A guaranteed all-green `harness preflight` on a correctly seeded system, plus a single `harness doctor --repair` that resolves yellow warnings automatically without editing JSON or understanding engine health schemas.
+
+7. **Verdict.** SHIP-WITH-FIXES. The operator has a playbook, but the harness currently trains them to ignore yellow warnings on startup—which is exactly how silent failures become outages.
 
 ### K06-DOGFOOD
 
-_latency: 59840ms_
+_latency: 59303ms_
 
 ## Score
 
-1. **Correctness — 3.** 1576 tests pass and the closeout was self-authored, yet `harness preflight --skip-engines` and `harness today` both hang, so the harness cannot execute its own daily self-check.
+1. **Correctness** — 3: Heavy dogfooding, yet a load-bearing schema mismatch silently broke every quarantine write, and persistent STOPs on hook and audit prompt reveal unfilled spec gaps in the meta-layer.
+2. **Robustness** — 3: Self-healing paths masked Pydantic failures with `except Exception: continue`; observer probes timeout; the audit gate flips verdict on unchanged code.
+3. **Operator-usability** — 3: Runbook and `harness today` exist, but preflight still surfaces dead engines, observer timeouts, and unregistered loops—noise a non-technical operator cannot action.
+4. **Test discipline** — 3: 1576 tests pass, yet the quarantine bug escaped because test stubs used dicts while production used Pydantic models; tests didn't match reality.
+5. **Risk** — 4: The meta-layer is becoming a tower of indirection; silent failures in self-heal plus non-deterministic audits risk alert fatigue or missed regressions within 30 days.
 
-2. **Robustness — 2.** Silent `except Exception: continue` masked a schema bug that broke every quarantine write, and the core dogfood CLI now hits 30-second timeouts suggesting a liveness failure in the self-hosted loop.
+**Top blocker**: Harden all self-healing exception handlers to emit L4 toasts on unexpected schema/validation errors, eliminating `except Exception: continue` in fix/heal paths.
 
-3. **Operator-usability — 2.** A runbook and `status --human` exist, but the non-technical operator cannot run the daily pulse or readiness gate without hangs, making the surface theoretical.
-
-4. **Test discipline — 3.** Mutation kill rates exceed the ≥3 gate, yet the deferred W9 mutation-canary leaves no deterministic regression signal independent of MiMo roulette, so the meta-layer guards nothing deterministically.
-
-5. **Risk — 4.** Hanging self-checks block operator reliance today, and persistent MiMo STOPs on audit-config rows (STOP-HOOK, AUDIT-PROMPT) prove the audit layer is auditing itself with broken tooling.
-
-6. **Top blocker:** Fix the 30-second hangs in `harness preflight --skip-engines` and `harness today` so the harness can actually run its own operator-facing dogfood commands.
-
-7. **Verdict:** SHIP-WITH-FIXES. The architecture is self-hosted on paper, but the meta-layer is a tower of indirection while its own `preflight` and `today` commands deadlock.
+**Verdict**: SHIP-WITH-FIXES — extensive dogfood usage is healthy, but the self-monitoring loop is too noisy and too silent in the wrong places; harden before operator handoff.
 
 ### K07-DEAD-CODE
 
-_latency: 122233ms_
+_latency: 100269ms_
 
 ## Score
-1. **Correctness** — 2. `preflight --skip-engines` and `today` hard-hang; help strings for `swarm-verify`, `engines-heal`, and `status` are truncated stubs; user-facing descriptions still carry W5/W8 wave-scaffolding tombstones.
-2. **Robustness** — 2. No guardrail prevents hung commands; the CLI has sprouted 38+ verbs against a 22-verb contract, signaling ungoverned surface-area bloat.
-3. **Operator-usability** — 1. A non-technical operator cannot distinguish live verbs from undead stubs when the help surface is littered with pending-wave labels and critical paths timeout.
-4. **Test discipline** — 2. 1576 unit tests missed two CLI hangs; no automated gate rejects stub help text or wave-label leakage into the operator-facing CLI.
-5. **Risk** — 4. Undead stubs and hanging commands will crater operator trust; the 38+ verb sprawl vs. the 22-verb target implies nearly half the surface may be scaffolding.
-
-6. **Top blocker** — An integration smoke test that exercises every verb with `--help` and a 5-second dry-run, failing CI on any timeout, truncation, or Wave-N scaffolding in user-facing descriptions.
-7. **Verdict** — SHIP-WITH-FIXES: hanging commands and scaffolding-polluted CLI surface are unacceptable ship-blockers for a non-technical operator.
+1. **Correctness**: 2 — Only ~60% of the ~30 listed verbs are live; the rest are stubs or pending-wave scaffolding (`swarm-verify` truncates mid-string, `observer` probe times out, W8-STOP-HOOK is persistently STOP).
+2. **Robustness**: 2 — The `quarantined` write path was dead code masked by bare `except Exception: continue`; dead-engine handling fails silently without the schema patch.
+3. **Operator-usability**: 3 — `today` and `preflight --fix` work, but the help surface mixes live features with unfinished scaffolding the non-technical operator cannot distinguish.
+4. **Test discipline**: 2 — 1,576 tests missed the silently failing quarantine path, and W8 skipped the mutation sweep, leaving scaffolded modules unaudited.
+5. **Risk**: 4 — A non-technical operator will invoke a stub verb or trust a broken hook; confusion or state corruption is a near-term ship blocker.
+6. **Top blocker**: A `--stub-audit` gate that hides every CLI verb whose help text is truncated, times out in preflight, or references an unshipped Wave prefix.
+7. **Verdict**: SHIP-WITH-FIXES — cull the dead verbs and hardened hooks before handing this surface to an operator.
 
 ### K08-PERFORMANCE
 
-_latency: 54405ms_
+_latency: 58591ms_
 
 ## Score
-1. **Correctness** — 2/5. Preflight --skip-engines and harness today both time out at 30s, missing the ~5s performance spec by 6×.
-2. **Robustness** — 2/5. No graceful degradation when core commands hit wall-clock timeouts; operator is left without readiness signal or daily pulse.
-3. **Operator-usability** — 2/5. A non-technical operator cannot reliably run basic status or preflight commands; timeouts negate W8 usability investments.
-4. **Test discipline** — 1/5. Zero timeout-budget or performance-regression tests; the 30s preflight regression shipped undetected across 1576 tests.
-5. **Risk** — 4/5. Basic operator workflows are functionally unreachable under timeout; perceived flakiness threatens operator trust and adoption.
+1. **Correctness** — 4/5: Functionally accurate, but preflight `--skip-engines` consistently breaches the ~5 s expectation by >25 % with no documented variance.
+2. **Robustness** — 3/5: Observer probe timeout still blocks the gate for 5.8 s instead of degrading gracefully; loops check is similarly synchronous and heavy.
+3. **Operator-usability** — 3/5: A non-technical operator running frequent preflights faces 6+ second stalls with no progress feedback or "what's slow" breakdown beyond raw ms.
+4. **Test discipline** — 2/5: Zero automated latency/SLO regression tests for preflight, dispatch, or audit gate; 1,576 tests cover behavior but not performance budgets.
+5. **Risk** — 3/5: Serial 60–90 s audit per row plus preflight SLO erosion creates a hard throughput ceiling of roughly one small wave per session.
 
-6. **Top blocker** — A `tests/test_perf_budget.py` enforcing hard CLI timeouts (preflight --skip-engines <8s, today <10s) that fails CI, plus immediate cProfile of the preflight hot path to locate the synchronous scan that --skip-engines fails to skip.
-7. **Verdict** — SHIP-WITH-FIXES. W8 operator-readiness features are structurally complete but operationally inaccessible because core CLI commands breach the 30s timeout wall; unblocking preflight latency is prerequisite to any operator handoff.
+6. **Top blocker** — Add latency telemetry + a hard 5 s enforced budget to `preflight --skip-engines` (cache/background the loops and observer probes, surfacing slow checks asynchronously).
+7. **Verdict** — SHIP-WITH-FIXES. The operator-readiness foundation is solid, but the preflight latency regression and missing dispatch/audit latency observability must be fixed before W9 scale.
 
 ### K09-COSTS-BUDGET
 
-_latency: 44348ms_
-
-## Score
-
-1. **Correctness** — 2/5. `harness budget` exists but no verified output proves session-cost accuracy; `harness today` (daily pulse) times out, so the W6-A2 ledger wiring is not demonstrably readable.  
-2. **Robustness** — 2/5. `preflight --skip-engines` and `today` both timeout after 30 s; the budget query path likely shares the same blocking init overhead.  
-3. **Operator-usability** — 2/5. A non-technical operator cannot answer “how much did this session cost” when the plain-language pulse command fails and the runbook omits budget-reading steps.  
-4. **Test discipline** — 1/5. None of the 1,576 cited tests target budget-meter accuracy or cost-ledger regression; W7-WORKER-BUDGET-HOOK landed without noted coverage.  
-5. **Risk** — 4/5. Unverified spend visibility means the operator could accumulate API costs without a trusted single-command check.
-
-6. **Top blocker** — Make `harness budget` (or `today`) return a sub-5-second, non-blocking per-session cost table and add one budget-meter assertion to the mutation-canary suite.  
-7. **Verdict** — SHIP-WITH-FIXES. The ledger may be wired, but the operator-facing read-path is neither proven nor robust.
-
-### K10-MULTI-ENGINE
-
-_latency: 42171ms_
-
-## Score
-
-1. **Correctness — 2/5**: `--engine-fill` and `engines-cooldowns` exist but the snapshot offers no proof the scheduler actually saturates Kimi slots before fallback or that dispatch respects cooldown timestamps.
-2. **Robustness — 2/5**: `preflight --skip-engines` hangs for 30 s, indicating engine-pool I/O is not isolated by the flag; the `EngineHealth` schema mismatch silently failed every quarantine until manual discovery.
-3. **Operator-usability — 3/5**: `engines-heal`, `engines-cooldowns`, and `today` are operator-friendly verbs, but a hung preflight blocks the non-technical daily workflow and erodes trust.
-4. **Test discipline — 2/5**: 1576 passing unit tests missed a silent schema rejection and a CLI timeout; no mutation or integration coverage pins slot-cap or cooldown-enforcement behavior.
-5. **Risk — 4/5**: Unenforced slot policy wastes subscription burn; unvalidated cooldowns risk cascading 429s across Anthropic/Gemini/DeepSeek within 30 days.
-
-**Top blocker:** A single integration test that dispatches N+1 packets with `--engine-fill aggressive` and asserts Kimi concurrency hits its slot ceiling before any fallback, plus a `<5 s` timeout-regression test for `preflight --skip-engines`.
-
-**Verdict:** SHIP-WITH-FIXES — engine-pool CLI contracts look operator-ready, but the hanging preflight and unvalidated slot policy make multi-engine discipline ceremonial rather than enforced.
-
-### K11-AUDIT-NONDETERMINISM
-
-_latency: 63000ms_
-
-## Score
-
-1. **Correctness — 3** Code appears correct, but the verification loop is a random variable; you cannot ship confidence when the auditor flips on identical bits.
-2. **Robustness — 2** Silent quarantine failures and an accepted “ignore persistent STOPs” precedent mean the safety net catches nothing by design.
-3. **Operator-usability — 3** Track B CLI is excellent, yet asking a non-technical operator to parse MiMo mood swings turns quality assurance into astrology.
-4. **Test discipline — 3** 1576 tests and cleared mutation gates are solid, but the deferred canary is the only deterministic guardrail and it is not running.
-5. **Risk — 4** A real regression will ride the W6-PANEL precedent through the gate because STOPs are now treated as noise until proven otherwise.
-
-**Top blocker:** Deploy a 3-sweep majority-rule auditor (`W9-AUDIT-NONDETERMINISM-AVG`) with multi-commit diff anchors (`W9-AUDIT-ANCHOR-MULTI-COMMIT`); stop treating a single MiMo run as a binary gate.
-
-**Verdict:** SHIP-WITH-FIXES — the harness is functional but its quality gate has worse SNR than a coin flip; calibrate it before W9 planning begins.
-
-### K12-REPLAY
-
-_latency: 47768ms_
+_latency: 47032ms_
 
 ## Score
 
 1. **Correctness — 2**  
-   `replay` claims v1/v2 coord-run reconstruction in help, yet no spec or shipped Wn row validates decision-chain fidelity.
+   `budget` CLI exists but snapshot shows no per-session cost attribution; ledger wiring is opaque.
 
 2. **Robustness — 2**  
-   Peer CLI verbs (`today`, `preflight`) time out after 30 s; replay lacks visible truncation or streaming guards for long histories.
+   No cost-cap alarms, overrun circuit breakers, or pricing-drift guards visible in preflight or `today`.
 
 3. **Operator-usability — 1**  
-   The non-technical runbook never mentions `replay`, and truncated CLI help offers no cue on when or why to invoke it.
+   `harness today` omits spend entirely; a non-technical operator has no obvious one-command answer for session cost.
 
 4. **Test discipline — 1**  
-   The 1,576-test roll-up and mutation tables omit replay entirely; a regression in reconstruction logic would go unnoticed.
+   1,576 tests cite zero ledger-reconciliation or cost-accuracy coverage; mutation table ignores budget modules.
 
 5. **Risk — 3**  
-   Without usable replay, the operator cannot self-service investigate coord-run failures, guaranteeing future L5 escalations.
+   Silent spend accumulation across Kimi/DeepSeek/MiMo with no meter visibility is a credible 30-day bill shock.
 
 6. **Top blocker**  
-   Add a runbook section “Investigate a failed coord run” that demonstrates `harness replay --human` with plain-language decision narration and sample output.
+   Add a plain-language cost stanza to `harness today` (or a `harness budget --last-session` human output) so the operator can read spend without interpreting a ledger.
 
-7. **Verdict — SHIP-WITH-FIXES**  
-   Replay is technically present but operator-invisible; the runbook gap turns decision archaeology into dead code.
+7. **Verdict**  
+   SHIP-WITH-FIXES: plumbing is present but the operator lacks a single, human-readable command to answer "how much did this session cost."
+
+### K10-MULTI-ENGINE
+
+_latency: 162802ms_
+
+## Score
+
+1. **Correctness — 2**: `--engine-fill` is operator-configurable rather than locked to `aggressive`, so the “keep Kimi slots full” policy is optional, not enforced; `deepseek:5` persisted past threshold without auto-quarantine.
+2. **Robustness — 3**: Dead-engine detection, quarantine schema, and heal commands exist, yet remediation still surfaces as a manual preflight warning instead of an autonomous circuit-break.
+3. **Operator-usability — 3**: Non-technical operators can run `engines-heal` and `preflight --fix`, but receive no visibility into Kimi subscription slot utilization vs. queue depth.
+4. **Test discipline — 2**: No cited tests assert cooldown backpressure or Kimi backfill behavior; W8 skipped engine-area mutation sweep after the schema fix.
+5. **Risk — 3**: Subscription waste (idle Kimi) and repeated dead-engine hits (DeepSeek ×5) create concurrent cost and reliability exposure.
+
+**Top blocker**: Harden `engine-fill` to default/aggressive and add a `kimi_slot_waste` preflight probe so queued work never sits while subscription capacity is idle.
+
+**Verdict**: SHIP-WITH-FIXES — primitives are landed, but policy enforcement is manual and dead-engine auto-remediation stops one step short of full autonomy.
+
+### K11-AUDIT-NONDETERMINISM
+
+_latency: 112933ms_
+
+## Score
+
+1. **Correctness** — 3: Identical commits yield PASS↔STOP flips; the gate cannot reliably separate correct code from incorrect.
+2. **Robustness** — 3: The harness tolerates runtime faults, but the audit layer fails under model jitter, producing fragile verdicts.
+3. **Operator-usability** — 2: A non-technical operator sees binary PASS/STOP in `harness today` that swing 0.40→0.85→0.40 with no code change; the signal is unusable.
+4. **Test discipline** — 4: Strong unit and mutation coverage catch code regressions, yet no test guards against audit-prompt variance.
+5. **Risk** — 4: Alert fatigue from noise will desensitize the operator to real blockers or waste cycles chasing phantom gaps.
+
+6. **Top blocker** — Ship `W9-AUDIT-NONDETERMINISM-AVG` as `--avg-of-N=3` with variance-aware labels (HARD PASS / HARD STOP / REVIEW) in `harness today`.
+7. **Verdict** — SHIP-WITH-FIXES: The harness is operationally sound, but the audit gate's noise floor currently exceeds its signal, so it must be calibrated with averaged sweeps before PASS/STOP labels are actionable.
+
+### K12-REPLAY
+
+_latency: 58534ms_
+
+## Score
+
+1. **Correctness** — 2. Help text claims v1/v2 reconstruction, yet no spec, sample output, or runbook step confirms it tells the right story.
+2. **Robustness** — 2. No evidence of handling missing logs, partial coord runs, or v1/v2 schema drift; likely raw-dump or silent failure.
+3. **Operator-usability** — 1. The non-technical operator has zero runbook guidance on when to invoke it, and the CLI description promises data, not decision archaeology.
+4. **Test discipline** — 1. None of the 1,576 visible tests cover replay; regressions in reconstruction logic would slip through undetected.
+5. **Risk** — 3. When a coord run fails, the operator will need narrative context and instead find an undocumented data hose, forcing escalation.
+
+6. **Top blocker** — Add `replay --human` (plain-language timeline: what was decided, why, by whom) and an OPERATOR_RUNBOOK section naming the exact failure signature that triggers invocation.
+7. **Verdict** — SHIP-WITH-FIXES. Daily pulse and preflight are operator-ready, but `replay` is a dark corner: it answers neither when to use it nor how to understand the output.
 
 ### K13-SESSION-HANDOFF
 
-_latency: 51208ms_
+_latency: 78512ms_
 
 ## Score
-1. **Correctness: 2** — Handoff artifacts exist (`today`, `runbook`, `session`), but `harness today` and `preflight --skip-engines` both time out, and `--fix` silently stashes work, so the loop does not land the operator in a known-good state.
-2. **Robustness: 2** — Core operator-facing verbs collapse under normal use; if the loop hands off during load, the operator has no reliable landing surface.
-3. **Operator-usability: 2** — The runbook is readable, but its first mandated actions hang, violating the key question: “does the operator know what to do?”
-4. **Test discipline: 1** — 1,576 unit tests pass, yet integration coverage missed 30-second handoff-path timeouts that strand a non-technical user.
-5. **Risk: 4** — Immediate session-blocking hazard: a non-technical operator handed control with dead commands and invisible stashes will stall or panic.
 
-6. **Top blocker** — Fix the 30-second hang in `harness today` and `preflight --skip-engines`; harden `session` to emit exactly one imperative next-action sentence (e.g., “Run `harness today` to review 3 tasks”) instead of a raw state dump.
+1. **Correctness — 3**: `harness today` and the runbook provide static handoff context, but the snapshot shows no `session` output proving a proactive, actionable transfer recommendation fires when the loop yields.
+2. **Robustness — 3**: `heartbeat` and `panic-dump` are present, yet if the loop crashes before emitting a handoff, the operator has no persistent loop-exit artifact to consult.
+3. **Operator-usability — 4**: The plain-language `today` pulse and single-page runbook let a non-technical operator self-orient, though they must actively pull status rather than receiving a pushed handoff.
+4. **Test discipline — 2**: With 1,576 tests and no visible coverage of `harness session` or handoff logic, a regression in transfer signaling would likely slip through undetected.
+5. **Risk — 3**: A non-technical operator could fail to notice the loop has yielded control, leading to stalled work or unreviewed changes sitting idle.
 
-7. **Verdict** — SHIP-WITH-FIXES. The loop cannot safely return control while its canonical landing commands time out and the stash silently eats in-progress work.
+**Top blocker:** Force the loop exit path to invoke `harness session --handoff` and write a persistent `SESSION_HANDOFF.md` checklist (shipped blockers, next required operator action).
+
+**Verdict:** SHIP-WITH-FIXES — operator pull-based tools exist, but the loop still lacks an unmissable, push-style transfer packet that screams "take the wheel now."
 
 ### K14-LOOP-PRODUCTION
 
-_latency: 49507ms_
+_latency: 62571ms_
 
 ## Score
-1. **Correctness** — 2/5. `harness loop` exists in the verb tree, but W8 shipped no loop-specific hardening and core dependent commands (`preflight`, `today`) timeout, indicating the loop runtime likely fails to meet its spec under load.
-2. **Robustness** — 1/5. No pidfile hygiene, idempotent restart, or SIGKILL recovery is shown, and systemic CLI hangs suggest the long-running loop cannot survive plausible failures.
-3. **Operator-usability** — 2/5. The runbook helps, but a non-technical operator cannot safely drive a loop whose `status` may hang and for which no "stuck loop" recovery procedure exists.
-4. **Test discipline** — 2/5. Despite 1576 passing tests, the snapshot shows zero loop-lifecycle tests (kill, restart, orphan cleanup) and mutation scores exclude the loop controller.
-5. **Risk** — 4/5. As the central autonomous primitive, an unrecoverable loop crash after a Windows update or SIGKILL would halt all autonomous progress and force manual CLI triage.
 
-6. **Top blocker** — Add a persistent pidfile + heartbeat to `harness loop start`, an idempotent `--recover` path, and an integration test that SIGKILLs the loop then asserts `status` returns healthy with zero duplicate jobs.
+1. **Correctness** — 3/5. `harness loop` verbs exist, yet preflight treats an unregistered loop as a warn-level notice, and the snapshot shows no `loop status` output confirming accurate self-reporting.
+2. **Robustness** — 2/5. W5-M’s PID-sentinel covers coordinators, not the loop; zero evidence of auto-restart, state rehydration, or Task Scheduler watchdogging for the dev-loop process itself.
+3. **Operator-usability** — 3/5. `harness loop start` is discoverable, but a non-technical operator has no proven `status` signal to distinguish “running” from “zombie,” and the runbook’s loop-recovery section is unverified.
+4. **Test discipline** — 2/5. 1,576 tests pass, yet neither the audit sweeps nor the mutation manifest mention loop lifecycle coverage; there is no kill+restart regression test.
+5. **Risk** — 4/5. Silent loop death halts all autonomous progress; without durable execution, the entire W8 operator-readiness stack is moot because the engine simply stops.
 
-7. **Verdict** — HOLD. The productized loop primitive lacks demonstrated kill+restart resilience and systemic CLI timeouts make hands-off operator use unsafe.
+6. **Top blocker** — Harden `harness loop` into a supervised background task (e.g., Task Scheduler with auto-restart on failure) and add an integration test that SIGKILLs the loop process, then asserts `harness loop status` returns `running` within 30s.
+7. **Verdict** — SHIP-WITH-FIXES. The loop primitive is callable but not operator-grade until it demonstrably survives a kill+restart without manual intervention.
 
 ### K15-COORD-V2-MATURITY
 
-_latency: 51351ms_
+_latency: 60620ms_
 
 ## Score
 
-1. **Correctness: 3** — v2 coord primitives (worktrees, checkpoint, integrator) are not directly validated in W8; waves ship, but multi-agent isolation fidelity remains assumed, not proven.
-2. **Robustness: 2** — `preflight` and `today` hard-timeout after 30s; `--fix` silently stashes in-progress work; CRLF hook false-positives block commits on Windows.
-3. **Operator-usability: 3** — Human-facing verbs and runbook exist, but the operator-facing commands either hang or drop work silently, eroding non-technical trust.
-4. **Test discipline: 3** — Mutation gates and 1576 tests catch module regressions, yet the `EngineHealth` schema bug silently failed every quarantine write because `except Exception: continue` masked it.
-5. **Risk: 4** — In unattended mode, the timeout/stash/hook-noise failures will fire within days; v2 coord is still demo-ware until checkpoint recovery survives fault injection.
+1. **Correctness** — 2. Worktree and checkpoint primitives compile, but the integrator leaves the progress-stream broken after observer timeout and dead-engine quarantine, so unattended runs silently stall.
+2. **Robustness** — 2. No cascading-fault recovery: a single engine death plus observer timeout collapses the unattended loop because neither auto-restarts nor fails over to a degraded-but-up state.
+3. **Operator-usability** — 3. CLI surface is friendly, yet the non-technical operator must manually patch loop registration and observer health every morning—unattended autonomy is still aspirational.
+4. **Test discipline** — 3. High unit count misses the overnight unattended scenario; the schema-silent-failure and persistent hook STOPs show the integration harness lacks a 24h bootstrap regression suite.
+5. **Risk** — 4. Within 30 days an unattended run will halt on unregistered tasks or unhealed engines, confirming v2 coord is demo-ware with prod aspirations.
 
-**Top blocker:** Eliminate the 30s hangs in `preflight`/`today` and remove `--fix` auto-stash behavior; these unattended-run killers must be resolved before the next wave.
+6. **Top blocker** — `harness install` must auto-register the dev-loop Task Scheduler entry and couple the observer to a watchdog that self-restarts on timeout, eliminating the two manual preflight warnings permanently.
 
-**Verdict:** SHIP-WITH-FIXES — W8 operator readiness is tangible, but the timeouts, silent data loss, and hook noise prove v2 is not yet safe for unattended loops.
+7. **Verdict** — SHIP-WITH-FIXES. Multi-agent coordination is structurally sound, but the absence of self-bootstrapping loop and observer recovery means unattended operation remains a supervised demo, not production.
 
 ### K16-SPEC-CULTURE
 
-_latency: 49690ms_
+_latency: 71940ms_
 
 ## Score
 
-1. **Correctness — 3**  
-   The Wave 8 closeout spec matches the code because it was authored *after* shipping (dated 2026-05-24, yet commits `9aea866` and `3dc8593` landed earlier). It is a chronicle, not a blueprint.
+1. **Correctness — 2**: W8-STOP-HOOK’s spec claimed exclusions absent until follow-through commit `7081d93`, and the `EngineHealth.status` Literal omitted `quarantined`/`recovering` that production code was already writing.
+2. **Robustness — 3**: Failure modes (schema rejection, hook noise) are patched in follow-throughs rather than anticipated in the original spec.
+3. **Operator-usability — 3**: Runbook and `harness today` exist, but DPAPI seeding is invisible (W10 todo) and W8-OPERATOR-RUNBOOK criteria are soft enough to flip PASS/STOP.
+4. **Test discipline — 4**: 1,576 tests catch code regressions, yet persistent STOPs on spec-audit rows prove acceptance criteria aren’t crisp enough to be spec-driven or automatable.
+5. **Risk — 4**: W9’s 14-row backlog will amplify spec debt if implementation continues to outpace `spec/*.md`.
 
-2. **Robustness — 2**  
-   Retroactive specs offer no design-time guardrails. The `EngineHealth` schema bug silently failed every quarantine, and `preflight --fix` auto-stashed work—both surprises a spec-first review could have prevented.
+**Top blocker**: Gate every W9 row on a frozen `spec/*.md` that passes `harness spec-verify` before code is written; retroactively patch W8-STOP-HOOK and W8-PREFLIGHT-FIX specs to match commit `7081d93`.
 
-3. **Operator-usability — 3**  
-   The runbook and `harness today` are usable, but the non-technical operator cannot read an up-front spec to anticipate behavior or withhold authority before code ships.
-
-4. **Test discipline — 2**  
-   1,576 tests pass, yet there is no deterministic spec-to-code gate. MiMo audits are non-deterministic, the mutation-canary is deferred to W9, and the persistent STOPs on `W8-STOP-HOOK` and `W8-AUDIT-PROMPT` show spec compliance is verified erratically.
-
-5. **Risk — 4**  
-   Wave 9 is already queueing work (`W9-PREFLIGHT-FIX-NOSTASH`, `W9-MUTATION-CANARY`). Without a spec-first mandate, the next wave will repeat emergent development and operator surprise.
-
-**Top blocker:**  
-Freeze a `spec/wave-9-plan.md` and require operator sign-off *before* the first W9 implementation commit. Specs must lead; closeouts must not substitute for design review.
-
-**Verdict:** SHIP-WITH-FIXES. W8 delivers operator-ready functionality, but the spec culture is backward-looking. If Wave 9 is not spec-led, operational trust and auditability will degrade.
+**Verdict**: SHIP-WITH-FIXES — Spec culture is retroactive-edit, not lead; freeze specs pre-implementation or spec debt will outpace test coverage.
 
 ### K17-AUTHORITY-DISCIPLINE
 
-_latency: 98117ms_
+_latency: 71760ms_
 
 ## Score
+1. **Correctness**: 3 — Persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT were overridden by precedent; the sole external check on dev authority is already compromised.
+2. **Robustness**: 2 — Observer probe times out in preflight, MiMo flips PASS/STOP on identical code, and W8 skipped the full mutation sweep, so drift detection is unreliable.
+3. **Operator-usability**: 4 — Runbook, `today`, and `preflight --fix` make daily ops accessible, yet the non-technical operator still cannot independently validate Claude's commits.
+4. **Test discipline**: 3 — 1576 tests catch functional regressions, but coverage does not enforce boundaries on the dev-manager's unilateral authority.
+5. **Risk**: 5 — Unilateral commit/push authority with a flaky, non-blocking observer is a ship-blocker; nothing stops a slow-motion authority failure.
 
-1. **Correctness — 2** — The spec promises an audit gate on full dev authority, but MiMo’s non-determinism renders verdicts random; the discipline mechanism is effectively unspecified in practice.
-2. **Robustness — 2** — A silent schema bug hid failures for waves; preflight now times out; the stop-hook still misfires, so the system cannot reliably survive its own maintainer’s errors.
-3. **Operator-usability — 2** — The non-technical operator cannot review diffs or veto commits, and the oversight CLI (`today`, `preflight`) times out, leaving them blind.
-4. **Test discipline — 1** — No deterministic test checks what Claude commits; deferred mutation canary and LLM-based audits offer zero automated signal if the dev manager goes off-rails.
-5. **Risk — 4** — Unfettered commit/push authority with no enforceable check means a single bad loop could rewrite critical paths before a human notices.
-
-6. **Top blocker** — Ship W9-MUTATION-CANARY plus deterministic file-invariant tests in `observer` so a non-LLM process can block the dev manager.
-
-7. **Verdict — SHIP-WITH-FIXES** — Functionally close, but discipline is theater until a code-level gate can halt the autonomous loop.
+6. **Top blocker**: Fix the observer probe timeout and make the audit gate truly blocking: require `--avg-of-3` MiMo runs ≥0.75 before any Wn row ships, with zero "accepted-as-shipped" waivers.
+7. **Verdict**: SHIP-WITH-FIXES — Operator-facing features are ready, but the discipline layer is decorative until the observer is reliable and audit STOPs cannot be overridden.
 
 ### K18-SCOPE-CREEP
 
-_latency: 43407ms_
+_latency: 50118ms_
 
 ## Score
 
-1. **Correctness — 2/5**: Schema bugs silently fail quarantines, and `harness today`/`preflight` both timeout—surface area has outrun verification.
-2. **Robustness — 2/5**: `except Exception: continue` swallowed critical Pydantic errors; 30-second hangs on core paths show systemic load intolerance.
-3. **Operator-usability — 2/5**: Thirty-plus CLI verbs overwhelm a non-technical operator; `harness today` is unusable due to timeouts despite being built for them.
-4. **Test discipline — 3/5**: 1,576 tests look impressive, but they missed a load-bearing schema bug and W8 skipped the full mutation sweep—quantity is masking coverage gaps.
-5. **Risk — 5/5**: Scope is metastasizing (W9 queue already forming, two commands broken, verb tree unreadable); the harness is sprinting toward unmaintainable monolith.
+1. **Correctness** — 3. Individual features pass local audits, but systemic correctness frays under 40+ CLI verbs and 309 tracker rows, as shown by the EngineHealth schema/quarantine mismatch that silently failed for multiple waves.
+2. **Robustness** — 2. Broad surface breeds hidden rot: `except Exception: continue` masked total quarantine failure, and 1,576 tests failed to catch a Pydantic rejection that broke `preflight --fix` and `engines-heal`.
+3. **Operator-usability** — 2. New `today` and runbook are helpful, yet the 40+ visible verbs still overwhelm a non-technical operator and the readiness panel voted no.
+4. **Test discipline** — 2. Test count grew +32, but mutation kill rates barely clear the ≥3 gate; quantity is covering shallow coverage as scope expands.
+5. **Risk** — 4. Every wave adds more verbs, state, and tests without retiring old ones; the harness is sprawling toward an unmaintainable "mini-OS" instead of converging on an operator-shippable core.
 
-**Top blocker**: Hard freeze on new CLI verbs and split observer/proxy/engines into standalone packages so the core harness stops accruing state.
-
-**Verdict**: HOLD — convergence requires subtracting verbs, not adding more.
+6. **Top blocker** — A published CLI verb freeze + retirement plan: demote or merge half the current commands (e.g., collapse `engines-*` into `engines`, move observer/orchestrator under `harness admin`) before W9 adds any new user-facing verbs.
+7. **Verdict** — SHIP-WITH-FIXES. W8 shipped genuine operator-readiness wins, but the additive trajectory is unsustainable; scope must freeze and consolidate now or it will never converge.
 
 ### K19-INTERACTION-FRICTION
 
-_latency: 51274ms_
+_latency: 69205ms_
+
+## Score
+1. **Correctness** — 3: Specs are met but validating them costs three MiMo sweeps per row due to non-determinism.
+2. **Robustness** — 3: Runtime heals engines, yet the audit gate itself flakes, forcing manual operator-Claude rescue turns.
+3. **Operator-usability** — 3: Runbook exists, but shipping still requires spec → dispatch → three audit rounds; not yet half the friction.
+4. **Test discipline** — 3: Tests catch code regressions, but no test fails when the audit process itself regresses to three turns.
+5. **Risk** — 4: Next-wave scale will multiply audit STOP noise into operator fatigue and tangible ship delays.
+
+6. **Top blocker** — Ship W9-AUDIT-NONDETERMINISM-AVG with a `--avg-of-N 3` default so one dispatch replaces three manual audit sweeps.
+7. **Verdict** — SHIP-WITH-FIXES: Operator-readiness is real, but the audit approval pipeline still consumes three operator turns per feature; halve that and it's production-grade.
+
+### K20-NEXT-WAVE
+
+_latency: 64593ms_
 
 ## Score
 
 1. **Correctness — 3**  
-   Features work post-fix, but the schema bug required a 90-min follow-through and three audit sweeps—three extra operator-Claude turns that should have been zero.
+Persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT mean the detection layer does not yet meet its own spec; the schema-bug fix proves silent failures were slipping through.
 
 2. **Robustness — 3**  
-   `preflight --fix` silently stashes in-progress code and CLI verbs time out after 30 s; each failure mode consumes an unplanned operator turn to recover.
+`except Exception: continue` masked a load-bearing schema mismatch for an unknown duration; observer probes time out; detection noise undermines failure response.
 
-3. **Operator-usability — 2**  
-   Runbook exists, yet the operator must still interpret MiMo STOP flips and CRLF hook false-positives—technical friction that the non-technical profile cannot self-serve.
+3. **Operator-usability — 4**  
+Preflight --fix, `today`, engines-heal and the runbook clear W8 readiness blockers, though `--profile non_technical` still is not the default.
 
-4. **Test discipline — 2**  
-   1,576 tests cover logic, but no automated gate checks operator-facing friction (hangs, stash surprise, hook false-positives), so regressions in turns-per-feature go undetected.
+4. **Test discipline — 3**  
+1576 tests pass and mutation rates exceed gates, yet the quarantine path had zero coverage for the invalid-Literal rejection that silently broke every health write.
 
 5. **Risk — 4**  
-   Persistent MiMo non-determinism means every Wn row risks 3+ audit cycles; at 285 STATUS rows this is a compounding tax on every future dispatch.
+W9 must stack-rank detection > operator UX > engine reliability > v2 maturity > scope reduction; without a deterministic audit gate, regressions slip in silently or reviewer trust collapses under false-positive fatigue.
 
-**Top blocker:** Replace the MiMo pre-ship hard gate with W9-MUTATION-CANARY (deterministic, 1 turn) and an operator-runbook checklist, halving average turns per feature.
+## Top blocker
 
-**Verdict:** SHIP-WITH-FIXES — autonomy is structurally sound, but the approval layer (MiMo audits + hook/CLI hang friction) currently doubles or triples operator-Claude turns.
+Ship `W9-AUDIT-NONDETERMINISM-AVG` and eliminate the two persistent STOP rows so the audit gate becomes a trustworthy signal rather than a source of noise.
 
-### K20-NEXT-WAVE
+## Verdict
 
-_latency: 119545ms_
-
-## Score
-1. **Correctness** — 3. Core operator commands (`preflight`, `today`) time out; two W8 rows remain persistent STOP and the MiMo gate is nondeterministic.
-2. **Robustness** — 3. Silent `git stash` in `--fix`, blanket `except Exception: continue` masked the quarantine schema bug, and preflight hangs rather than degrading.
-3. **Operator-usability** — 3. Runbook and `--human` exist but the operator cannot reliably run a morning pulse or safe preflight without hangs or data loss.
-4. **Test discipline** — 4. 1576 tests pass and mutation gates clear, yet the quarantine path was uncaught until audit; deterministic canary is still deferred.
-5. **Risk** — 4. Nondeterministic audit + missing canary + hanging core commands mean regressions can ship silently and readiness cannot be verified.
-
-## Plus
-6. **Top blocker** — W9-MUTATION-CANARY (detection). Stack-rank: detection > operator UX > engine reliability > v2 maturity > scope reduction. Detection is #1 because MiMo nondeterminism has already allowed persistent STOPs to ship and the operator cannot trust the audit gate to catch regressions.
-7. **Verdict** — SHIP-WITH-FIXES. Readiness features exist but core CLI paths hang and the audit gate is unreliable, so Wave 9 must land the canary and timeout fixes before scaling usage.
+SHIP-WITH-FIXES — operator readiness is good enough to proceed, but W9 must not layer new features atop an audit gate that cries wolf (or stays silent on real wolves).
 
 ### M01-INSTALL
 
-_latency: 22414ms_
+_latency: 23674ms_
 
 ## Score
 
-1. **Correctness (3/5)**: Preflight timed out with `--skip-engines` on Windows — the exact cold-start gate the fresh-install reviewer needs is non-functional at HEAD. Schema bug was real and fixed, but the timeout means we can't confirm the fix works for a new operator.
-2. **Robustness (2/5)**: Two commands timed out (preflight, today). `--fix` silently stashed work (W9-PREFLIGHT-FIX-NOSTASH). CRLF false-positive on the commit hook blocks Windows operators. The Python Foundation Store path in the timeout trace signals PATH/install issues the runbook doesn't cover.
-3. **Operator-usability (2/5)**: The `--help` tree has 40+ CLI verbs with flags like `--explore-on-uncertainty [dispatch_alternatives|inline|ask_operator]`. No mention of Python install, venv, or `pip install -e .` anywhere in the snapshot. The operator runbook assumes harness is already running — the gap from "cloned repo" to "preflight green" is undocumented.
-4. **Test discipline (4/5)**: 1576 tests, mutation kill rates above gate, 32 new tests in W8. The schema bug slipped through *tests* but was caught by audit. Strong regression signal.
-5. **Risk (4/5)**: A fresh-install reviewer literally cannot complete their task. The preflight timeout means the cold-start path is broken, and there's zero evidence of install/bootstrap documentation.
+1. **Correctness** — 3. Preflight runs and `--fix` resolves git/pytest issues, but dead_engines warns immediately on a fresh clone where no keys exist yet; that's an expected state, not a real failure, yet the operator sees `[!]` with no "you need keys first" context.
 
-6. **Top blocker**: A `harness bootstrap` or `preflight` that actually succeeds — the Windows timeout trace (`PythonSoftwareFoundation.Python.3.13`) suggests the shebang/module invocation path is broken on Windows Store Python. Either fix the invocation (use `python -m harness` directly from documented entrypoint) or add a one-line install script (`pip install -e . && harness preflight`). The runbook must start at `git clone`, not at "run harness."
+2. **Robustness** — 2. The schema bug (Literal rejected `quarantined`/`recovering` silently swallowed by bare `except Exception`) is exactly the failure mode a fresh-install reviewer fears most — the fix shipped, but the pattern recurs: `_check_dead_engines` still fires on a keyless clone, observer times out because it's not running, loops warn because nothing's registered. Three warnings at first boot, none explained.
 
-7. **Verdict**: **HOLD.** The cold-start gate (`preflight --skip-engines`) times out on Windows — no fresh-install reviewer can validate anything until that path works end-to-end in <30 seconds.
+3. **Operator-usability** — 2. There is **no cold-start path visible in this snapshot**. No `pip install -e .`, no `pyproject.toml`, no "clone → install → run" sequence. The operator runbook (`docs/OPERATOR_RUNBOOK.md`) exists but isn't referenced until the final line of `harness today`. A non-technical operator cloning this repo doesn't know whether to run `pip install`, `poetry install`, or `python -m harness` directly. The CLI entry point is `python -m harness` — not mentioned anywhere in the preflight output.
+
+4. **Test discipline** — 4. 1576 tests, mutation kill rates above gate, the schema bug caught by audit. But the `except Exception: continue` pattern that hid the quarantine bug is a test-discipline smell — the fix addressed the symptom, and no new test asserts "quarantined status actually persists."
+
+5. **Risk** — 3. The cold-start story is invisible to the snapshot audience. Every new operator will hit the same wall: clone, stare at CLI help, guess at installation, get three warnings they can't interpret.
+
+6. **Top blocker** — Add a `README.md` or `docs/COLD_START.md` with the exact 5-command path: clone → `pip install -e .` → set 3 API keys → `harness preflight --fix --skip-engines` → `harness today`. Without it, the operator runbook is unreachable.
+
+7. **Verdict** — **HOLD.** The harness works once bootstrapped, but there is literally zero documentation for the first 5 minutes after clone — the exact window this lens audits.
 
 ### M02-CLI-COMPLETENESS
 
-_latency: 16320ms_
+_latency: 49816ms_
 
 ## Score
 
-1. **Correctness**: 4/5 — Core verbs (preflight, engines-heal, dispatch, loop) functionally correct after W8 schema fix; edge-case failures (timeout, CRLF) documented.
-2. **Robustness**: 3/5 — Silent quarantine failure was load-bearing; timeout on `preflight` and `today` suggests platform fragility; audit non-determinism undermines trust.
-3. **Operator-usability**: 2/5 — Non-technical operator still blocked by timeouts, missing human-readable alias (`status --human`), and `preflight --fix` silently stashing code.
-4. **Test discipline**: 4/5 — 1576 tests pass, mutation kill-rates recovered, but audit non-determinism means test verdicts aren’t reliable regression signals.
-5. **Risk**: 3/5 — `preflight --fix` stash surprise could lose operator work; audit non-determinism may mask real regressions in next wave.
+| Dimension | Score | Justification |
+|---|---|---|
+| **Correctness** | 4 | Core verbs work as specced. Schema bug was load-bearing and got fixed. `doctor`/`preflight` split is semantically unclear in the help tree. |
+| **Robustness** | 3 | Quarantine flow silently failed until caught; no `rollback` or `observer reset` for stuck states; `--skip-engines` is a manual escape hatch, not auto-degrade. |
+| **Operator-usability** | 3 | `today`, `preflight --fix`, `engines-heal` are good on-ramps. But 22 top-level verbs + 60+ subcommands is high discovery friction for non-technical profile. `--profile non_technical` isn't the default. |
+| **Test discipline** | 4 | 1576 tests, mutation kill rates ≥3 on all top-5 modules. Audit gate catches real regressions (schema bug). |
+| **Risk** | 3 | Verb explosion makes the CLI hard to navigate blind. Missing lifecycle gap: no `rollback` for bad dispatches, no `upgrade` for harness updates, no key-rotation verb for the dead-engines path. |
 
 ## Top blocker
 
-**Fix `preflight --fix` to surface stash or skip it** — Current silent stash erodes operator trust; this single change lifts Robustness + Operator-usability by ≥1 point.
+**Consolidate `doctor` into `preflight` and add `harness rollback`.** `doctor` and `preflight` are 80%+ overlapping (both check git, python, secrets); the split forces the operator to guess which one to run. A single `preflight` with `--fix` and `--quick` flags covers both. Meanwhile, the dead-engines fix mentions "rotate keys" but there's no `harness keys rotate` or `harness rollback <dispatch-id>` — a bad overnight dispatch currently has no undo path except `panic-dump` + ping engineering. Either verb closes a real lifecycle gap.
 
 ## Verdict
 
-SHIP-WITH-FIXES — The CLI covers the operator lifecycle verb-by-verb, but the `preflight --fix` stash risk and missing `status --human` alias must be resolved before handoff to a non-technical operator.
+**SHIP-WITH-FIXES.** The CLI covers install → daily run → recover → retro → debug, but the 22-verb surface is bloated (4 verbs could be folded into `engines` subcommands; `doctor`/`preflight` should merge) and the missing `rollback` leaves a production hole that `replay` doesn't fill — `replay` reconstructs, it doesn't undo.
 
 ### M03-OPERATOR-DAILY
 
-_latency: 15246ms_
+_latency: 20023ms_
 
 ## Score
 
-1. **Correctness**: 2/5 — Core daily verbs (`preflight`, `today`) timeout in practice, breaking the morning cadence the runbook prescribes.
-2. **Robustness**: 2/5 — The 30-second timeout on critical status commands makes the operator's daily flow fragile and unreliable.
-3. **Operator-usability**: 3/5 — The runbook and human-readable status are sound *in theory*, but the tools they depend on aren't functional.
-4. **Test discipline**: 4/5 — 1576 tests pass, and the W8 focus on fixing the schema bug and adding `preflight --fix` logic is good regression insurance.
-5. **Risk**: 4/5 — Operator daily cadence is dead-on-arrival until the timeout failures in `preflight` and `today` are diagnosed and fixed.
+1. **Correctness** — 4. Core mechanics (preflight, engines-heal, today) work, but audit non-determinism undermines reliability of the "done" signal.
+2. **Robustness** — 4. Survives dead engines and schema bugs; audit flips (STOP↔PASS) with no code changes indicate fragile self-assessment.
+3. **Operator-usability** — 3. Daily pulse (`today`) and one-command recovery (`preflight --fix`) land, but weekly/monthly cadences aren't supported by existing verbs—operator has no clear "what next" beyond daily.
+4. **Test discipline** — 4. 1576 tests, solid coverage; but the audit layer itself (the system's own judgment) is non-deterministic, which tests don't catch.
+5. **Risk** — 3. Operator trust erodes if audits flip without cause; the `status --human` alias and `preflight --fix` are load-bearing for adoption.
 
-6. **Top blocker**: Fix the command timeout for `harness preflight --skip-engines` and `harness today`. Without a working "morning pulse," the operator runbook and entire daily-flow concept are theoretical, not operational.
+## Top blocker
+Stabilize audit verdicts: either average-of-N sweeps or binary pass/fail thresholds. Non-determinism destroys operator confidence in the "done" signal—the system cannot self-assess reliably.
 
-7. **Verdict**: **HOLD**. The foundation for operator readiness is built, but the two most critical daily-flow commands are non-functional, making the harness unusable for its primary non-technical operator audience.
+## Verdict
+SHIP-WITH-FIXES: The operator-readiness foundation is usable for daily tasks, but inconsistent audit verdicts require a deterministic gating mechanism before the system can be trusted for autonomous cycles.
 
 ### M04-OBSERVABILITY
 
-_latency: 21813ms_
+_latency: 33174ms_
 
 ## Score
 
-1. **Correctness**: 3/5 — Core status surfaces (STATUS.csv, CLI verbs) exist, but critical commands (`preflight`, `today`) timeout in the provided capture, breaking immediate operator observability.
-2. **Robustness**: 2/5 — The 30s timeout on `preflight` and `today` renders them unusable under the snapshot conditions, a severe observability gap.
-3. **Operator-usability**: 1/5 — The non-technical operator's primary windows into system state (`status --human`, `today`) are non-functional in the capture, forcing manual file digging.
-4. **Test discipline**: 2/5 — 1576 tests pass, but the test suite did not catch the live-timeout of two core observability commands, indicating an integration or environment gap.
-5. **Risk**: 3/5 — Without working daily pulse or preflight, the operator cannot detect stalls, cost spikes, or engine health issues in real-time, risking prolonged silent failures.
+1. **Correctness** — 3/5. Surfaces reflect state but `harness today` truncates after 110 items; operator can't see the full picture without digging into STATUS.csv.
+2. **Robustness** — 3/5. Observer probe timeout shows one retry warning; preflight shows fixable warnings. No proactive alerting when surfaces degrade.
+3. **Operator-usability** — 2/5. `harness today` is friendly, but default profile is technical, STATUS.csv is raw 309-row CSV, and dashboard requires manual start/stop. Non-technical operator must switch contexts.
+4. **Test discipline** — 3/5. Observer has tests; status tracker is tested. Mutation testing covers dispatch and integration but observability surfaces not prioritized in mutation sweeps.
+5. **Risk** — 2/5. Scattered surfaces mean operator might miss a quiet failure until it escalates. Not a ship-blocker but friction.
 
-## Top Blocker
-
-**Diagnose and fix the command timeouts.** The harness's observability promise (`harness today`, `harness preflight`) is currently hollow in the captured environment. Making these commands reliably complete in <30s is the single change that would lift operator-usability and robustness scores by ≥1.
+## Top blocker
+Set `--profile non_technical` as the default so `harness today`, preflight, and status automatically show the human-friendly format without requiring the operator to remember a flag.
 
 ## Verdict
-
-**SHIP-WITH-FIXES.** The observability design is sound, but the captured execution failures make it non-functional for the operator today; the timeout root cause must be resolved before handoff.
+SHIP-WITH-FIXES — Observability is functional but the operator has to toggle between friendly and technical views; a default profile flip and a persistent dashboard would cut the digging in half.
 
 ### M05-ERROR-RECOVERY
 
-_latency: 25179ms_
+_latency: 23231ms_
 
 ## Score
 
-| # | Dimension | Score | Justification |
-|---|-----------|-------|---------------|
-| 1 | **Correctness** | 2/5 | The EngineHealth schema bug silently swallowed every quarantine write — the exact failure this lens is designed to catch. It was fixed, but only because the audit sweep caught it; tests didn't. Now `preflight` and `today` both timeout = core commands produce no output. |
-| 2 | **Robustness** | 1/5 | `preflight --skip-engines` and `today --since-hours 48` both hang to 30-second timeout with zero diagnostic. An `except Exception: continue` hid the schema bug for an entire wave. `preflight --fix` silently stashes the operator's in-progress work (W9 queued but not shipped). Three independent error-recovery paths fail silently or hang. |
-| 3 | **Operator-usability** | 2/5 | The runbook exists, but if the operator runs `preflight` (step 1 of every autonomous-mode start) they stare at a blank screen for 30 seconds. `today` is the daily pulse — also dead. The operator cannot see their own system state through the two commands the runbook tells them to run first. |
-| 4 | **Test discipline** | 2/5 | 1576 tests but none caught `except Exception: continue` masking a Pydantic validation error. No integration test runs `preflight --skip-engines` end-to-end under a timeout budget or it would have caught the hang. Mutation kill rate is healthy but the tested surface doesn't include the error-swallowing paths. |
-| 5 | **Risk** | 5/5 | **Ship-blocker.** Two of the three most operator-facing commands are non-functional on HEAD. The operator literally cannot start their day. |
+**Correctness**: 4/5 — Engine schema fix and preflight --fix work, but persistent audit STOPs on 2 rows suggest spec-compliance gaps in error recovery pathways.
 
-## Top Blocker
+**Robustness**: 3/5 — The schema bug fix shows critical error paths are now surfaced, but audit non-determinism could mask future recovery failures.
 
-**Diagnose and fix the 30-second timeouts on `harness preflight --skip-engines` and `harness today`.** These are the first two commands the runbook tells the operator to run and both hang indefinitely until killed. Until they return real output, every other operator-readiness investment (runbook, status human, engines heal) is inaccessible because the operator can't even get past step 1.
+**Operator-usability**: 4/5 — `preflight --fix`, `engines-heal`, and runbook give clear recovery actions, but audit noise might undermine operator confidence.
 
-## Verdict
+**Test discipline**: 4/5 — +32 tests for W8, but mutation sweep not re-run means recovery-path regression detection is lagging.
 
-**HOLD.** The two most operator-facing commands hang on invocation — the non-technical operator cannot run preflight or see today's status, which means they cannot safely enter autonomous mode or know whether their system is healthy.
+**Risk**: 3/5 — Persistent audit failures could erode trust in error recovery guidance; operators may bypass recommended fixes.
+
+**Top blocker**: Resolve the persistent STOP on W8-STOP-HOOK audit. If the audit gate itself can't reliably validate noise reduction, how can operators trust it to surface real error recovery needs?
+
+**Verdict**: SHIP-WITH-FIXES — Core recovery flows work, but audit reliability issues need fixing before operators can confidently rely on the guidance system.
 
 ### M06-AUDIT-GATE
 
-_latency: 61596ms_
-
-## Score
-
-1. **Correctness — 3/5**: Gate catches real regressions (PREFLIGHT-FIX STOP→PASS pinned a load-bearing schema bug) but ~30% of rows flip verdict with zero code change, so the output can't be trusted at face value.
-
-2. **Robustness — 2/5**: Non-determinism is the definition of fragile. W8-ENGINES-HEAL went 0.58→0.85→0.68 across three sweeps on the same commit. No input stabilization (debounce, content-hash, diff-cap) fixes interpretive variance inside MiMo.
-
-3. **Operator-usability — 2/5**: Non-technical operator must read three sweeps, apply ad-hoc "W6-PANEL precedent" to decide which STOPs are real, and manually accept-as-shipped. There's no `--avg-of-N`, no consensus score, no single number to act on.
-
-4. **Test discipline — 2/5**: Zero tests for audit-gate verdict consistency. Nothing catches the gate itself regressing. Mutation canary (W9) would provide a deterministic regression signal independent of MiMo, but it's queued, not shipped.
-
-5. **Risk — 3/5 (noise erodes trust)**: If the operator learns that 1-in-3 STOPs are coin-flips, the rational response is to ignore all STOPs — which makes the gate worthless. This trust-erosion is the real 30-day risk, not any individual false STOP.
-
-**False-positive estimate**: ~30% — 3 of 10 rows show STOPs on code verified good in a prior sweep (no commit between sweeps 2→3). Two persistent STOPs (STOP-HOOK, AUDIT-PROMPT) appear legitimate and aren't counted as false positives.
-
-**False-negative estimate**: ≥1 documented — the EngineHealth schema bug silently failing every quarantine write survived undetected across W6 and W7 audits. Rate is likely low (5–15%) but non-zero and unmeasurable without re-auditing prior waves against ground truth.
-
-6. **Top blocker**: Ship **W9-MUTATION-CANARY** immediately. Three known-killer mutants per top module, daily Task Scheduler run, ≥1 test failure per mutant expected. This bypasses MiMo entirely and gives a deterministic, non-interpretable regression signal. One canary run per day makes the audit gate's non-determinism tolerable rather than fatal.
-
-7. **Verdict**: **SHIP-WITH-FIXES.** The gate catches real regressions (PREFLIGHT-FIX is proof) but 30% noise + no deterministic fallback means it can't be the sole regression signal — ship mutation-canary as a mandatory W9-Blocker, not a nice-to-have.
-
-### M07-MUTATION-COVERAGE
-
-_latency: 27349ms_
-
-## Score — Mutation Coverage Reviewer
-
-| Dimension | Score | Justification |
-|---|---|---|
-| **Correctness** | 3 | ≥3 gate is met for 5 tracked modules, but only 5 of ~20+ modules are tracked; W8 shipped 32 tests without re-running the sweep |
-| **Robustness** | 2 | No mutation re-sweep in W8 despite code touching 6 new subcommands; canary deferred to W9; zero detection if a tracked module regresses |
-| **Operator-usability** | 3 | Mutation data isn't operator-facing, but the audit gate it feeds is; operator can't assess whether mutations actually cover their risk surface |
-| **Test discipline** | 2 | W7-MUTATION-ORCH is the only mutation-orchestration module; the 5-module table is a static artifact, not an enforced CI gate; gaps are invisible |
-| **Risk** | 4 | W8 code landed in engines-heal, preflight-fix, stop-hook, audit-prompt, status-human, runbook — none re-validated by mutation sweep; ship-blocker if any of those modules dropped below the gate |
-
-## Top blocker
-
-**Surface untested modules.** Add a mutation-coverage manifest (e.g., `mutation_targets.yaml`) that lists every module with ≥3 known-killer mutants and its last-sweep SHA. Any module shipping code without a passing sweep must be auto-flagged. This transforms "5 modules pass" from a static snapshot into an enforced, auditable gate — and answers the operator's question: "what's CURRENTLY untested?"
-
-## Verdict
-
-SHIP-WITH-FIXES. The ≥3 bar is correct *for tracked modules* but the tracking surface is dangerously narrow (5 of 20+), W8 didn't re-sweep, and the deferred canary means regressions are invisible. Add the manifest + re-sweep W8-touched modules before closing.
-
-### M08-ENGINE-RELIABILITY
-
-_latency: 36072ms_
-
-## Score
-
-1. **Correctness — 4/5.** The schema bug fix (`7081d93`) unblocked the entire quarantine flow; manual verification confirms it works. But `preflight --skip-engines` timed out at 30s, so I cannot independently verify end-to-end engine-health state today.
-
-2. **Robustness — 3/5.** The `except Exception: continue` that silently swallowed every quarantine write is a systemic anti-pattern; one instance was load-breaking, and no one audited whether the same pattern exists elsewhere in the engine layer. A single engine collapsing mid-dispatch falls back (dispatcher.py mutation kill rate 17.30 is strong), but the engine-heal command itself hit a 30s timeout in this snapshot — recovery may hang under real failure.
-
-3. **Operator-usability — 4/5.** `harness engines-heal` is a single verb; the runbook links to it. `harness today` timed out, so the operator currently has no plain-language engine-health pulse — but the intent is sound and the timeout is likely environmental.
-
-4. **Test discipline — 3/5.** 1576 tests, +32 this wave, dispatcher at 17.30 kill rate — excellent. But the schema bug lived through multiple waves undetected precisely because tests asserted on return values, not on `engine_health` disk state. W8-ENGINES-HEAL is audit-non-deterministic (STOP twice of three), meaning even the auditor isn't confident tests cover the recovery transitions.
-
-5. **Risk — 3/5.** One engine dying is the exact scenario this layer exists for. The quarantine path now works, but the `recovering → up` promotion is untested in the snapshot (preflight timeout), and the silent-exception pattern may mask other failures that only surface under real engine collapse.
-
-6. **Top blocker.** Grep `except.*continue` across all `engines/` and `dispatch` paths; convert every instance to at minimum `logger.warning` with the caught exception, or surface it via the L4 alarm. One such instance already silently broke quarantine for weeks — the same pattern elsewhere is the highest-probability next failure.
-
-7. **Verdict — SHIP-WITH-FIXES.** The schema fix is real and load-bearing, but the silent-exception sweep is prerequisite to trusting the engine layer under a single-engine collapse — which is its primary job.
-
-### M09-SECURITY-POSTURE
-
-_latency: 37719ms_
-
-## Score
-
-1. **Correctness** — 3/5. Specs say DPAPI + JSONL redact + 0600, but the `except Exception: continue` pattern that silently swallowed the quarantine bug proves identical silent-failure masking is plausible in key-storage or redaction paths — unverified.
-2. **Robustness** — 2/5. `panic-dump` scrubbing is claimed but untested; `preflight --fix` silently stashes tracked files (W9-PREFLIGHT-FIX-NOSTASH); the `proxy` 4-key circuit breaker has no audit entry; git-stash in a secret-bearing repo risks secret-adjacent context leaking into stash reflog.
-3. **Operator-usability** — 4/5. Runbook and `status --human` are strong, but security posture is invisible — the operator has no signal whether redaction is working or a key just leaked to a log.
-4. **Test discipline** — 2/5. Zero tests exercise redaction completeness, DPAPI isolation, `panic-dump` scrubbing, or prompt-injection resistance in `dispatch`→engine paths. Mutation tests target functional bugs only. The 1576 tests are security-blind.
-5. **Risk** — 4/5. Worst path: `dispatch` sends user-controlled packet content to an LLM engine via a proxy holding 4 API keys — prompt injection → engine exfiltrates key material into response → response logged or surfaced via `retro`/`replay` before redaction runs. Second path: `harness env` reports per-key presence; if it ever leaks the actual value (even once, in debug mode), the JSONL log with that entry is permanent. Third path: `full_dev_authority` mode lets Claude commit+push — a poisoned memory file (`memory/*.md`) is trusted implicitly and has no integrity check.
-
-## Top blocker
-
-Ship a **redaction-integrity test**: enumerate every output surface (`retro`, `replay`, `panic-dump`, `env`, JSONL logs, `today`, `status human`) and assert no known-secret-pattern (API key prefix, DPAPI blob, env var value) appears unredacted. This single test suite lifts score from 2→3 on test discipline and 4→3 on risk.
-
-## Verdict
-
-HOLD — the `except Exception: continue` bug that silently swallowed quarantine writes for an unknown duration is proof that silent-failure masking exists in this codebase; until a redaction audit proves secret-handling paths don't share the same pattern, shipping exposes the operator to undetectable key leakage.
-
-### M10-STATE-ATOMICITY
-
-_latency: 20438ms_
-
-## Score
-
-**Correctness**: 2/5 — Quarantine writes to `engine_health` silently failed *every time* until W8; Pydantic rejected `quarantined` status and `except Exception: continue` swallowed it. State files told lies.
-
-**Robustness**: 1/5 — No evidence of atomic writes (temp+rename), no WAL for sqlite, no `StateFileCorruptError` anywhere, and the one observed failure mode was *silent data loss*. `kill -9` mid-write is an open question with no documented mitigation.
-
-**Operator-usability**: 3/5 — Preflight `--fix` and `engines-heal` give the operator recovery verbs, but if those verbs *themselves* silently corrupt state (as the schema bug proved), the UX is a trap.
-
-**Test discipline**: 2/5 — The schema bug survived through W7 *and* was reproduced by the audit tooling — tests never caught a rejected Pydantic write to engine_health. No crash-recovery / mid-write tests visible.
-
-**Risk**: 4/5 — State is the single source of truth for engine routing, quarantine, and cooldown. Silent write failure = operator thinks engine is quarantined, harness keeps dispatching to it. Next outage is load-bearing.
-
-## Top blocker
-
-Add `state/atomic.py` — a write helper that: (a) writes to `.tmp` then `os.replace`, (b) wraps all JSON/SQLite writes, (c) raises `StateFileCorruptError` on any serialization failure instead of swallowing. Then add a kill-during-write integration test. This single artifact closes the atomicity gap and makes the `except Exception: continue` class of bug structurally impossible.
-
-## Verdict
-
-**HOLD** for state write atomicity — the W8 proof that *every quarantine write silently failed* is a ship-blocker until the state layer has crash-safe writes and surface-on-failure error handling.
-
-### M11-CONCURRENCY
-
-_latency: 24293ms_
-
-## Score
-
-1. **Correctness — 3/5**: Three distinct concurrency runtimes (ThreadPoolExecutor, asyncio, multiprocessing) share mutable state (engine_health.json, git index, pytest cache) with **no cross-model synchronization**. The schema fix (7081d93) corrected the *shape* of writes but not their *atomicity*.
-
-2. **Robustness — 2/5**: `preflight --fix` does `git stash` + file mutation + engine_health write. If Task Scheduler fires the autonomous loop while an operator runs `preflight --fix` manually, both contend on the git working tree and the same JSON file. The `scheduled_tasks.lock` is your only guard, and nothing in the snapshot confirms it's checked before engine_health writes. The `except Exception: continue` that hid the schema bug is the *exact pattern* that hides races too.
-
-3. **Operator-usability — 4/5**: Not the operator's problem to solve. The CLI verbs look clean.
-
-4. **Test discipline — 2/5**: Zero evidence of concurrent stress tests. All 1576 tests are sequential. A single `concurrent.futures.ThreadPoolExecutor` submitting two `preflight --fix` calls against shared state would surface the race in seconds, yet it doesn't exist. Mutation sweeps fork processes that could mutate files mid-read by the main process — untested.
-
-5. **Risk — 4/5**: Task Scheduler fires the autonomous loop on a cadence; `preflight --fix` is its first step. A manual `preflight --fix` from the operator during a scheduled tick is a plausible data race on `engine_health.json` and the git index. Silent corruption (like the quarantine bug, but concurrency-induced) is the likely failure mode.
-
-## Top blocker
-
-**Add an advisory file lock (`portalocker` or `fcntl`) around `engine_health.json` read-modify-write in `_check_dead_engines`, `engines heal`, and `preflight --fix`, plus a 3-line concurrent smoke test that submits two `preflight --fix` calls to a ThreadPoolExecutor and asserts no duplicate quarantine writes.** This is the only shared mutable state accessed from all three concurrency models with no happens-before guarantee today.
-
-## Verdict
-
-**SHIP-WITH-FIXES.** The operator-readiness work is genuinely load-bearing, but the unsynchronized engine_health writes under concurrent Task Scheduler + manual invocation are a data-race waiting to manifest as silent corruption — the same class of bug you just fixed.
-
-### M12-V2-COORD
-
-_latency: 29654ms_
-
-## Score
-
-**1. Correctness — 3.** The schema bug (EngineHealth Literal rejecting `quarantined`/`recovering`, silently swallowed by `except Exception: continue`) is a coord-correctness archetype: the worker wrote data the coordinator schema wouldn't accept, and nobody noticed because the contract was implicit. Fixed now, but the pattern likely lurks elsewhere.
-
-**2. Robustness — 3.** The `except Exception: continue` anti-pattern in the fix functions is exactly the cross-worker contract drift I'd flag. W8 fixed the EngineHealth instance, but no sweep verified the pattern doesn't repeat in other coord↔worker boundaries. `preflight --skip-engines` timing out at 30s is a separate robustness signal.
-
-**3. Operator-usability — 3.** Track B addressed the 0/10 readiness-blocker list, and the CLI verb tree is now rich. But two commands the runbook references (`preflight`, `today`) timed out in testing — the operator will hit those first and lose trust.
-
-**4. Test discipline — 3.** 1576 tests pass, mutation kill rates ≥3 on all top-5 modules. But the quarantine-flow schema bug evaded every test — meaning tests validated the happy path, not the actual schema contract. W9-MUTATION-CANARY (deferred) is the right fix.
-
-**5. Risk — 4.** From my lens: the single-worker directive (W7-SPEC-DRIFT) is enforced by convention, not by coord-layer assertion. Nothing in `coord/planner.py`, `coord/worker.py`, or `coord/integrator.py` validates that the progress-stream contract is upheld between handoffs. The non-deterministic audit sweeps make this worse — a contract-violating change could get a PASS on one sweep and never be re-checked.
-
-**6. Top blocker.** Add a `coord/tests/test_contract_drift.py` that exercises the planner→worker→integrator handoff with synthetic progress-stream payloads and asserts schema conformance at each boundary. One test file catches the class of bugs the EngineHealth schema bug belonged to.
-
-**7. Verdict: SHIP-WITH-FIXES.** The coord contract surface is load-bearing and currently validated only by integration tests that don't isolate handoff schemas — one contract-drift regression will silently propagate.
-
-### M13-PROXY-SAFETY
-
-_latency: 32688ms_
-
-## Score
-
-1. **Correctness — 3/5.** The 4-key proxy + circuit breaker + auto-quarantine exists, but the EngineHealth schema bug proves auto-quarantine-on-flap was *silently non-functional* until W8. Core safety claim was broken; now fixed, but trust is earned over time.
-
-2. **Robustness — 2/5.** The `except Exception: continue` that swallowed quarantine writes is a fundamental anti-pattern in a safety-critical proxy path. What happens when all 4 keys are rate-limited or revoked? Fail-open or fail-closed? Circuit-breaker behavior is unspecified anywhere in the snapshot.
-
-3. **Operator-usability — 3/5.** `engines-heal` + runbook help, but no proxy-specific operator guidance is visible. When the circuit breaker trips at 2am, does the non-technical operator see "traffic routed direct — keys exhausted" or a silent degradation?
-
-4. **Test discipline — 2/5.** Zero proxy-specific tests mentioned. No proxy module appears in the mutation kill-rate table. The 32 W8 net-new tests are unspecified. There is no evidence that key rotation, circuit-breaker trip/recovery, or quarantine-on-flap are exercised by tests at all.
-
-5. **Risk — 4/5.** The proxy's defining feature (auto-quarantine) was demonstrably broken for an indeterminate period. 4 on-disk API keys is 4× the credential-exposure surface of direct HTTPS with one key. A proxy that can silently fail its safety mechanisms is *strictly less safe* than direct HTTPS — it adds opacity, not protection.
-
-## Top blocker
-
-**Produce a proxy failure-mode matrix.** For each scenario — single key revoked, all keys exhausted, circuit-breaker open, all engines quarantined, TLS handshake failure — document: (a) observable behavior, (b) fail-open vs fail-closed, (c) operator action required. This is the artifact that answers "is the proxy actually safer than direct HTTPS?" Currently there is no such document anywhere in the snapshot.
-
-## Verdict
-
-**SHIP-WITH-FIXES.** The proxy's quarantine mechanism works post-W8 schema fix, but with zero visible proxy tests and no failure-mode analysis, we're shipping an opaque safety layer whose failure behavior is unknown — the one thing a proxy safety reviewer cannot accept.
-
-### M14-OBSERVER-DESIGN
-
-_latency: 23818ms_
+_latency: 58824ms_
 
 ## Score
 
 | # | Dimension | Score | Justification |
 |---|-----------|-------|---------------|
-| 1 | Correctness | 3 | Observer runs, but two persistent STOPs are on the *detection layer itself* (STOP-HOOK, AUDIT-PROMPT) — the observer cannot cleanly pass its own audit. The `except Exception: continue` that silenced the schema bug for an entire wave proves the detection surface has blind spots. |
-| 2 | Robustness | 2 | 3/7 audited rows flip PASS↔STOP with **zero code change between sweeps 2→3**. A detector whose verdict is a coin-flip on identical input is not robust — it's noise. The schema fix shows silent-failure patterns were load-bearing for weeks. |
-| 3 | Operator-usability | 3 | The triage output is a confidence float with no guidance: non-technical operator sees `0.68 STOP` and has no decision procedure. No `--avg-of-N`, no "retry" button, no plain-language interpretation. `harness today` timed out in 30 s — operator can't even read the pulse. |
-| 4 | Test discipline | 3 | 1576 passing tests exist, but the mutation canary (the deterministic regress check that bypasses MiMo) was *deferred* from W8. Observer's own behavior is untested for stability across repeated invocations. |
-| 5 | Risk (30-day) | 4 | If the operator trusts a flippy audit gate, real regressions get waved through OR good work gets falsely STOP'd. Both erode authority credibility fast. |
+| 1 | Correctness | 3 | Gate caught real regressions (schema bug, MUTATION-ORCH), but ~30% of STOPs on unchanged code are false positives (ENGINES-HEAL, STATUS-HUMAN, OPERATOR-RUNBOOK flips). The 0.65–0.75 confidence band is a coin-flip zone. |
+| 2 | Robustness | 2 | Same commit + same auditor → different verdict. Three flips across sweeps 2→3 with zero code diff. The gate is non-deterministic at the decision boundary, which is the *only* place reliability matters. |
+| 3 | Operator-usability | 2 | A non-technical operator sees STOP/STOP/PASS on ENGINES-HEAL and can't distinguish "real regression" from "MiMo rolled a different number." Trust erodes fast. |
+| 4 | Test discipline | 3 | The gate is eating its own dogfood — 3 sweeps, flip-tables published, `--avg-of-N` queued in W9. But no integration test asserts stability on fixed input, so the noise floor is only *documented*, not *eliminated*. |
+| 5 | Risk (audit-gate lens) | 3 | Not a ship-blocker yet because operator precedent (W6-PANEL) already absorbed the noise. But if W10+ rows hit the 0.65–0.75 band, every wave gets a "3 STOPs — is it real?" cycle. W9-AUDIT-NONDETERMINISM-AVG is the critical path. |
 
-**6. Top blocker:** Implement `W9-AUDIT-NONDETERMINISM-AVG` *before* re-running the readiness panel — an N=3 consensus where a row passes only if ≥2/3 sweeps return ≥0.70. This single change converts the audit gate from random signal to actionable triage and lifts correctness+robustness each by ≥1.
-
-**7. Verdict:** **SHIP-WITH-FIXES** — The operator-readiness legs (preflight, runbook, heal, status-human) are genuinely load-bearing and should stay shipped, but the detection layer needs the averaging gate before the observer's verdicts carry operational weight.
-
-### M15-DASHBOARD-UX
-
-_latency: 45263ms_
-
-## Score
-1. **Correctness** - 3: Core harness logic works, but the FastAPI `/v2/*` layer lacks endpoints for Wave 8's critical `engines heal` and `preflight --fix` capabilities.
-2. **Robustness** - 2: Backend CLI timeouts (30s hangs on `preflight` and `today`) indicate blocking I/O that will cascade to WebSocket clients as silent UI freezes or drops.
-3. **Operator-usability** - 2: The non-technical operator's primary interface is the dashboard; leaving `engines heal`, `preflight --fix`, and `status human` as CLI-only renders them invisible.
-4. **Test discipline** - 2: The 1576 tests cover backend logic, but the absence of API contract tests for `/v2/*` JSON schemas means frontend breakage bypasses CI entirely.
-5. **Risk** - 4: If the dashboard cannot trigger or display the new system health actions, the 0/10 operator readiness vote will not improve.
-
-**Top blocker**: Implement `/v2/engines/heal` and `/v2/preflight` REST endpoints in FastAPI and bind them to a "System Health" UI pane with live WebSocket status updates.
-
-**Verdict**: HOLD — The dashboard completely fails to surface the new Wave 8 operator-readiness tools, leaving the non-technical GUI user unable to perform daily system maintenance.
-
-### M16-TEST-QUALITY
-
-_latency: 24470ms_
-
-## Score
-
-1.  **Correctness** — **4/5**. Core features (preflight --fix, engines-heal, status human) work as specified. Persistent audit STOPs on two rows indicate specified behavior isn't fully validated.
-2.  **Robustness** — **4/5**. Schema bug fix shows good failure recovery. However, the `preflight --fix` auto-stash is a robustness risk (silent stash drop).
-3.  **Operator-usability** — **5/5**. Single-page runbook, `today` command, and `engines-heal` directly address the W8 readiness panel's 0/10 blocker.
-4.  **Test discipline** — **3/5**. 1576 tests pass, but MiMo audit non-determinism and two persistent STOPs suggest test boundaries are fuzzy or flaky, masking real gaps.
-5.  **Risk** — **3/5**. Primary risk is MiMo audit non-determinism eroding trust in the gate; secondary is the stash surprise for operators.
-
-**Top blocker**: **Implement `W9-AUDIT-NONDETERMINISM-AVG`**. The `--avg-of-N` flag for the audit command would make verdicts deterministic, turning non-det STOPs into actionable signals or confirmed passes.
-
-**Verdict**: **SHIP-WITH-FIXES**. The operator-readiness foundation is solid and the harness is functional, but the flaky audit gate undermines the "every Wn row gets a MiMo audit" policy.
-
----
-**Test Quality Deep-Dive**:
-- **Overall**: Tests are **mostly behavioral**, focusing on module outputs and state changes (e.g., engine health transitions, fix outcomes). Mock usage is strategic for external APIs and file system calls, not heavy.
-- **Sampled Modules**:
-    1.  `engines/dispatcher.py` (Score: 5/5): Tests are highly behavioral, verifying routing logic and error handling. High mutation kill rate confirms effectiveness.
-    2.  `coord/worker.py` (Score: 4/5): Strong behavioral tests after W7 recovery. Minor concern: some tests may mock too much of the integrator.
-    3.  `orchestrator.py` (Score: 3/5): Tests are adequate but likely mock-heavy on the underlying `coord` module, reducing confidence in full integration.
-- **Dead Test Code**: No significant dead code indicated. The 6 skipped tests appear intentional. The primary "dead" signal is the **non-deterministic audit verdicts**, which make certain test outcomes unreliable for decision-making.
-
-### M17-DOCS-ACCURACY
-
-_latency: 24585ms_
-
-## Score
-
-| Dimension | Score | Justification |
-|---|---|---|
-| **Correctness** | 2/5 | Closeout claims `harness today` shipped; CLI help shows only `morning-brief` — doc and code disagree on the command name. |
-| **Robustness** | 2/5 | Both documented-ref commands (`preflight --skip-engines`, `today`) timed out at 30s; no evidence they actually run. |
-| **Operator-usability** | 3/5 | Runbook and human-readable status are described clearly in the doc, but if the commands don't execute, the operator has a playbook for tools that don't work. |
-| **Test discipline** | 2/5 | 1576 tests asserted but unverifiable — the harness itself won't boot; mutation-kill table covers 5 modules with no breadth claim for the rest. |
-| **Risk** | 3/5 | Doc-code mismatch on a primary operator-facing command (`today` vs `morning-brief`) will confuse a non-technical operator following the runbook literally. |
-
-**Top blocker**: Reconcile the `harness today` claim in the closeout and runbook with the actual CLI verb (`morning-brief`); update either the doc or the CLI so they match, and verify the chosen command actually executes without timeout.
-
-**Verdict**: SHIP-WITH-FIXES — the documentation fabricates a command name that doesn't exist in the CLI tree, and every tested harness invocation timed out, so nothing in the doc can be independently verified as functional.
-
-### M18-STATUS-CSV-DISCIPLINE
-
-_latency: 20576ms_
-
-## Score
-
-1.  **Correctness (3)**: Core features function (preflight --fix, engines-heal, status --human), but the audit gate's own non-determinism (PASS↔STOP flips with no code change) undermines its authority as the canonical "done" signal.
-2.  **Robustness (2)**: Schema bug in `EngineHealth` was a load-bearing, silent failure. Command timeouts in preflight/today suggest latent fragility. The auto-stash in `preflight --fix` is an operator-facing footgun.
-3.  **Operator-usability (4)**: Significant progress (runbook, `status human`, `engines heal`). The non-technical operator now has a daily pulse and recovery verbs, but timeouts and stash surprises degrade trust.
-4.  **Test discipline (4)**: 1576 tests pass; mutation canary is queued but not yet active (W9). The audit process itself lacks deterministic regression checks.
-5.  **Risk (3)**: The **audit gate's non-determinism** is the top risk. If the system for judging "shipped" is unreliable, all downstream planning and confidence decay.
+**False-positive rate:** ~20–24% (4–5 of ~21 sweeps gave STOP on code unchanged since last PASS).
+**False-negative rate:** Cannot be measured from this data — there's no independent "ground truth" audit to compare against. At least one TP (schema bug) proves the gate *can* catch silent failures. But a silent false negative is, by definition, silent.
 
 ## Top blocker
 
-**Fix `W8-AUDIT-PROMPT` (persistent STOP).** The audit prompt is the lens through which all work is judged. Its persistent STOP (low scores on precision/recall) indicates the audit's own instructions are flawed, causing the observed non-determinism. A stable, deterministic audit prompt is foundational.
+Ship **W9-AUDIT-NONDETERMINISM-AVG** (`--avg-of-N`) and **require it** for all Wn closeout verdicts. A single averaged score ≥0.70 = PASS, below = STOP. This collapses the flip-flop noise into one number and makes the audit gate auditable itself.
 
 ## Verdict
 
-**SHIP-WITH-FIXES.** The operator-readiness foundation is solid, but the audit system's non-determinism undermines confidence; fix the audit prompt to make the gate reliable before expanding.
+**SHIP-WITH-FIXES.** The gate catches real regressions (2 hard-PASS lifts prove it), but ~20–24% false-positive noise on unchanged code makes individual STOP verdicts unreliable — the operator cannot distinguish signal from MiMo non-determinism without the `--avg-of-N` stabilizer shipping in W9.
 
-### M19-WAVE-DISCIPLINE
+### M07-MUTATION-COVERAGE
 
-_latency: 16895ms_
+_latency: 28836ms_
 
 ## Score
 
-1. **Correctness** — 5. All 8 W8 rows shipped as specified; preflight --fix, engines heal, and status --human work as documented.
-2. **Robustness** — 4. Schema bug fixed; but audit non-determinism (3 rows flipping PASS↔STOP with no code change) remains a reliability gap.
-3. **Operator-usability** — 5. Operator runbook, `harness today`, and `engines heal` directly address the 0/10 readiness panel feedback.
-4. **Test discipline** — 4. 1576 tests pass; but the persistent-STOP rows (W8-STOP-HOOK, W8-AUDIT-PROMPT) and audit non-determinism indicate test confidence isn't absolute.
-5. **Risk** — 3. Main risk is audit non-determinism masking real regressions; mitigated by planned mutation-canary and averaging.
+**Correctness (3):** The ≥3 gate is met for all 5 hot modules — the spec says what it says and the code delivers. But the spec itself is narrow: 5 modules out of ~40 production files get mutation coverage. The gate is correct *for its scope*; the scope is insufficient.
 
-**Top blocker**: Implement `W9-AUDIT-NONDETERMINISM-AVG` to run audits in triplicate and average scores, lifting confidence in the audit gate's determinism.
+**Robustness (2):** W8 did not re-run the sweep. W9-MUTATION-MANIFEST has 3 warm-tier modules with `last_sweep_sha=null`. Three of the five tracked modules had 0.00 kill rate as recently as W6 and only recovered because they were explicitly targeted. No mechanism auto-fires a mutation run when a hot-module file changes — regressions land silently until the next manual sweep.
 
-**Verdict**: SHIP-WITH-FIXES. The wave discipline loop held across W6/W7/W8, but audit non-determinism is the one process risk that needs a concrete fix before scaling.
+**Operator-usability (2):** A non-technical operator has no CLI verb to see which modules are mutation-tracked, what the kill rates are, or whether a sweep is stale. `harness today` and `harness status human` surface test counts and audit verdicts but not mutation coverage. The operator cannot distinguish "covered and green" from "never tested."
 
-### M20-RISK-PROFILE
+**Test discipline (3):** Tests exist that *generate* mutation scores, and 1576 tests pass. But 0 tests assert that the mutation manifest is consistent (e.g., "every `src/harness/**/*.py` appears in at least one tier"). The gate itself — "≥3 kill rate" — has no property-test verifying it's applied on every CI run or preflight cycle.
 
-_latency: 52637ms_
+**Risk (3):** The sustainable bar is the real question. ≥3 is fine for a codebase with 5 tracked modules. At 10 modules, you need 10 sweeps. At 20, the sweep cost dominates. No tier graduation policy exists — modules never move from warm to hot. W10-FRESH-CANARY-MODULES is queued but unshipped, meaning 3 manifest gaps persist.
 
-## Top 5 Risks — 30-Day Window
+**Top blocker:** Execute `W10-FRESH-CANARY-MODULES` immediately (3 canary runs, ~30 min total) to populate `last_sweep_sha` for the 3 warm-tier nulls. Then add a preflight check: `mutation_manifest_completeness` that fails if any tier has `null` sha older than 7 days. This makes the ≥3 gate *self-enforcing* rather than manually refreshed.
 
-### 1. **Engine Cascade Failure** — Score: 3/5
-The quarantine flow was *silently broken* until W8-AUDIT-FOLLOWUP (`7081d93`). `EngineHealth.status` rejected `quarantined`/`recovering` writes via Pydantic, but `except Exception: continue` swallowed the error. **Probability: 40%** a similar silent-failure pattern exists in another engine path. Impact: dead engine wastes dispatch cycles, triggers cascading timeouts, burns Kimi/Claude quota on doomed retries. The `engines-heal` audit is non-deterministic (PASS-STOP-STOP) — confidence the fix itself is robust: **65%**.
+**Verdict:** SHIP-WITH-FIXS. The gate works for the 5 modules it covers; the coverage gap and stale-sweep risk are real but addressable in one focused session.
 
-### 2. **Audit Gate Unreliability** — Score: 4/5
-MiMo's non-determinism is the *systemic* risk. Three rows flipped PASS↔STOP with zero code change. Two persistent STOPs (W8-STOP-HOOK, W8-AUDIT-PROMPT) may be legitimate gaps *or* auditor hallucination — the snapshot doesn't distinguish. **Probability: 80%** that at least one Wave 9 row will be incorrectly held up or incorrectly cleared by the audit gate within 30 days. Without `--avg-of-N` (queued, not shipped), every audit verdict is a coin-flip on soft criteria.
+### M08-ENGINE-RELIABILITY
 
-### 3. **Cost Overrun** — Score: 3/5
-`--engine-fill aggressive` is the default. DeepSeek handles V-file + math + ship-critical work (the most expensive paths). `harness budget` exists but there's no evidence the operator checks it. **Probability: 35%** of hitting a rate-limit or billing surprise in 30 days, especially if Kimi slots fill and DeepSeek absorbs overflow. No circuit-breaker on per-day spend is visible.
+_latency: 38757ms_
 
-### 4. **Operator Usability Cliff** — Score: 4/5
-`preflight --skip-engines` and `today` **both timed out at 30 seconds** in the snapshot. A non-technical operator hitting timeouts on the two most important daily commands will lose trust immediately. The git-stash surprise in `preflight --fix` (`W9-PREFLIGHT-FIX-NOSTASH` queued but not shipped) could lose in-progress work silently. **Probability: 60%** the operator encounters a confusing failure within 30 days.
+## Score
 
-### 5. **Scope Creep / Wave Drift** — Score: 3/5
-Five W9 candidates already queued. Persistent STOPs demand resolution. Readiness-panel rerun is pending. CRLF hook fix surfaced mid-closeout. **Probability: 50%** that Wave 9 scope doubles before the first row ships, pushing delivery out by ≥1 week.
+1. **Correctness** — 3. Quarantine/recovery lifecycle now implements the spec post-schema-fix (7081d93), but a bug that silently swallowed every quarantine write for weeks proves the spec was unmet until very recently.
 
----
+2. **Robustness** — 2. The `except Exception: continue` that hid the schema bug is a **pattern-level hazard**. One was found; the question is how many remain. DeepSeek is currently dead (`deepseek:5`) and recovery hasn't been demonstrated end-to-end in production — only manually verified with `--skip-engines`.
 
-## Score (0-5)
+3. **Operator-usability** — 4. `engines-heal` exists, `harness today` surfaces the blocker, and the runbook documents recovery steps. Minor gap: key-rotation vs. quarantine decision isn't guided in the CLI output itself.
+
+4. **Test discipline** — 2. Tests passed *throughout* the broken-quarantine period because the same `except Exception: continue` masked failures in test stubs too. The follow-through explicitly notes stubs had to be taught to match Pydantic forms — meaning tests were validating a different code path than production ran.
+
+5. **Risk** — 3. DeepSeek is dead *right now*. The schema fix is <1 commit old, the non-det audit on ENGINES-HEAL means we can't rely on automated verification, and autonomous overnight loops will degrade silently if a second engine fails while the recovery path has an undiscovered bug.
+
+6. **Top blocker** — Systematic grep for `except Exception` with bare `continue`/`pass` in every engine-health, quarantine, and dispatcher-fallback path. The schema bug proves these patterns hide load-bearing failures. Each hit needs a logged warning or explicit re-raise. Estimate: 2 hours, eliminates the entire category.
+
+7. **Verdict** — **SHIP-WITH-FIXES.** The single-engine-collapse path exists and the schema bug is patched, but the silent-swallow pattern that hid it for weeks is a systemic defect that must be hunted before we can trust the recovery lifecycle under real autonomous load.
+
+### M09-SECURITY-POSTURE
+
+_latency: 35131ms_
+
+## Score
+
+**Correctness — 4/5**: DPAPI key storage, JSONL+redaction logging, and `panic-dump` scrubbing are present and functionally correct. The redaction integrity gate (W9) landed. However, the DPAPI *seed* path is undocumented and unverified — `doctor` reports DPAPI as readable but never explains provenance, a gap acknowledged only as a W10 todo.
+
+**Robustness — 2/5**: The EngineHealth `except Exception: continue` pattern that silently failed every quarantine write is a **class defect**, not a one-off. No evidence anyone audited DPAPI reads, redaction pipelines, or key-rotation paths for the same swallow-and-continue pattern. One such block in a redaction path means secrets leak to JSONL permanently with zero surface signal.
+
+**Operator-usability — 3/5**: `harness env` reports per-key presence, `status --human` is readable, and the runbook is single-page. But a non-technical operator hitting a DPAPI seeding failure has no remediation path — `doctor` says "readable" without explaining where keys originate. Invisible until production breaks.
+
+**Test discipline — 3/5**: 1576 tests + redaction integrity gate are solid foundations. Missing: DPAPI failure-mode tests, redaction pattern coverage completeness (does every new log sink inherit redaction?), and file-permission enforcement assertions (`0600` mentioned in the prompt but not in any shipped row I can verify).
+
+**Risk — 4/5**: The silent-failure pattern is proven to hide load-bearing security bugs. The injection scanner question is unanswered — I see no explicit injection-scanning primitive in the CLI tree or shipped rows. Trust on `env` means any process inheriting the operator's environment sees all API keys; no scoping or least-privilege boundary exists.
+
+**Top blocker**: Run a targeted grep for every `except Exception: continue` (and `except: pass`) in security-sensitive modules — DPAPI, redaction, key rotation, state writes — and replace each with explicit `logging.error` + surface to operator. The EngineHealth bug proves this pattern silently breaks security guarantees; the same class of bug is almost certainly hiding in a redaction path.
+
+**Verdict**: SHIP-WITH-FIXES — the silent-failure audit is non-negotiable; one leaked API key in a JSONL log is an irreversible exposure.
+
+### M10-STATE-ATOMICITY
+
+_latency: 31126ms_
+
+## Score
+
+1. **Correctness**: 2 — W8 schema bug proves state writes silently swallowed failures for *weeks*; `except Exception: continue` is the anti-pattern that corrupts silently.
+2. **Robustness**: 2 — W9-STATE-ATOMIC-WRITES committed but no evidence of write-temp+fsync+rename pattern; kill-9 during `engine_performance_log.jsonl` append or `engine_health` update leaves partial/truncated state with zero detection.
+3. **Operator-usability**: 1 — `doctor`/`preflight` never validates state-file integrity; a corrupted `engine_health.json` silently feeds bad routing until operator notices phantom cooldowns weeks later.
+4. **Test discipline**: 2 — no kill-9/mid-write simulation tests; the quarantine bug was caught by *audit sweep*, not by 1576 tests — that's a red flag for state-write coverage specifically.
+5. **Risk**: 3 — silent state corruption during autonomous overnight loops can compound: one bad `engine_health` write → phantom quarantine → routing misbehavior → operator discovers Monday.
+
+## State-atomicity specifics unresolved
+
+- `db.sqlite`: no WAL-mode or journal-mode evidence; `PRAGMA integrity_check` absent from preflight.
+- `*.json` files: JSONL append is natively non-atomic; `*.json` writes need write-replace pattern explicitly.
+- `YAML configs`: PyYAML `safe_dump` to same path = truncate-then-write = data loss on kill-9.
+- `StateFileCorruptError`: **never observed** in any sweep, test, or log — meaning either (a) it doesn't exist as a class, or (b) it exists but has zero test coverage. Either is a gap.
+
+## Top blocker
+
+Add `state_integrity` to preflight: validate every `state/*.json` parses, `db.sqlite` passes `PRAGMA integrity_check`, and all YAML configs load — *before* any autonomous dispatch fires. Without this, the W9 atomic-write commit is unverifiable in production.
+
+## Verdict
+
+**HOLD** — W9 landed atomic-write infrastructure but zero integration tests prove it works under kill-9, and the preflight gate has no state-integrity check to catch corruption before autonomous loops consume bad data.
+
+### M11-CONCURRENCY
+
+_latency: 36065ms_
+
+## Score
+
+1. **Correctness** — 3/5. W9-STATE-ATOMIC-WRITES + W9-STATE-FILE-LOCK landed, but the snapshot gives no proof the atomic-write pattern covers all shared state paths (engine_health JSON, engine_performance_log.jsonl, STATUS.csv). The schema bug fix is correct but the `except Exception: continue` that hid it may still exist in other write paths.
+
+2. **Robustness** — 2/5. Preflight ThreadPoolExecutor checks run in parallel, but preflight --fix + engines-heal can quarantine engines concurrently with no mutual exclusion on engine_health writes. Coord supervisors share state files; observer reads them on its own cadence — no happens-before between observer tick and coordinator flush. Stale lock detection for `scheduled_tasks.lock` after crash not mentioned anywhere.
+
+3. **Operator-usability** — 4/5. Concurrency is invisible to the operator by design, but the runbook doesn't warn against running `preflight --fix` while the autonomous loop is live — a plausible footgun.
+
+4. **Test discipline** — 2/5. 1576 tests are almost certainly sequential. Zero evidence of parallel-execution stress tests, lock-contention tests, or TOCTOU regression tests. Mutation canary is spot-check (3 mutants), not concurrency-aware.
+
+5. **Risk** — 4/5. Five subsystems (preflight, coord, observer, mutation sweeps, scheduled tasks) touch overlapping state files. The W9 atomic-write commit is < 1 week old and unproven under concurrent load. Windows file-locking semantics (mandatory vs advisory) add platform-specific hazard. A silent corruption in engine_performance_log.jsonl would poison dispatch routing for days.
+
+## Top blocker
+
+Add a concurrency stress test (`test_parallel_state_safety`) that simultaneously runs preflight --fix, engines-heal, coord status, and observer tick against shared state files, asserting no data corruption, no silent drops, and no stale-lock deadlock. Without it, the W9 atomic-write fix is aspirational, not verified.
+
+## Verdict
+
+**SHIP-WITH-FIXES** — The W9 atomic-writes commit addresses the worst race but lacks a concurrent-execution regression test to prove it; one stress test closes the gap between "fixed in theory" and "verified under load."
+
+### M12-V2-COORD
+
+_latency: 25255ms_
+
+## Score
 
 | Dimension | Score | Justification |
 |---|---|---|
-| **Correctness** | 3 | Core flows work; quarantine schema bug was ship-blocking and only found by accident |
-| **Robustness** | 2 | Silent `except Exception: continue` pattern was load-bearing; CLI timeouts survive |
-| **Operator-usability** | 2 | Two critical commands time out; git-stash surprise; `--help` is technical |
-| **Test discipline** | 4 | 1576 passing + mutation gate ≥3; non-determinism is auditor-side, not harness-side |
-| **Risk** | 4 | Engine cascade + audit unreliability compound; operator can't self-diagnose |
+| **Correctness** | 3 | Coord modules pass tests and mutation gate, but W8 skipped the full mutation sweep—no fresh proof that orchestrator→integrator→worker contracts still hold after W8 refactors. |
+| **Robustness** | 2 | The EngineHealth schema bug (silently swallowed by `except Exception: continue`) proves the integrator path has untested silent-failure modes. Coord's checkpoint/progress-stream contracts have no explicit invariant tests for partial-write scenarios. |
+| **Operator-usability** | 3 | `harness today` surfaces dispatch-level events but **zero coord-level visibility**—the operator can't see where in the plan→worker→integrate cycle a run stalled. `coord status` exists in `--help` but isn't surfaced in the daily pulse. |
+| **Test discipline** | 3 | 1576 tests pass, kill rates ≥3 on coord modules, but the mutation sweep is stale (last ran W7). No contract-level tests verifying the single-worker directive is enforced across worktree boundaries. |
+| **Risk** | 3 | Cross-worker contract drift is the live risk: if worker A's output schema drifts from what integrator B expects, there's no explicit schema-contract assertion at the boundary. The `except Exception: continue` pattern that hid the EngineHealth bug may exist elsewhere in coord paths. |
 
-## Top Blocker
-Ship `W9-AUDIT-NONDETERMINISM-AVG` (median-of-3 or avg-of-5) as the *first* Wave 9 row. Every subsequent audit verdict depends on this. Without it, the audit gate is advisory noise, not a gate.
+## Top blocker
+
+**Add explicit schema-contract tests at each coord boundary** (planner→worker output spec, worker→integrator result spec, integrator→coordinator summary spec). One integration test per boundary asserting the Pydantic models round-trip cleanly would catch the class of silent-failure bugs the EngineHealth incident exemplified. This alone would lift Robustness from 2→4 and Risk from 3→1.
 
 ## Verdict
-**SHIP-WITH-FIXES.** The harness is functional and the W8 operator-readiness work is real progress, but the audit gate unreliability and CLI timeouts are operator-facing credibility risks that should be resolved before the next wave begins.
+
+**SHIP-WITH-FIXES** — Coord correctness is demonstrated at the module level but unproven at the contract level; one boundary-contract test suite per handoff point closes the gap the EngineHealth bug exposed.
+
+### M13-PROXY-SAFETY
+
+_latency: 24628ms_
+
+## Score
+
+**Through the PROXY SAFETY REVIEWER lens:**
+
+| Dimension | Score | Justification |
+|-----------|-------|---------------|
+| **Correctness** | 3 | Proxy exists as CLI primitive (`harness proxy`), 4-key rotation + circuit breaker spec'd; but W9-PROXY-FAILURE-MATRIX (afed9ba) never proves the proxy is safer than direct HTTPS — it catalogs failure modes without showing the attack surface delta. |
+| **Robustness** | 2 | Circuit breaker + auto-quarantine-on-flap is the right architecture, but **no evidence of adversarial key-exhaustion testing** — what happens when all 4 keys are quarantined simultaneously? The fallback path is unspecified in the snapshot. |
+| **Operator-usability** | 2 | `harness --help` shows `proxy` with zero detail. Non-technical operator can't tell if proxy is active, healthy, or in circuit-open state. No `proxy status` surfaced in `harness today` or `preflight`. |
+| **Test discipline** | 3 | 1576 tests, mutation kill ≥3 on engine modules; but proxy-specific failure-matrix tests (flap detection, key-exhaustion, circuit-open → half-open transitions) aren't evidenced. W9-PROXY-FAILURE-MATRIX commit name suggests analysis, not validation. |
+| **Risk** | 4 | **If the proxy silently degrades to passthrough or blocks all traffic on 4-key exhaustion, it's strictly worse than direct HTTPS** — it adds latency and a single point of failure without proving the threat model it defends against is real. No kill-switch for direct-fallback is documented. |
+
+## Top blocker
+
+Ship a **proxy failure-mode matrix that proves the proxy's attack surface is smaller than direct HTTPS** — specifically: (a) what threat model justifies 4-key rotation vs. 1 key, (b) simultaneous-key-exhaustion behavior, and (c) circuit-open fallback to direct HTTPS or explicit halt. Without (a), the proxy is complexity theater.
+
+## Verdict
+
+**HOLD.** The proxy adds a single point of failure and key-management complexity but hasn't demonstrated it's safer than the thing it replaces — the failure-matrix commit catalogs modes without proving the net security delta is positive.
+
+### M14-OBSERVER-DESIGN
+
+_latency: 36144ms_
+
+## Score
+1. **Correctness** — 3. Observer is implemented and tested, but probe timeout in preflight indicates runtime reliability gaps.
+2. **Robustness** — 3. Retries on next preflight are good, but persistent timeout suggests deeper responsiveness or scheduling issues.
+3. **Operator-usability** — 2. 12 subcommands and technical timeout warnings overwhelm non-technical operators; needs clearer guidance.
+4. **Test discipline** — 4. 41 tests cover observer functionality; timeout may be environmental rather than code defect.
+5. **Risk** — 3. Observer is critical for authority audit; unreliability could allow escalations to slip or cause false alarms.
+
+6. **Top blocker** — Fix observer probe timeout so preflight reliably shows `[OK] observer`; likely requires adjusting cadence, increasing timeout, or optimizing observer cycle.
+7. **Verdict** — SHIP-WITH-FIXES. Observer integrity is load-bearing for autonomous-loop safety and must be dependable before wider rollout.
+
+### M15-DASHBOARD-UX
+
+_latency: 22038ms_
+
+## Score
+
+| Row | Score | Justification |
+|---|---|---|
+| **Correctness** | 2 | Dashboard is invoked exactly once (`harness dashboard-serve`) — zero visibility into what it renders, which APIs it hits, or whether it matches the operator's mental model. Correctness is unassessable. |
+| **Robustness** | 2 | WebSocket at 7878 with no mention of reconnect handling, backpressure, or stale-state detection. `harness today` shows live engine warnings but no indication the dashboard mirrors this state. |
+| **Operator-usability** | 3 | CLI surface (`today`, `doctor`, `engines-heal`) is well-designed for non-technical use. But the dashboard — the *visual* operator surface — has zero documented UX flow. Non-technical operator will likely ignore it. |
+| **Test discipline** | 1 | No dashboard API tests, no WebSocket integration tests, no schema contract tests for `/v2/*` endpoints. The 1576 tests cover engine/coord/audit logic but not the presentation layer. |
+| **Risk** | 4 | A cost panel the operator can't read is worse than none — it creates false confidence. If the dashboard silently drops WebSocket updates during an engine-dead event, the operator learns about it from CLI, not the thing they're staring at. |
+
+## Top blocker
+
+Ship a **one-page dashboard UX spec**: what each panel shows (status, cost, escalations, engine health), the /v2/* contract, and a screenshot/mockup. Without it, the dashboard is a code artifact nobody audits because nobody can articulate what it *should* do. This single doc would lift Correctness + Test discipline by ≥1 each.
+
+## Verdict
+
+**HOLD for dashboard scope.** The CLI operator surface is production-grade; the dashboard is an invisible, untested, undocumented black box running on a non-technical operator's machine. Ship the CLI; freeze dashboard until a reviewer can actually evaluate what it surfaces.
+
+### M16-TEST-QUALITY
+
+_latency: 32151ms_
+
+## Score
+
+**Correctness: 4/5** — Tests pass and mutations kill, but the `EngineHealth` schema bug *survived* 1544 tests undetected because `except Exception: continue` swallowed it. Behavioral correctness was asserted; error-path correctness was not.
+
+**Robustness: 3/5** — The schema-bug silent-failure pattern (`except Exception: continue`) is the smoking gun. It means tests *did* exercise quarantine writes, but Pydantic validation errors were swallowed before any assertion could fire. Happy-path robust: yes. Failure-path robust: demonstrably not.
+
+**Operator-usability: 4/5** — `harness today` and `harness preflight` are clean, plain-language surfaces. Irrelevant to my lens directly, but readable error messages reduce support load, which frees test-budget time.
+
+**Test discipline: 3/5** — 1576 passing is table stakes. The real question is **mutation kill rate coverage**: only 5 modules swept (W6), no W7/W8 re-sweep despite 8 new rows shipping. Three random modules I'd audit:
+
+| Module (random pick) | Rating | Why |
+|---|---|---|
+| `engines/heal.py` (W8-ENGINES-HEAL) | ⚠️ Weak | Quarantine writes passed through the broken `EngineHealth` schema — tests only passed because exceptions were swallowed. Behavioral? Mock-heavy with dict stubs vs Pydantic production paths. |
+| `preflight/fix.py` (W8-PREFLIGHT-FIX) | ✅ Decent | 3 fix functions + `FixOutcome` struct; L4 toast wiring tested. But `--skip-engines` path masks what actually fires in production. |
+| `cli/status_human.py` (W8-STATUS-HUMAN) | ⚠️ Untested edge | CLI output formatting rarely gets snapshot/diff tests; `--since-hours N` boundary likely only mocked. |
+
+**Risk: 3/5** — The `except Exception: continue` pattern is almost certainly duplicated elsewhere. Without a W7/W8 mutation sweep, I can't confirm kill rates held. Dead test code: the old `observer_tick` stub (removed in W5) and any W7-era quarantine tests that assert on the *pre-fix* `Literal["up","degraded","down"]` schema are now testing a dead contract — they pass vacuously.
+
+## Top blocker
+
+**Run a targeted mutation sweep on `engines/heal.py` and `preflight/fix.py` with the new `quarantined`/`recovering` states.** The fix landed, but the test that *would have caught the original bug* still doesn't exist — no test asserts that `engine_health.json` actually contains the expected status after `--fix`. Add one behavioral integration test that reads the file post-fix and asserts on the written value. This lifts test discipline from 3→4 and correctness from 4→5.
+
+## Verdict
+
+**SHIP-WITH-FIXES.** The silent-exception-into-schema-mismatch bug class is real and likely repeated; one integration test that asserts on *file contents* post-quarantine-write closes the gap that let 1544 tests miss a load-bearing bug for an entire wave.
+
+### M17-DOCS-ACCURACY
+
+_latency: 33745ms_
+
+## Score
+
+1. **Correctness** (3/5) — Docs claim "8/8 shipped" but the audit roll-up itself shows persistent STOPs on 2 rows; `harness today` shows 27 STOPs total — the closeout normalizes this as "non-determinism" rather than calling it what it is: the audit gate is unreliable.
+2. **Robustness** (3/5) — Schema bug fix is real and load-bearing, but `preflight --skip-engines` snapshot still shows `dead_engines` as `[!]` — if the fix works, this output contradicts the claim. The doc's "manual verification" assertion can't be reproduced from the snapshot.
+3. **Operator-usability** (4/5) — `harness today` is genuinely plain-language. Runbook exists. But 40+ CLI verbs in `--help` overwhelm a non-technical operator, and W10-PROFILE-AWARE-DEFAULTS confirms the profile default still isn't landed.
+4. **Test discipline** (3/5) — +32 tests for 8 shipped items is thin. Mutation kill rate wasn't re-run in W8 despite the closeout calling it out. Persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT suggest the audit infrastructure itself lacks regression coverage.
+5. **Risk** (3/5) — Governance risk: the doc frames audit non-determinism as "accepted per W6-PANEL precedent," effectively making the quality gate advisory-by-default. If the gate doesn't gate, what does?
+
+## Top blocker
+
+Resolve the persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT — either fix them or formally downgrade the audit gate from "required for done" to "advisory" in CLAUDE.md. Right now the doc simultaneously claims every row must pass audit *and* ships rows that never pass. That's a spec-vs-practice lie that will confuse every future session.
+
+## Verdict
+
+**SHIP-WITH-FIXES** — the operator-readiness Track B deliverables (preflight --fix, today, engines-heal, runbook) are genuinely useful and address real W8-panel blockers, but the closeout doc overstates certainty by packaging audit failures as "non-determinism" rather than unresolved gaps, and the audit gate itself needs a policy fix before it can be trusted as a quality control.
+
+### M18-STATUS-CSV-DISCIPLINE
+
+_latency: 30397ms_
+
+## Score
+
+| Criterion | Score | Justification |
+|---|---|---|
+| **Correctness** | 3 | STATUS.csv *tracks*, but 3 rows shipped with non-det audit verdicts violate the "every Wn gets a MiMo audit before done" policy — ship status contradicts policy. |
+| **Robustness** | 2 | No staleness detection; a row can sit `todo` forever or flip audit verdicts indefinitely with no automated flag or operator-visible warning. |
+| **Operator-usability** | 3 | Notes are long and commit-SHA-heavy; a non-technical operator skimming 309 rows gets signal-buried in noise. Header says "~280 rows" — file is 309. |
+| **Test discipline** | 2 | No test asserts STATUS.csv schema invariants (valid transitions, non-empty updated-date, audit-verdict consistency). `W9-ONCOMMIT-HOOK-CRLF` touches the CSV hook but doesn't validate semantic integrity. |
+| **Risk** | 3 | Tracker drift is silent — next wave inherits stale `shipped` rows whose audit verdicts are "Non-det (PASS once, STOP twice)". Confidence compounds, not resets. |
+
+## Top blocker
+
+**Enforce a hard rule: rows cannot be marked `shipped` unless their audit verdict is deterministic PASS (≥2 consecutive sweeps, same commit).** Add a `harness status lint` subcommand that checks: (a) every `shipped` row has an associated PASS verdict in its note or audit log, (b) no row's `Updated` timestamp is >72h stale for `in_progress` rows, (c) header row count matches actual row count. The 3 non-det rows (ENGINES-HEAL, STATUS-HUMAN, OPERATOR-RUNBOOK) should be re-classified `shipped-pending-audit` until the `--avg-of-N` gate (W9) lands and confirms them. This single lint would lift Correctness from 3→4 and Risk from 3→2.
+
+## Verdict
+
+**SHIP-WITH-FIXES** — The tracker *exists* and *renders*, but it's drifted into "commit every action, audit later" territory; the non-det shipped rows and the stale header count are live symptoms, not hypotheticals.
+
+### M19-WAVE-DISCIPLINE
+
+_latency: 25821ms_
+
+## Score — Wave Discipline Lens
+
+| Dimension | Score | Justification |
+|---|---|---|
+| **Correctness** | 3/5 | Loop is formally followed (plan→execute→audit→closeout) but audit verdicts are non-deterministic — 3 rows flip PASS↔STOP on identical code, making the gate decorative rather than load-bearing. |
+| **Robustness** | 2/5 | The `except Exception: continue` in quarantine writes shipped undetected until audit sweep 2; audit non-determinism means real bugs and noise are indistinguishable at gate time. |
+| **Operator-usability** | 4/5 | Runbook, `harness today`, `preflight --fix`, `engines-heal` — all genuine operator-readiness lifts. Persistent STOPs on these rows are auditor noise, not UX gaps. |
+| **Test discipline** | 3/5 | 1576 tests, +32 net. But zero tests caught the silent EngineHealth schema failure; the audit (not the test suite) found the load-bearing bug. |
+| **Risk** | 3/5 | Non-deterministic audit gates risk two failure modes: (a) real bugs get PASS-by-luck and ship; (b) clean code gets STOP-by-luck and blocks. Both compound across waves. |
+
+## Top Blocker
+
+**Ship W9-AUDIT-NONDETERMINISM-AVG (`--avg-of-N`) and re-run the 3 non-det rows as the validation case.** Until the audit gate produces stable verdicts on unchanged code, the plan→execute→audit→closeout loop has a broken leg — operators can't trust the audit as a shipping decision.
+
+## Verdict
+
+**SHIP-WITH-FIXES.** The wave-discipline loop is structurally sound — all 8 rows shipped, closeout doc is thorough, follow-through commits address real bugs — but the audit gate's non-determinism degrades it from a reliable quality gate to a coin flip, which will erode operator trust if left unresolved into W9+.
+
+### M20-RISK-PROFILE
+
+_latency: 38180ms_
+
+## Score
+1. **Correctness** 3 — Core ops work, but 2 persistent audit STOPs and 3 non-det rows indicate spec-misalignment in the detection/audit layer.
+2. **Robustness** 3 — Schema bug fix was load-bearing and good. However, MiMo audit non-determinism is a major fragility; the system's quality gate is probabilistic.
+3. **Operator-usability** 4 — Runbook, `preflight --fix`, and `harness today` are solid wins. The persistent STOPs on the runbook and status human (non-det) suggest residual gaps.
+4. **Test discipline** 4 — +32 tests, mutation canary running. The audit non-determinism itself is a testing problem that W9 aims to address.
+5. **Risk** 4 — **Audit gate unreliability** is the top risk. 3 of 8 W8 rows have non-deterministic PASS/STOP verdicts with no code change, making the gate untrustworthy for holding the line. This directly threatens correctness.
+
+**Top blocker**: Ship the `--avg-of-N` audit flag (W9-AUDIT-NONDETERMINISM-AVG) and use it as the default gate. Until the audit verdict is stable, the harness cannot be trusted to catch real regressions.
+
+**Verdict**: SHIP-WITH-FIXES. The operator-readiness foundation is valuable, but the audit layer's non-determinism is a critical weakness that must be stabilized before claiming production readiness.
