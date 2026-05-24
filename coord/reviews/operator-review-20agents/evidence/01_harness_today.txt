@@ -1,0 +1,50 @@
+============================================================
+  Today — what happened in the last 24 hours
+============================================================
+
+## What shipped
+
+  W11-SDK-E2E-LIVE-ENGINE-PROOF — First real-engine SDK E2E test + auto-bootstrap adapter fix + AGENT_QUICKSTART.md
+  W8-STATUS-HUMAN — harness today verb — plain-language daily pulse
+  W8-ENGINES-HEAL — harness engines-heal one-command engine recovery
+  2026-05-24T001152Z — Dispatch 2026-05-24T001152Z
+  2026-05-24T011152Z — Dispatch 2026-05-24T011152Z
+  2026-05-24T021152Z — Dispatch 2026-05-24T021152Z
+  2026-05-24T031223Z — Dispatch 2026-05-24T031223Z
+  W9-AUDIT-ANCHOR-MULTI-COMMIT — Audit script accepts commit range not single anchor
+  W9-AUDIT-NONDETERMINISM-AVG — Audit script --avg-of-N flag for non-determinism
+  W9-PREFLIGHT-FIX-NOSTASH — preflight --fix should not silently stash work
+  W9-READINESS-PANEL-RERUN — Re-run 10-reviewer readiness panel post-W8
+  W9-MUTATION-CANARY — 3-mutant rolling spot-check (deferred from W8 Track A)
+  ... and 53 more
+
+## Audit results (recent reviews)
+
+  32 PASS, 25 STOP, total 57 in this window
+    PASS 0.85  W8-PREFLIGHT-FIX
+    STOP 0.40  W8-STOP-HOOK
+    STOP 0.60  W8-STATUS-HUMAN
+    STOP 0.58  W8-OPERATOR-RUNBOOK
+    PASS 0.70  W7-SPEC-DRIFT
+    STOP 0.25  W8-AUDIT-PROMPT
+    ... and 51 more
+
+## L5 escalations (last 24h)
+
+  None — no L5 escalations in the last 24h.
+
+## Current blockers
+
+  [X] pytest_cache: last run had failures (lastfailed has 8 tokens)
+  [!] git_clean: 3 untracked files
+
+## Suggested next actions
+
+  1. Run `harness preflight --fix --dry-run` to preview the auto-fix, then drop --dry-run.
+  2. `harness dashboard-serve` if you want a visual.  Closes when you Ctrl-C.
+  3. If anything looks wrong, run `harness panic-dump` and ping engineering.
+
+============================================================
+  For the full daily playbook: docs/OPERATOR_RUNBOOK.md
+============================================================
+

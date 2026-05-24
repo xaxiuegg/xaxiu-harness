@@ -1,0 +1,20 @@
+8bf5ba9 W11-SDK-E2E-LIVE-ENGINE-PROOF: closes 'never field-tested' gap
+dd4ca93 SESSION-2026-05-24-CLOSEOUT: STATUS.csv follow-up for closeout commit
+f4c64b3 W11 closeout — wave-11-closeout.md narrative + audit-pattern writeup
+8d7043c W5-E: E2E success-path coord pipeline proof — Wave 5 retired
+4da95ee W11-PYTHON-SDK-API-IMPL: dispatch + .full() real impl — Wave 11 COMPLETE
+7085460 W11-COST-VISIBILITY-WIDGET: 'this session cost $X' surface for operator
+569ee40 W11-L5-OUTPUT-CONTRACT + watchdog escalation chain + latency audit fixes
+549a30c W11-PER-CHECK-LATENCY-OBSERVABILITY: rolling p50/p95/p99 of preflight checks
+600b026 W11-OBSERVER-WATCHDOG-RECOVERY + W11-CROSS-PLATFORM-OBSERVER audit fixes
+2dad19e W11-CROSS-PLATFORM-OBSERVER: cron alternative to Windows Task Scheduler
+72ceef0 W11-AGENT-TELEMETRY: STATUS.csv follow-up — mark shipped (b7vqlronn)
+3ae5979 W11-AGENT-TELEMETRY: STATUS.csv follow-up (Edit race)
+2f18966 W11-AGENT-TELEMETRY + 20-agent audit panel infrastructure
+760b612 W11-RETRIEVE-API: harness.retrieve(id, scope) — Wave 11-B complete (4/4)
+ceb1c10 W11-CONTEXT-FRUGAL-RETURN-LAZY: dispatcher writes payload to cache; content_ref set
+dfff974 W11-DISPATCH-CACHE: content+adapter-hash dispatch cache module
+46c920b W11-CONTEXT-FRUGAL-RETURN-SCHEMA: STATUS.csv follow-up (a8c3489)
+a8c3489 W11-CONTEXT-FRUGAL-RETURN-SCHEMA: new DispatchResult fields + feature flag
+91d277f W11-PYTHON-SDK-API-STUBS: frozen contract; agent-facing import surface
+9ad72d2 W11-DPAPI-CROSS-PLATFORM: .env-first secrets; agents work on Linux/Mac

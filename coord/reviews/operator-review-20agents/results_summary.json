@@ -1,0 +1,27 @@
+[
+  {
+    "persona_id": "M05-test-use-blockers",
+    "engine": "mimo",
+    "ok": true,
+    "deliverable": "D:\\xaxiu-harness-standalone\\coord\\reviews\\operator-review-20agents\\responses\\M05-test-use-blockers_response.md",
+    "elapsed_s": 53.84228019999864,
+    "tokens_in": 69579,
+    "tokens_out": 1800
+  },
+  {
+    "persona_id": "M06-wave-12-priorities",
+    "engine": "mimo",
+    "ok": true,
+    "deliverable": "D:\\xaxiu-harness-standalone\\coord\\reviews\\operator-review-20agents\\responses\\M06-wave-12-priorities_response.md",
+    "elapsed_s": 56.44060349999927,
+    "tokens_in": 69595,
+    "tokens_out": 1800
+  },
+  {
+    "persona_id": "K07-cost-truthfulness",
+    "engine": "kimi",
+    "ok": false,
+    "error": null,
+    "elapsed_s": 248.36058989999583
+  }
+]

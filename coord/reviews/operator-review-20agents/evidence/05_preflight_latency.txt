@@ -1,0 +1,15 @@
+Preflight latency (all-time) — 187 samples
+
+  check                            n      p50      p95      max
+  ---------------------------- -----  -------  -------  -------
+  loops                           34   4700ms   8360ms   8723ms
+  observer                        54   4331ms   5967ms   6701ms
+  git_clean                       44    888ms   3972ms   4100ms
+  engine:kimi                      8   2000ms   2000ms   2000ms
+  dead_engines                    29     19ms     21ms     22ms
+  dpapi                           10      8ms     10ms     10ms
+  x                                5     10ms     10ms     10ms
+  pytest_cache                     2      1ms      1ms      1ms
+  status_csv                       1      1ms      1ms      1ms
+
+Overall: p50=789ms  p95=7103ms  p99=8337ms  max=8723ms
