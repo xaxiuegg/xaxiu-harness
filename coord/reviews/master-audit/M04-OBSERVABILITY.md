@@ -1,17 +1,15 @@
-<!-- name=M04-OBSERVABILITY latency_ms=21813 error='' -->
+<!-- name=M04-OBSERVABILITY latency_ms=33174 error='' -->
 
 ## Score
 
-1. **Correctness**: 3/5 — Core status surfaces (STATUS.csv, CLI verbs) exist, but critical commands (`preflight`, `today`) timeout in the provided capture, breaking immediate operator observability.
-2. **Robustness**: 2/5 — The 30s timeout on `preflight` and `today` renders them unusable under the snapshot conditions, a severe observability gap.
-3. **Operator-usability**: 1/5 — The non-technical operator's primary windows into system state (`status --human`, `today`) are non-functional in the capture, forcing manual file digging.
-4. **Test discipline**: 2/5 — 1576 tests pass, but the test suite did not catch the live-timeout of two core observability commands, indicating an integration or environment gap.
-5. **Risk**: 3/5 — Without working daily pulse or preflight, the operator cannot detect stalls, cost spikes, or engine health issues in real-time, risking prolonged silent failures.
+1. **Correctness** — 3/5. Surfaces reflect state but `harness today` truncates after 110 items; operator can't see the full picture without digging into STATUS.csv.
+2. **Robustness** — 3/5. Observer probe timeout shows one retry warning; preflight shows fixable warnings. No proactive alerting when surfaces degrade.
+3. **Operator-usability** — 2/5. `harness today` is friendly, but default profile is technical, STATUS.csv is raw 309-row CSV, and dashboard requires manual start/stop. Non-technical operator must switch contexts.
+4. **Test discipline** — 3/5. Observer has tests; status tracker is tested. Mutation testing covers dispatch and integration but observability surfaces not prioritized in mutation sweeps.
+5. **Risk** — 2/5. Scattered surfaces mean operator might miss a quiet failure until it escalates. Not a ship-blocker but friction.
 
-## Top Blocker
-
-**Diagnose and fix the command timeouts.** The harness's observability promise (`harness today`, `harness preflight`) is currently hollow in the captured environment. Making these commands reliably complete in <30s is the single change that would lift operator-usability and robustness scores by ≥1.
+## Top blocker
+Set `--profile non_technical` as the default so `harness today`, preflight, and status automatically show the human-friendly format without requiring the operator to remember a flag.
 
 ## Verdict
-
-**SHIP-WITH-FIXES.** The observability design is sound, but the captured execution failures make it non-functional for the operator today; the timeout root cause must be resolved before handoff.
+SHIP-WITH-FIXES — Observability is functional but the operator has to toggle between friendly and technical views; a default profile flip and a persistent dashboard would cut the digging in half.

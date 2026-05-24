@@ -1,23 +1,13 @@
-<!-- name=K16-SPEC-CULTURE latency_ms=49690 error='' -->
+<!-- name=K16-SPEC-CULTURE latency_ms=71940 error='' -->
 
 ## Score
 
-1. **Correctness — 3**  
-   The Wave 8 closeout spec matches the code because it was authored *after* shipping (dated 2026-05-24, yet commits `9aea866` and `3dc8593` landed earlier). It is a chronicle, not a blueprint.
+1. **Correctness — 2**: W8-STOP-HOOK’s spec claimed exclusions absent until follow-through commit `7081d93`, and the `EngineHealth.status` Literal omitted `quarantined`/`recovering` that production code was already writing.
+2. **Robustness — 3**: Failure modes (schema rejection, hook noise) are patched in follow-throughs rather than anticipated in the original spec.
+3. **Operator-usability — 3**: Runbook and `harness today` exist, but DPAPI seeding is invisible (W10 todo) and W8-OPERATOR-RUNBOOK criteria are soft enough to flip PASS/STOP.
+4. **Test discipline — 4**: 1,576 tests catch code regressions, yet persistent STOPs on spec-audit rows prove acceptance criteria aren’t crisp enough to be spec-driven or automatable.
+5. **Risk — 4**: W9’s 14-row backlog will amplify spec debt if implementation continues to outpace `spec/*.md`.
 
-2. **Robustness — 2**  
-   Retroactive specs offer no design-time guardrails. The `EngineHealth` schema bug silently failed every quarantine, and `preflight --fix` auto-stashed work—both surprises a spec-first review could have prevented.
+**Top blocker**: Gate every W9 row on a frozen `spec/*.md` that passes `harness spec-verify` before code is written; retroactively patch W8-STOP-HOOK and W8-PREFLIGHT-FIX specs to match commit `7081d93`.
 
-3. **Operator-usability — 3**  
-   The runbook and `harness today` are usable, but the non-technical operator cannot read an up-front spec to anticipate behavior or withhold authority before code ships.
-
-4. **Test discipline — 2**  
-   1,576 tests pass, yet there is no deterministic spec-to-code gate. MiMo audits are non-deterministic, the mutation-canary is deferred to W9, and the persistent STOPs on `W8-STOP-HOOK` and `W8-AUDIT-PROMPT` show spec compliance is verified erratically.
-
-5. **Risk — 4**  
-   Wave 9 is already queueing work (`W9-PREFLIGHT-FIX-NOSTASH`, `W9-MUTATION-CANARY`). Without a spec-first mandate, the next wave will repeat emergent development and operator surprise.
-
-**Top blocker:**  
-Freeze a `spec/wave-9-plan.md` and require operator sign-off *before* the first W9 implementation commit. Specs must lead; closeouts must not substitute for design review.
-
-**Verdict:** SHIP-WITH-FIXES. W8 delivers operator-ready functionality, but the spec culture is backward-looking. If Wave 9 is not spec-led, operational trust and auditability will degrade.
+**Verdict**: SHIP-WITH-FIXES — Spec culture is retroactive-edit, not lead; freeze specs pre-implementation or spec debt will outpace test coverage.

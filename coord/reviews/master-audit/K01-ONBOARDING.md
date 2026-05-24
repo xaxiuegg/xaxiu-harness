@@ -1,12 +1,11 @@
-<!-- name=K01-ONBOARDING latency_ms=49538 error='' -->
+<!-- name=K01-ONBOARDING latency_ms=135941 error='' -->
 
 ## Score
-1. **Correctness**: 2 — W8 shipped operator readiness, yet `preflight --skip-engines` and `today` both timeout on the live Windows box; the runbook cannot compensate for a hung binary.
-2. **Robustness**: 1 — Fresh clone → run preflight → 30 s deadlock with no fallback or diagnostic. The queued silent-stash bug (W9-PREFLIGHT-FIX-NOSTASH) adds surprise data loss on recovery.
-3. **Operator-usability**: 1 — A non-technical user must choose `--mode`, `--profile`, and parse 30+ verbs before validation; then step one hangs. Evidence shows ~100 % first-attempt failure rate.
-4. **Test discipline**: 2 — 1 576 tests miss the Windows first-run integration hang and the CRLF hook false-positive (W9-ONCOMMIT-HOOK-CRLF).
-5. **Risk**: 5 — Complete onboarding blockage for the target operator profile; a clear ship-blocker.
+1. **Correctness** — 3/5. Preflight returns 0 fails but surfaces three unrelated warnings; a “successful” run still leaves the fresh clone in an unusable state (unregistered loops, dead engines, observer timeout).
+2. **Robustness** — 3/5. `--fix` and `engines-heal` exist, yet the onboarding path scatters recovery across disparate commands rather than one resilient funnel.
+3. **Operator-usability** — 2/5. A non-technical operator must independently decide to ignore warnings, run `--fix`, run `loop start`, or debug an observer timeout before the first healthy tick; DPAPI seeding is invisible and `--profile non_technical` is not the default.
+4. **Test discipline** — 2/5. 1,576 unit tests pass, but the golden-path “clone → first green preflight” integration for a non-technical operator is unguarded.
+5. **Risk** — 4/5. High probability the operator misses loop registration or DPAPI setup, misinterprets warnings as errors, and abandons or misconfigures the harness.
 
-## Plus
-6. **Top blocker**: A `harness doctor --first-run` fast-path that skips DPAPI/git-depth checks known to hang under Windows Store Python, surfaces dirty-state warnings without stashing, and confirms the CLI is responsive before any comprehensive gate runs.
-7. **Verdict**: HOLD. No fresh operator can complete clone-to-first-green-preflight today without technical rescue.
+6. **Top blocker** — Wire `harness install` (already labeled a “first-run wizard”) into `preflight` so a fresh clone detects an uninitialized state and routes the operator through one idempotent command that sets the non-technical profile, registers the loop task, seeds DPAPI, and quarantines dead engines.
+7. **Verdict** — SHIP-WITH-FIXES. The recovery primitives exist, but the hand-off from clone to first trustworthy preflight still demands debugging rather than reading.

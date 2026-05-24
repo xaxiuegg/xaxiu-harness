@@ -1,11 +1,11 @@
-<!-- name=K08-PERFORMANCE latency_ms=54405 error='' -->
+<!-- name=K08-PERFORMANCE latency_ms=58591 error='' -->
 
 ## Score
-1. **Correctness** — 2/5. Preflight --skip-engines and harness today both time out at 30s, missing the ~5s performance spec by 6×.
-2. **Robustness** — 2/5. No graceful degradation when core commands hit wall-clock timeouts; operator is left without readiness signal or daily pulse.
-3. **Operator-usability** — 2/5. A non-technical operator cannot reliably run basic status or preflight commands; timeouts negate W8 usability investments.
-4. **Test discipline** — 1/5. Zero timeout-budget or performance-regression tests; the 30s preflight regression shipped undetected across 1576 tests.
-5. **Risk** — 4/5. Basic operator workflows are functionally unreachable under timeout; perceived flakiness threatens operator trust and adoption.
+1. **Correctness** — 4/5: Functionally accurate, but preflight `--skip-engines` consistently breaches the ~5 s expectation by >25 % with no documented variance.
+2. **Robustness** — 3/5: Observer probe timeout still blocks the gate for 5.8 s instead of degrading gracefully; loops check is similarly synchronous and heavy.
+3. **Operator-usability** — 3/5: A non-technical operator running frequent preflights faces 6+ second stalls with no progress feedback or "what's slow" breakdown beyond raw ms.
+4. **Test discipline** — 2/5: Zero automated latency/SLO regression tests for preflight, dispatch, or audit gate; 1,576 tests cover behavior but not performance budgets.
+5. **Risk** — 3/5: Serial 60–90 s audit per row plus preflight SLO erosion creates a hard throughput ceiling of roughly one small wave per session.
 
-6. **Top blocker** — A `tests/test_perf_budget.py` enforcing hard CLI timeouts (preflight --skip-engines <8s, today <10s) that fails CI, plus immediate cProfile of the preflight hot path to locate the synchronous scan that --skip-engines fails to skip.
-7. **Verdict** — SHIP-WITH-FIXES. W8 operator-readiness features are structurally complete but operationally inaccessible because core CLI commands breach the 30s timeout wall; unblocking preflight latency is prerequisite to any operator handoff.
+6. **Top blocker** — Add latency telemetry + a hard 5 s enforced budget to `preflight --skip-engines` (cache/background the loops and observer probes, surfacing slow checks asynchronously).
+7. **Verdict** — SHIP-WITH-FIXES. The operator-readiness foundation is solid, but the preflight latency regression and missing dispatch/audit latency observability must be fixed before W9 scale.

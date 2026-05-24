@@ -1,13 +1,19 @@
-<!-- name=M19-WAVE-DISCIPLINE latency_ms=16895 error='' -->
+<!-- name=M19-WAVE-DISCIPLINE latency_ms=25821 error='' -->
 
-## Score
+## Score — Wave Discipline Lens
 
-1. **Correctness** — 5. All 8 W8 rows shipped as specified; preflight --fix, engines heal, and status --human work as documented.
-2. **Robustness** — 4. Schema bug fixed; but audit non-determinism (3 rows flipping PASS↔STOP with no code change) remains a reliability gap.
-3. **Operator-usability** — 5. Operator runbook, `harness today`, and `engines heal` directly address the 0/10 readiness panel feedback.
-4. **Test discipline** — 4. 1576 tests pass; but the persistent-STOP rows (W8-STOP-HOOK, W8-AUDIT-PROMPT) and audit non-determinism indicate test confidence isn't absolute.
-5. **Risk** — 3. Main risk is audit non-determinism masking real regressions; mitigated by planned mutation-canary and averaging.
+| Dimension | Score | Justification |
+|---|---|---|
+| **Correctness** | 3/5 | Loop is formally followed (plan→execute→audit→closeout) but audit verdicts are non-deterministic — 3 rows flip PASS↔STOP on identical code, making the gate decorative rather than load-bearing. |
+| **Robustness** | 2/5 | The `except Exception: continue` in quarantine writes shipped undetected until audit sweep 2; audit non-determinism means real bugs and noise are indistinguishable at gate time. |
+| **Operator-usability** | 4/5 | Runbook, `harness today`, `preflight --fix`, `engines-heal` — all genuine operator-readiness lifts. Persistent STOPs on these rows are auditor noise, not UX gaps. |
+| **Test discipline** | 3/5 | 1576 tests, +32 net. But zero tests caught the silent EngineHealth schema failure; the audit (not the test suite) found the load-bearing bug. |
+| **Risk** | 3/5 | Non-deterministic audit gates risk two failure modes: (a) real bugs get PASS-by-luck and ship; (b) clean code gets STOP-by-luck and blocks. Both compound across waves. |
 
-**Top blocker**: Implement `W9-AUDIT-NONDETERMINISM-AVG` to run audits in triplicate and average scores, lifting confidence in the audit gate's determinism.
+## Top Blocker
 
-**Verdict**: SHIP-WITH-FIXES. The wave discipline loop held across W6/W7/W8, but audit non-determinism is the one process risk that needs a concrete fix before scaling.
+**Ship W9-AUDIT-NONDETERMINISM-AVG (`--avg-of-N`) and re-run the 3 non-det rows as the validation case.** Until the audit gate produces stable verdicts on unchanged code, the plan→execute→audit→closeout loop has a broken leg — operators can't trust the audit as a shipping decision.
+
+## Verdict
+
+**SHIP-WITH-FIXES.** The wave-discipline loop is structurally sound — all 8 rows shipped, closeout doc is thorough, follow-through commits address real bugs — but the audit gate's non-determinism degrades it from a reliable quality gate to a coin flip, which will erode operator trust if left unresolved into W9+.

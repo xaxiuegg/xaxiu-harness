@@ -934,15 +934,38 @@ def status_update(
 @click.option("--filter", "filter_status", default=None, help="Filter by status value.")
 @click.option("--category", default=None, help="Filter by category.")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json", "csv"]), default="pretty")
-def status_list(filter_status: Optional[str], category: Optional[str], fmt: str) -> None:
-    """List rows (with optional filters)."""
+@click.option("--recent", type=int, default=None,
+              help="W10-STATUS-CSV-OVERWHELM: show only the N most recently "
+                   "updated rows (sorted by Updated date desc).  Defaults to "
+                   "no truncation for backwards compat with CI scripts.")
+def status_list(filter_status: Optional[str], category: Optional[str],
+                fmt: str, recent: Optional[int]) -> None:
+    """List rows (with optional filters).
+
+    Use ``--recent 20`` to show only the 20 most recently updated rows
+    (and a footer naming how many older rows are in coord/STATUS.csv).
+    The full 296-row CSV is impossible for a non-technical operator
+    to scan; --recent surfaces what matters now without dropping history.
+    """
     from harness.status import read_status
 
-    rows = read_status(_status_csv_path())
+    all_rows = read_status(_status_csv_path())
+    rows = list(all_rows)
     if filter_status:
         rows = [r for r in rows if r.status.value == filter_status]
     if category:
         rows = [r for r in rows if r.category == category]
+
+    # W10-STATUS-CSV-OVERWHELM: --recent truncation, only for pretty
+    # output.  JSON/CSV consumers (CI) keep the full set.
+    truncated_off: int = 0
+    if recent is not None and recent >= 0 and fmt == "pretty":
+        # Sort by Updated date descending (string ISO compares fine)
+        rows = sorted(rows, key=lambda r: r.updated or "", reverse=True)
+        if recent < len(rows):
+            truncated_off = len(rows) - recent
+            rows = rows[:recent]
+
     if fmt == "json":
         click.echo(json.dumps([r.model_dump(mode="json") for r in rows], indent=2))
         return
@@ -962,6 +985,9 @@ def status_list(filter_status: Optional[str], category: Optional[str], fmt: str)
         return
     for r in rows:
         click.echo(f"{r.id:24}  {r.status.value:12}  {r.title}")
+    if truncated_off > 0:
+        click.echo(f"\n  ... and {truncated_off} older row(s) in "
+                   f"coord/STATUS.csv (run without --recent to see all)")
 
 
 @status.command(name="summary")
@@ -1922,8 +1948,15 @@ def preflight_cmd(fmt: str, skip_engines: bool,
                 f"  {glyph.get(r.severity, '?')} "
                 f"{r.name:<20} {r.message}  ({r.duration_ms}ms)"
             )
-            if r.fix:
-                click.echo(f"          fix: {r.fix}")
+            # W10-PREFLIGHT-REMEDIATION-CARDS 2026-05-25: print fix hints
+            # ONLY for warn/fail checks (ok checks have nothing to fix)
+            # and use a visually distinct "→ Run to fix:" callout instead
+            # of a buried "fix:" line.  Operators scanning a long preflight
+            # output now immediately see the actionable command per
+            # warning, not just an indented hint that reads as part of
+            # the check message.
+            if r.fix and r.severity != "ok":
+                click.echo(f"     → Run to fix:  {r.fix}")
         click.echo("=" * 60)
         ok_count = sum(1 for r in results if r.severity == "ok")
         warn_count = sum(1 for r in results if r.severity == "warn")
@@ -2226,6 +2259,48 @@ def daily_cmd(full: bool, since_hours: int) -> None:
                         for (lbl, _, _), rc in zip(phases, exit_codes))
         )
     sys.exit(worst)
+
+
+@cli.group(name="profile")
+def profile_group() -> None:
+    """W10-PROFILE-AWARE-DEFAULTS: persisted operator profile.
+
+    Saves the operator's choice of `technical` or `non_technical`
+    profile to ~/.harness/profile.json so commands that take
+    --profile fall back to the saved value when the flag isn't
+    passed.  Run `harness profile set non_technical` once instead of
+    typing --profile every invocation.
+    """
+
+
+@profile_group.command(name="set")
+@click.argument("profile_name",
+                type=click.Choice(["technical", "non_technical"]))
+def profile_set(profile_name: str) -> None:
+    """Save PROFILE_NAME as the default operator profile."""
+    from harness.operator.saved_profile import save_profile, default_profile_path
+    record = save_profile(profile_name)
+    target = default_profile_path()
+    click.echo(f"[OK] saved profile={record.profile} -> {target}")
+    click.echo(
+        f"     Commands that take --profile will now use "
+        f"{record.profile!r} when the flag isn't passed."
+    )
+
+
+@profile_group.command(name="show")
+def profile_show() -> None:
+    """Show the currently saved profile (or 'unset' if none)."""
+    from harness.operator.saved_profile import load_profile, default_profile_path
+    saved = load_profile()
+    target = default_profile_path()
+    if saved is None:
+        click.echo(f"[!] no saved profile at {target}")
+        click.echo("    Commands fall back to their built-in defaults.")
+        click.echo("    Set one via: `harness profile set non_technical`")
+        sys.exit(1)
+    click.echo(f"[OK] profile={saved.profile}  (saved {saved.updated_at})")
+    click.echo(f"     path: {target}")
 
 
 @cli.command(name="panic-dump")

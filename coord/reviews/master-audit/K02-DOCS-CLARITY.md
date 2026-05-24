@@ -1,24 +1,24 @@
-<!-- name=K02-DOCS-CLARITY latency_ms=63680 error='' -->
+<!-- name=K02-DOCS-CLARITY latency_ms=59650 error='' -->
 
 ## Score
 
-1. **Correctness — 2**  
-   Docs claim operator readiness, yet CLI commands timeout and MiMo returned persistent STOP on W8-STOP-HOOK and W8-AUDIT-PROMPT.
+1. **Correctness — 3**  
+   CLI help and `harness today` are accurate, but the runbook omits DPAPI seeding paths and stop-hook behavior still confuses auditors, so docs do not fully match system reality.
 
-2. **Robustness — 2**  
-   No visible operator-facing docs cover failure modes (timeouts, stash recovery, CRLF hook bug), so a non-technical user has no escape hatch.
+2. **Robustness — 3**  
+   Recovery flows (`preflight --fix`, `engines-heal`) are documented, yet the runbook lacks guidance on DPAPI/key-loss failure modes and hook noise, leaving operators unprepared for common faults.
 
 3. **Operator-usability — 3**  
-   Runbook and human-friendly commands exist, but the operator cannot trust them while undocumented timeout and data-loss paths remain.
+   Plain-language CLI output is strong, but a non-technical operator still cannot onboard cold: the runbook hides where secrets come from and `--profile non_technical` is not the default.
 
-4. **Test discipline — 2**  
-   Doc quality hinges on non-deterministic MiMo audits; no deterministic doc-regression tests (e.g., runbook walkthrough scripts) are evident.
+4. **Test discipline — 1**  
+   No automated regression tests for README, runbook, or spec clarity; the only guard is the non-deterministic MiMo audit, which is process, not test coverage.
 
 5. **Risk — 4**  
-   Unverified runbook + silent stash behavior + CLI timeouts create a high chance of operator confusion or data loss within 30 days.
+   A docs gap that blocks a non-technical operator from rotating keys or understanding hook noise is a near-term ship-blocker for unsupervised operation.
 
 6. **Top blocker**  
-   OPERATOR_RUNBOOK.md must be manually validated end-to-end and include a "Known Issues & Recovery" section for the stash, timeout, and CRLF hook bugs.
+   Add the DPAPI seeding section and `--profile non_technical` default instructions to `docs/OPERATOR_RUNBOOK.md` (the W10 todo already flagged) so setup and recovery are fully visible.
 
-7. **Verdict**  
-   SHIP-WITH-FIXES — operator-readiness scaffolding exists, but documented behavior does not yet match reality closely enough for safe handoff.
+7. **Verdict — SHIP-WITH-FIXES**  
+   Operator-facing surfaces are 80 % there, but the remaining 20 % are exactly the gaps that strand a non-technical user on first contact.

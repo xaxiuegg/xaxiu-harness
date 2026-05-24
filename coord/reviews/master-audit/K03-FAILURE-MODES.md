@@ -1,20 +1,12 @@
-<!-- name=K03-FAILURE-MODES latency_ms=120024 error='' -->
+<!-- name=K03-FAILURE-MODES latency_ms=123251 error='' -->
 
 ## Score
-1. **Correctness — 3**: Spec implemented, but silent stash and 30 s Windows timeouts are operator-safety gaps.
-2. **Robustness — 2**: Timeouts, CRLF hook false-positives, and historically swallowed exceptions let failures cascade.
-3. **Operator-usability — 3**: Runbook exists, yet daily commands timeout and `--fix` destroys uncommitted work without warning.
-4. **Test discipline — 3**: 1 576 tests cover logic, but Windows CLI timeouts and Bash hook CRLF behavior lack coverage.
-5. **Risk — 4**: First-week operator faces data loss or morning blindness; blast radius is immediate productivity halt.
+1. **Correctness** — 3 — Core fix/heal flows work after the schema patch, but persistent STOPs on hook noise and audit prompt mean spec edges still fail MiMo validation.
+2. **Robustness** — 2 — Bare `except Exception: continue` in quarantine paths silently swallowed a Pydantic schema violation, a catastrophic failure-mode pattern that will recur under engine churn.
+3. **Operator-usability** — 3 — Runbook and plain-language status exist, yet a non-technical operator faces immediate warning fatigue from dead-engine alerts, observer timeouts, and unregistered loops.
+4. **Test discipline** — 3 — 1576 tests pass and mutation gate is green, but the schema/quarantine mismatch between dict stubs and Pydantic production reveals a critical cross-form integration hole.
+5. **Risk** — 4 — Silent swallowing + non-technical operator + daily engine death/cooldown churn creates high-probability, unrecoverable first-week failure modes with ship-blocking blast radius.
 
-**Failure modes (freq×impact, sorted):**
-1. **Preflight/`today` 30 s timeout** — daily blindness; retry/skip engines; 5–10 min.
-2. **`preflight --fix` silent stash** — lost uncommitted changes; `git stash pop`; 5–30 min.
-3. **CRLF commit-hook false-pos** — commits blocked; bypass hook; 5–15 min.
-4. **Dead-engine quarantine loop** — zero dispatch; `engines-heal`; 10–20 min.
-5. **MiMo audit flip** — confidence erosion; accept-as-shipped precedent; 15–45 min.
-6. **Verb-tree overload** — wrong destructive command; runbook + reverse; 10–30 min.
-7. **Secret/DPAPI expiry** — total outage; re-seed keys; 10–30 min.
+6. **Top blocker** — Land a single hardening PR that replaces every bare `except Exception: continue` in preflight/heal paths with typed error surfacing and adds a Pydantic-native integration test for `engine_health` quarantine writes.
 
-6. **Top blocker**: Ship W9-PREFLIGHT-FIX-NOSTASH (replace auto-stash with a loud confirmation prompt).
-7. **Verdict**: SHIP-WITH-FIXES — W9 queued patches are small, localized, and required for first-week operator survival.
+7. **Verdict** — SHIP-WITH-FIXES — Operator scaffolding is in place, but silent failure modes and persistent audit/hook STOPs guarantee a non-technical operator hits an unrecoverable fault within days.

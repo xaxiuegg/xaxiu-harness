@@ -1,13 +1,12 @@
-<!-- name=K11-AUDIT-NONDETERMINISM latency_ms=63000 error='' -->
+<!-- name=K11-AUDIT-NONDETERMINISM latency_ms=112933 error='' -->
 
 ## Score
 
-1. **Correctness — 3** Code appears correct, but the verification loop is a random variable; you cannot ship confidence when the auditor flips on identical bits.
-2. **Robustness — 2** Silent quarantine failures and an accepted “ignore persistent STOPs” precedent mean the safety net catches nothing by design.
-3. **Operator-usability — 3** Track B CLI is excellent, yet asking a non-technical operator to parse MiMo mood swings turns quality assurance into astrology.
-4. **Test discipline — 3** 1576 tests and cleared mutation gates are solid, but the deferred canary is the only deterministic guardrail and it is not running.
-5. **Risk — 4** A real regression will ride the W6-PANEL precedent through the gate because STOPs are now treated as noise until proven otherwise.
+1. **Correctness** — 3: Identical commits yield PASS↔STOP flips; the gate cannot reliably separate correct code from incorrect.
+2. **Robustness** — 3: The harness tolerates runtime faults, but the audit layer fails under model jitter, producing fragile verdicts.
+3. **Operator-usability** — 2: A non-technical operator sees binary PASS/STOP in `harness today` that swing 0.40→0.85→0.40 with no code change; the signal is unusable.
+4. **Test discipline** — 4: Strong unit and mutation coverage catch code regressions, yet no test guards against audit-prompt variance.
+5. **Risk** — 4: Alert fatigue from noise will desensitize the operator to real blockers or waste cycles chasing phantom gaps.
 
-**Top blocker:** Deploy a 3-sweep majority-rule auditor (`W9-AUDIT-NONDETERMINISM-AVG`) with multi-commit diff anchors (`W9-AUDIT-ANCHOR-MULTI-COMMIT`); stop treating a single MiMo run as a binary gate.
-
-**Verdict:** SHIP-WITH-FIXES — the harness is functional but its quality gate has worse SNR than a coin flip; calibrate it before W9 planning begins.
+6. **Top blocker** — Ship `W9-AUDIT-NONDETERMINISM-AVG` as `--avg-of-N=3` with variance-aware labels (HARD PASS / HARD STOP / REVIEW) in `harness today`.
+7. **Verdict** — SHIP-WITH-FIXES: The harness is operationally sound, but the audit gate's noise floor currently exceeds its signal, so it must be calibrated with averaged sweeps before PASS/STOP labels are actionable.

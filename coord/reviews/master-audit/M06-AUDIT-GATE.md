@@ -1,21 +1,22 @@
-<!-- name=M06-AUDIT-GATE latency_ms=61596 error='' -->
+<!-- name=M06-AUDIT-GATE latency_ms=58824 error='' -->
 
 ## Score
 
-1. **Correctness — 3/5**: Gate catches real regressions (PREFLIGHT-FIX STOP→PASS pinned a load-bearing schema bug) but ~30% of rows flip verdict with zero code change, so the output can't be trusted at face value.
+| # | Dimension | Score | Justification |
+|---|-----------|-------|---------------|
+| 1 | Correctness | 3 | Gate caught real regressions (schema bug, MUTATION-ORCH), but ~30% of STOPs on unchanged code are false positives (ENGINES-HEAL, STATUS-HUMAN, OPERATOR-RUNBOOK flips). The 0.65–0.75 confidence band is a coin-flip zone. |
+| 2 | Robustness | 2 | Same commit + same auditor → different verdict. Three flips across sweeps 2→3 with zero code diff. The gate is non-deterministic at the decision boundary, which is the *only* place reliability matters. |
+| 3 | Operator-usability | 2 | A non-technical operator sees STOP/STOP/PASS on ENGINES-HEAL and can't distinguish "real regression" from "MiMo rolled a different number." Trust erodes fast. |
+| 4 | Test discipline | 3 | The gate is eating its own dogfood — 3 sweeps, flip-tables published, `--avg-of-N` queued in W9. But no integration test asserts stability on fixed input, so the noise floor is only *documented*, not *eliminated*. |
+| 5 | Risk (audit-gate lens) | 3 | Not a ship-blocker yet because operator precedent (W6-PANEL) already absorbed the noise. But if W10+ rows hit the 0.65–0.75 band, every wave gets a "3 STOPs — is it real?" cycle. W9-AUDIT-NONDETERMINISM-AVG is the critical path. |
 
-2. **Robustness — 2/5**: Non-determinism is the definition of fragile. W8-ENGINES-HEAL went 0.58→0.85→0.68 across three sweeps on the same commit. No input stabilization (debounce, content-hash, diff-cap) fixes interpretive variance inside MiMo.
+**False-positive rate:** ~20–24% (4–5 of ~21 sweeps gave STOP on code unchanged since last PASS).
+**False-negative rate:** Cannot be measured from this data — there's no independent "ground truth" audit to compare against. At least one TP (schema bug) proves the gate *can* catch silent failures. But a silent false negative is, by definition, silent.
 
-3. **Operator-usability — 2/5**: Non-technical operator must read three sweeps, apply ad-hoc "W6-PANEL precedent" to decide which STOPs are real, and manually accept-as-shipped. There's no `--avg-of-N`, no consensus score, no single number to act on.
+## Top blocker
 
-4. **Test discipline — 2/5**: Zero tests for audit-gate verdict consistency. Nothing catches the gate itself regressing. Mutation canary (W9) would provide a deterministic regression signal independent of MiMo, but it's queued, not shipped.
+Ship **W9-AUDIT-NONDETERMINISM-AVG** (`--avg-of-N`) and **require it** for all Wn closeout verdicts. A single averaged score ≥0.70 = PASS, below = STOP. This collapses the flip-flop noise into one number and makes the audit gate auditable itself.
 
-5. **Risk — 3/5 (noise erodes trust)**: If the operator learns that 1-in-3 STOPs are coin-flips, the rational response is to ignore all STOPs — which makes the gate worthless. This trust-erosion is the real 30-day risk, not any individual false STOP.
+## Verdict
 
-**False-positive estimate**: ~30% — 3 of 10 rows show STOPs on code verified good in a prior sweep (no commit between sweeps 2→3). Two persistent STOPs (STOP-HOOK, AUDIT-PROMPT) appear legitimate and aren't counted as false positives.
-
-**False-negative estimate**: ≥1 documented — the EngineHealth schema bug silently failing every quarantine write survived undetected across W6 and W7 audits. Rate is likely low (5–15%) but non-zero and unmeasurable without re-auditing prior waves against ground truth.
-
-6. **Top blocker**: Ship **W9-MUTATION-CANARY** immediately. Three known-killer mutants per top module, daily Task Scheduler run, ≥1 test failure per mutant expected. This bypasses MiMo entirely and gives a deterministic, non-interpretable regression signal. One canary run per day makes the audit gate's non-determinism tolerable rather than fatal.
-
-7. **Verdict**: **SHIP-WITH-FIXES.** The gate catches real regressions (PREFLIGHT-FIX is proof) but 30% noise + no deterministic fallback means it can't be the sole regression signal — ship mutation-canary as a mandatory W9-Blocker, not a nice-to-have.
+**SHIP-WITH-FIXES.** The gate catches real regressions (2 hard-PASS lifts prove it), but ~20–24% false-positive noise on unchanged code makes individual STOP verdicts unreliable — the operator cannot distinguish signal from MiMo non-determinism without the `--avg-of-N` stabilizer shipping in W9.

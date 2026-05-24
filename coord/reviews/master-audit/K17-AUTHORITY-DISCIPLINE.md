@@ -1,13 +1,11 @@
-<!-- name=K17-AUTHORITY-DISCIPLINE latency_ms=98117 error='' -->
+<!-- name=K17-AUTHORITY-DISCIPLINE latency_ms=71760 error='' -->
 
 ## Score
+1. **Correctness**: 3 — Persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT were overridden by precedent; the sole external check on dev authority is already compromised.
+2. **Robustness**: 2 — Observer probe times out in preflight, MiMo flips PASS/STOP on identical code, and W8 skipped the full mutation sweep, so drift detection is unreliable.
+3. **Operator-usability**: 4 — Runbook, `today`, and `preflight --fix` make daily ops accessible, yet the non-technical operator still cannot independently validate Claude's commits.
+4. **Test discipline**: 3 — 1576 tests catch functional regressions, but coverage does not enforce boundaries on the dev-manager's unilateral authority.
+5. **Risk**: 5 — Unilateral commit/push authority with a flaky, non-blocking observer is a ship-blocker; nothing stops a slow-motion authority failure.
 
-1. **Correctness — 2** — The spec promises an audit gate on full dev authority, but MiMo’s non-determinism renders verdicts random; the discipline mechanism is effectively unspecified in practice.
-2. **Robustness — 2** — A silent schema bug hid failures for waves; preflight now times out; the stop-hook still misfires, so the system cannot reliably survive its own maintainer’s errors.
-3. **Operator-usability — 2** — The non-technical operator cannot review diffs or veto commits, and the oversight CLI (`today`, `preflight`) times out, leaving them blind.
-4. **Test discipline — 1** — No deterministic test checks what Claude commits; deferred mutation canary and LLM-based audits offer zero automated signal if the dev manager goes off-rails.
-5. **Risk — 4** — Unfettered commit/push authority with no enforceable check means a single bad loop could rewrite critical paths before a human notices.
-
-6. **Top blocker** — Ship W9-MUTATION-CANARY plus deterministic file-invariant tests in `observer` so a non-LLM process can block the dev manager.
-
-7. **Verdict — SHIP-WITH-FIXES** — Functionally close, but discipline is theater until a code-level gate can halt the autonomous loop.
+6. **Top blocker**: Fix the observer probe timeout and make the audit gate truly blocking: require `--avg-of-3` MiMo runs ≥0.75 before any Wn row ships, with zero "accepted-as-shipped" waivers.
+7. **Verdict**: SHIP-WITH-FIXES — Operator-facing features are ready, but the discipline layer is decorative until the observer is reliable and audit STOPs cannot be overridden.

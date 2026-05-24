@@ -1,12 +1,24 @@
-<!-- name=K09-COSTS-BUDGET latency_ms=44348 error='' -->
+<!-- name=K09-COSTS-BUDGET latency_ms=47032 error='' -->
 
 ## Score
 
-1. **Correctness** — 2/5. `harness budget` exists but no verified output proves session-cost accuracy; `harness today` (daily pulse) times out, so the W6-A2 ledger wiring is not demonstrably readable.  
-2. **Robustness** — 2/5. `preflight --skip-engines` and `today` both timeout after 30 s; the budget query path likely shares the same blocking init overhead.  
-3. **Operator-usability** — 2/5. A non-technical operator cannot answer “how much did this session cost” when the plain-language pulse command fails and the runbook omits budget-reading steps.  
-4. **Test discipline** — 1/5. None of the 1,576 cited tests target budget-meter accuracy or cost-ledger regression; W7-WORKER-BUDGET-HOOK landed without noted coverage.  
-5. **Risk** — 4/5. Unverified spend visibility means the operator could accumulate API costs without a trusted single-command check.
+1. **Correctness — 2**  
+   `budget` CLI exists but snapshot shows no per-session cost attribution; ledger wiring is opaque.
 
-6. **Top blocker** — Make `harness budget` (or `today`) return a sub-5-second, non-blocking per-session cost table and add one budget-meter assertion to the mutation-canary suite.  
-7. **Verdict** — SHIP-WITH-FIXES. The ledger may be wired, but the operator-facing read-path is neither proven nor robust.
+2. **Robustness — 2**  
+   No cost-cap alarms, overrun circuit breakers, or pricing-drift guards visible in preflight or `today`.
+
+3. **Operator-usability — 1**  
+   `harness today` omits spend entirely; a non-technical operator has no obvious one-command answer for session cost.
+
+4. **Test discipline — 1**  
+   1,576 tests cite zero ledger-reconciliation or cost-accuracy coverage; mutation table ignores budget modules.
+
+5. **Risk — 3**  
+   Silent spend accumulation across Kimi/DeepSeek/MiMo with no meter visibility is a credible 30-day bill shock.
+
+6. **Top blocker**  
+   Add a plain-language cost stanza to `harness today` (or a `harness budget --last-session` human output) so the operator can read spend without interpreting a ledger.
+
+7. **Verdict**  
+   SHIP-WITH-FIXES: plumbing is present but the operator lacks a single, human-readable command to answer "how much did this session cost."

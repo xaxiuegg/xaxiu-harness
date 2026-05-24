@@ -1,17 +1,17 @@
-<!-- name=M09-SECURITY-POSTURE latency_ms=37719 error='' -->
+<!-- name=M09-SECURITY-POSTURE latency_ms=35131 error='' -->
 
 ## Score
 
-1. **Correctness** — 3/5. Specs say DPAPI + JSONL redact + 0600, but the `except Exception: continue` pattern that silently swallowed the quarantine bug proves identical silent-failure masking is plausible in key-storage or redaction paths — unverified.
-2. **Robustness** — 2/5. `panic-dump` scrubbing is claimed but untested; `preflight --fix` silently stashes tracked files (W9-PREFLIGHT-FIX-NOSTASH); the `proxy` 4-key circuit breaker has no audit entry; git-stash in a secret-bearing repo risks secret-adjacent context leaking into stash reflog.
-3. **Operator-usability** — 4/5. Runbook and `status --human` are strong, but security posture is invisible — the operator has no signal whether redaction is working or a key just leaked to a log.
-4. **Test discipline** — 2/5. Zero tests exercise redaction completeness, DPAPI isolation, `panic-dump` scrubbing, or prompt-injection resistance in `dispatch`→engine paths. Mutation tests target functional bugs only. The 1576 tests are security-blind.
-5. **Risk** — 4/5. Worst path: `dispatch` sends user-controlled packet content to an LLM engine via a proxy holding 4 API keys — prompt injection → engine exfiltrates key material into response → response logged or surfaced via `retro`/`replay` before redaction runs. Second path: `harness env` reports per-key presence; if it ever leaks the actual value (even once, in debug mode), the JSONL log with that entry is permanent. Third path: `full_dev_authority` mode lets Claude commit+push — a poisoned memory file (`memory/*.md`) is trusted implicitly and has no integrity check.
+**Correctness — 4/5**: DPAPI key storage, JSONL+redaction logging, and `panic-dump` scrubbing are present and functionally correct. The redaction integrity gate (W9) landed. However, the DPAPI *seed* path is undocumented and unverified — `doctor` reports DPAPI as readable but never explains provenance, a gap acknowledged only as a W10 todo.
 
-## Top blocker
+**Robustness — 2/5**: The EngineHealth `except Exception: continue` pattern that silently failed every quarantine write is a **class defect**, not a one-off. No evidence anyone audited DPAPI reads, redaction pipelines, or key-rotation paths for the same swallow-and-continue pattern. One such block in a redaction path means secrets leak to JSONL permanently with zero surface signal.
 
-Ship a **redaction-integrity test**: enumerate every output surface (`retro`, `replay`, `panic-dump`, `env`, JSONL logs, `today`, `status human`) and assert no known-secret-pattern (API key prefix, DPAPI blob, env var value) appears unredacted. This single test suite lifts score from 2→3 on test discipline and 4→3 on risk.
+**Operator-usability — 3/5**: `harness env` reports per-key presence, `status --human` is readable, and the runbook is single-page. But a non-technical operator hitting a DPAPI seeding failure has no remediation path — `doctor` says "readable" without explaining where keys originate. Invisible until production breaks.
 
-## Verdict
+**Test discipline — 3/5**: 1576 tests + redaction integrity gate are solid foundations. Missing: DPAPI failure-mode tests, redaction pattern coverage completeness (does every new log sink inherit redaction?), and file-permission enforcement assertions (`0600` mentioned in the prompt but not in any shipped row I can verify).
 
-HOLD — the `except Exception: continue` bug that silently swallowed quarantine writes for an unknown duration is proof that silent-failure masking exists in this codebase; until a redaction audit proves secret-handling paths don't share the same pattern, shipping exposes the operator to undetectable key leakage.
+**Risk — 4/5**: The silent-failure pattern is proven to hide load-bearing security bugs. The injection scanner question is unanswered — I see no explicit injection-scanning primitive in the CLI tree or shipped rows. Trust on `env` means any process inheriting the operator's environment sees all API keys; no scoping or least-privilege boundary exists.
+
+**Top blocker**: Run a targeted grep for every `except Exception: continue` (and `except: pass`) in security-sensitive modules — DPAPI, redaction, key rotation, state writes — and replace each with explicit `logging.error` + surface to operator. The EngineHealth bug proves this pattern silently breaks security guarantees; the same class of bug is almost certainly hiding in a redaction path.
+
+**Verdict**: SHIP-WITH-FIXES — the silent-failure audit is non-negotiable; one leaked API key in a JSONL log is an irreversible exposure.

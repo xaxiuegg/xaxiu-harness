@@ -1,17 +1,19 @@
-<!-- name=M18-STATUS-CSV-DISCIPLINE latency_ms=20576 error='' -->
+<!-- name=M18-STATUS-CSV-DISCIPLINE latency_ms=30397 error='' -->
 
 ## Score
 
-1.  **Correctness (3)**: Core features function (preflight --fix, engines-heal, status --human), but the audit gate's own non-determinism (PASS↔STOP flips with no code change) undermines its authority as the canonical "done" signal.
-2.  **Robustness (2)**: Schema bug in `EngineHealth` was a load-bearing, silent failure. Command timeouts in preflight/today suggest latent fragility. The auto-stash in `preflight --fix` is an operator-facing footgun.
-3.  **Operator-usability (4)**: Significant progress (runbook, `status human`, `engines heal`). The non-technical operator now has a daily pulse and recovery verbs, but timeouts and stash surprises degrade trust.
-4.  **Test discipline (4)**: 1576 tests pass; mutation canary is queued but not yet active (W9). The audit process itself lacks deterministic regression checks.
-5.  **Risk (3)**: The **audit gate's non-determinism** is the top risk. If the system for judging "shipped" is unreliable, all downstream planning and confidence decay.
+| Criterion | Score | Justification |
+|---|---|---|
+| **Correctness** | 3 | STATUS.csv *tracks*, but 3 rows shipped with non-det audit verdicts violate the "every Wn gets a MiMo audit before done" policy — ship status contradicts policy. |
+| **Robustness** | 2 | No staleness detection; a row can sit `todo` forever or flip audit verdicts indefinitely with no automated flag or operator-visible warning. |
+| **Operator-usability** | 3 | Notes are long and commit-SHA-heavy; a non-technical operator skimming 309 rows gets signal-buried in noise. Header says "~280 rows" — file is 309. |
+| **Test discipline** | 2 | No test asserts STATUS.csv schema invariants (valid transitions, non-empty updated-date, audit-verdict consistency). `W9-ONCOMMIT-HOOK-CRLF` touches the CSV hook but doesn't validate semantic integrity. |
+| **Risk** | 3 | Tracker drift is silent — next wave inherits stale `shipped` rows whose audit verdicts are "Non-det (PASS once, STOP twice)". Confidence compounds, not resets. |
 
 ## Top blocker
 
-**Fix `W8-AUDIT-PROMPT` (persistent STOP).** The audit prompt is the lens through which all work is judged. Its persistent STOP (low scores on precision/recall) indicates the audit's own instructions are flawed, causing the observed non-determinism. A stable, deterministic audit prompt is foundational.
+**Enforce a hard rule: rows cannot be marked `shipped` unless their audit verdict is deterministic PASS (≥2 consecutive sweeps, same commit).** Add a `harness status lint` subcommand that checks: (a) every `shipped` row has an associated PASS verdict in its note or audit log, (b) no row's `Updated` timestamp is >72h stale for `in_progress` rows, (c) header row count matches actual row count. The 3 non-det rows (ENGINES-HEAL, STATUS-HUMAN, OPERATOR-RUNBOOK) should be re-classified `shipped-pending-audit` until the `--avg-of-N` gate (W9) lands and confirms them. This single lint would lift Correctness from 3→4 and Risk from 3→2.
 
 ## Verdict
 
-**SHIP-WITH-FIXES.** The operator-readiness foundation is solid, but the audit system's non-determinism undermines confidence; fix the audit prompt to make the gate reliable before expanding.
+**SHIP-WITH-FIXES** — The tracker *exists* and *renders*, but it's drifted into "commit every action, audit later" territory; the non-det shipped rows and the stale header count are live symptoms, not hypotheticals.

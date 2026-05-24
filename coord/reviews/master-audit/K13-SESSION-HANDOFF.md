@@ -1,12 +1,13 @@
-<!-- name=K13-SESSION-HANDOFF latency_ms=51208 error='' -->
+<!-- name=K13-SESSION-HANDOFF latency_ms=78512 error='' -->
 
 ## Score
-1. **Correctness: 2** — Handoff artifacts exist (`today`, `runbook`, `session`), but `harness today` and `preflight --skip-engines` both time out, and `--fix` silently stashes work, so the loop does not land the operator in a known-good state.
-2. **Robustness: 2** — Core operator-facing verbs collapse under normal use; if the loop hands off during load, the operator has no reliable landing surface.
-3. **Operator-usability: 2** — The runbook is readable, but its first mandated actions hang, violating the key question: “does the operator know what to do?”
-4. **Test discipline: 1** — 1,576 unit tests pass, yet integration coverage missed 30-second handoff-path timeouts that strand a non-technical user.
-5. **Risk: 4** — Immediate session-blocking hazard: a non-technical operator handed control with dead commands and invisible stashes will stall or panic.
 
-6. **Top blocker** — Fix the 30-second hang in `harness today` and `preflight --skip-engines`; harden `session` to emit exactly one imperative next-action sentence (e.g., “Run `harness today` to review 3 tasks”) instead of a raw state dump.
+1. **Correctness — 3**: `harness today` and the runbook provide static handoff context, but the snapshot shows no `session` output proving a proactive, actionable transfer recommendation fires when the loop yields.
+2. **Robustness — 3**: `heartbeat` and `panic-dump` are present, yet if the loop crashes before emitting a handoff, the operator has no persistent loop-exit artifact to consult.
+3. **Operator-usability — 4**: The plain-language `today` pulse and single-page runbook let a non-technical operator self-orient, though they must actively pull status rather than receiving a pushed handoff.
+4. **Test discipline — 2**: With 1,576 tests and no visible coverage of `harness session` or handoff logic, a regression in transfer signaling would likely slip through undetected.
+5. **Risk — 3**: A non-technical operator could fail to notice the loop has yielded control, leading to stalled work or unreviewed changes sitting idle.
 
-7. **Verdict** — SHIP-WITH-FIXES. The loop cannot safely return control while its canonical landing commands time out and the stash silently eats in-progress work.
+**Top blocker:** Force the loop exit path to invoke `harness session --handoff` and write a persistent `SESSION_HANDOFF.md` checklist (shipped blockers, next required operator action).
+
+**Verdict:** SHIP-WITH-FIXES — operator pull-based tools exist, but the loop still lacks an unmissable, push-style transfer packet that screams "take the wheel now."

@@ -1,13 +1,13 @@
-<!-- name=K10-MULTI-ENGINE latency_ms=42171 error='' -->
+<!-- name=K10-MULTI-ENGINE latency_ms=162802 error='' -->
 
 ## Score
 
-1. **Correctness — 2/5**: `--engine-fill` and `engines-cooldowns` exist but the snapshot offers no proof the scheduler actually saturates Kimi slots before fallback or that dispatch respects cooldown timestamps.
-2. **Robustness — 2/5**: `preflight --skip-engines` hangs for 30 s, indicating engine-pool I/O is not isolated by the flag; the `EngineHealth` schema mismatch silently failed every quarantine until manual discovery.
-3. **Operator-usability — 3/5**: `engines-heal`, `engines-cooldowns`, and `today` are operator-friendly verbs, but a hung preflight blocks the non-technical daily workflow and erodes trust.
-4. **Test discipline — 2/5**: 1576 passing unit tests missed a silent schema rejection and a CLI timeout; no mutation or integration coverage pins slot-cap or cooldown-enforcement behavior.
-5. **Risk — 4/5**: Unenforced slot policy wastes subscription burn; unvalidated cooldowns risk cascading 429s across Anthropic/Gemini/DeepSeek within 30 days.
+1. **Correctness — 2**: `--engine-fill` is operator-configurable rather than locked to `aggressive`, so the “keep Kimi slots full” policy is optional, not enforced; `deepseek:5` persisted past threshold without auto-quarantine.
+2. **Robustness — 3**: Dead-engine detection, quarantine schema, and heal commands exist, yet remediation still surfaces as a manual preflight warning instead of an autonomous circuit-break.
+3. **Operator-usability — 3**: Non-technical operators can run `engines-heal` and `preflight --fix`, but receive no visibility into Kimi subscription slot utilization vs. queue depth.
+4. **Test discipline — 2**: No cited tests assert cooldown backpressure or Kimi backfill behavior; W8 skipped engine-area mutation sweep after the schema fix.
+5. **Risk — 3**: Subscription waste (idle Kimi) and repeated dead-engine hits (DeepSeek ×5) create concurrent cost and reliability exposure.
 
-**Top blocker:** A single integration test that dispatches N+1 packets with `--engine-fill aggressive` and asserts Kimi concurrency hits its slot ceiling before any fallback, plus a `<5 s` timeout-regression test for `preflight --skip-engines`.
+**Top blocker**: Harden `engine-fill` to default/aggressive and add a `kimi_slot_waste` preflight probe so queued work never sits while subscription capacity is idle.
 
-**Verdict:** SHIP-WITH-FIXES — engine-pool CLI contracts look operator-ready, but the hanging preflight and unvalidated slot policy make multi-engine discipline ceremonial rather than enforced.
+**Verdict**: SHIP-WITH-FIXES — primitives are landed, but policy enforcement is manual and dead-engine auto-remediation stops one step short of full autonomy.

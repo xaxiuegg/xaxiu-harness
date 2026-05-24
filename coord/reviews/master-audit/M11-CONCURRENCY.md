@@ -1,21 +1,21 @@
-<!-- name=M11-CONCURRENCY latency_ms=24293 error='' -->
+<!-- name=M11-CONCURRENCY latency_ms=36065 error='' -->
 
 ## Score
 
-1. **Correctness — 3/5**: Three distinct concurrency runtimes (ThreadPoolExecutor, asyncio, multiprocessing) share mutable state (engine_health.json, git index, pytest cache) with **no cross-model synchronization**. The schema fix (7081d93) corrected the *shape* of writes but not their *atomicity*.
+1. **Correctness** — 3/5. W9-STATE-ATOMIC-WRITES + W9-STATE-FILE-LOCK landed, but the snapshot gives no proof the atomic-write pattern covers all shared state paths (engine_health JSON, engine_performance_log.jsonl, STATUS.csv). The schema bug fix is correct but the `except Exception: continue` that hid it may still exist in other write paths.
 
-2. **Robustness — 2/5**: `preflight --fix` does `git stash` + file mutation + engine_health write. If Task Scheduler fires the autonomous loop while an operator runs `preflight --fix` manually, both contend on the git working tree and the same JSON file. The `scheduled_tasks.lock` is your only guard, and nothing in the snapshot confirms it's checked before engine_health writes. The `except Exception: continue` that hid the schema bug is the *exact pattern* that hides races too.
+2. **Robustness** — 2/5. Preflight ThreadPoolExecutor checks run in parallel, but preflight --fix + engines-heal can quarantine engines concurrently with no mutual exclusion on engine_health writes. Coord supervisors share state files; observer reads them on its own cadence — no happens-before between observer tick and coordinator flush. Stale lock detection for `scheduled_tasks.lock` after crash not mentioned anywhere.
 
-3. **Operator-usability — 4/5**: Not the operator's problem to solve. The CLI verbs look clean.
+3. **Operator-usability** — 4/5. Concurrency is invisible to the operator by design, but the runbook doesn't warn against running `preflight --fix` while the autonomous loop is live — a plausible footgun.
 
-4. **Test discipline — 2/5**: Zero evidence of concurrent stress tests. All 1576 tests are sequential. A single `concurrent.futures.ThreadPoolExecutor` submitting two `preflight --fix` calls against shared state would surface the race in seconds, yet it doesn't exist. Mutation sweeps fork processes that could mutate files mid-read by the main process — untested.
+4. **Test discipline** — 2/5. 1576 tests are almost certainly sequential. Zero evidence of parallel-execution stress tests, lock-contention tests, or TOCTOU regression tests. Mutation canary is spot-check (3 mutants), not concurrency-aware.
 
-5. **Risk — 4/5**: Task Scheduler fires the autonomous loop on a cadence; `preflight --fix` is its first step. A manual `preflight --fix` from the operator during a scheduled tick is a plausible data race on `engine_health.json` and the git index. Silent corruption (like the quarantine bug, but concurrency-induced) is the likely failure mode.
+5. **Risk** — 4/5. Five subsystems (preflight, coord, observer, mutation sweeps, scheduled tasks) touch overlapping state files. The W9 atomic-write commit is < 1 week old and unproven under concurrent load. Windows file-locking semantics (mandatory vs advisory) add platform-specific hazard. A silent corruption in engine_performance_log.jsonl would poison dispatch routing for days.
 
 ## Top blocker
 
-**Add an advisory file lock (`portalocker` or `fcntl`) around `engine_health.json` read-modify-write in `_check_dead_engines`, `engines heal`, and `preflight --fix`, plus a 3-line concurrent smoke test that submits two `preflight --fix` calls to a ThreadPoolExecutor and asserts no duplicate quarantine writes.** This is the only shared mutable state accessed from all three concurrency models with no happens-before guarantee today.
+Add a concurrency stress test (`test_parallel_state_safety`) that simultaneously runs preflight --fix, engines-heal, coord status, and observer tick against shared state files, asserting no data corruption, no silent drops, and no stale-lock deadlock. Without it, the W9 atomic-write fix is aspirational, not verified.
 
 ## Verdict
 
-**SHIP-WITH-FIXES.** The operator-readiness work is genuinely load-bearing, but the unsynchronized engine_health writes under concurrent Task Scheduler + manual invocation are a data-race waiting to manifest as silent corruption — the same class of bug you just fixed.
+**SHIP-WITH-FIXES** — The W9 atomic-writes commit addresses the worst race but lacks a concurrent-execution regression test to prove it; one stress test closes the gap between "fixed in theory" and "verified under load."

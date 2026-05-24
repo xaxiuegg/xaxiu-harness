@@ -1,11 +1,10 @@
-<!-- name=K07-DEAD-CODE latency_ms=122233 error='' -->
+<!-- name=K07-DEAD-CODE latency_ms=100269 error='' -->
 
 ## Score
-1. **Correctness** — 2. `preflight --skip-engines` and `today` hard-hang; help strings for `swarm-verify`, `engines-heal`, and `status` are truncated stubs; user-facing descriptions still carry W5/W8 wave-scaffolding tombstones.
-2. **Robustness** — 2. No guardrail prevents hung commands; the CLI has sprouted 38+ verbs against a 22-verb contract, signaling ungoverned surface-area bloat.
-3. **Operator-usability** — 1. A non-technical operator cannot distinguish live verbs from undead stubs when the help surface is littered with pending-wave labels and critical paths timeout.
-4. **Test discipline** — 2. 1576 unit tests missed two CLI hangs; no automated gate rejects stub help text or wave-label leakage into the operator-facing CLI.
-5. **Risk** — 4. Undead stubs and hanging commands will crater operator trust; the 38+ verb sprawl vs. the 22-verb target implies nearly half the surface may be scaffolding.
-
-6. **Top blocker** — An integration smoke test that exercises every verb with `--help` and a 5-second dry-run, failing CI on any timeout, truncation, or Wave-N scaffolding in user-facing descriptions.
-7. **Verdict** — SHIP-WITH-FIXES: hanging commands and scaffolding-polluted CLI surface are unacceptable ship-blockers for a non-technical operator.
+1. **Correctness**: 2 — Only ~60% of the ~30 listed verbs are live; the rest are stubs or pending-wave scaffolding (`swarm-verify` truncates mid-string, `observer` probe times out, W8-STOP-HOOK is persistently STOP).
+2. **Robustness**: 2 — The `quarantined` write path was dead code masked by bare `except Exception: continue`; dead-engine handling fails silently without the schema patch.
+3. **Operator-usability**: 3 — `today` and `preflight --fix` work, but the help surface mixes live features with unfinished scaffolding the non-technical operator cannot distinguish.
+4. **Test discipline**: 2 — 1,576 tests missed the silently failing quarantine path, and W8 skipped the mutation sweep, leaving scaffolded modules unaudited.
+5. **Risk**: 4 — A non-technical operator will invoke a stub verb or trust a broken hook; confusion or state corruption is a near-term ship blocker.
+6. **Top blocker**: A `--stub-audit` gate that hides every CLI verb whose help text is truncated, times out in preflight, or references an unshipped Wave prefix.
+7. **Verdict**: SHIP-WITH-FIXES — cull the dead verbs and hardened hooks before handing this surface to an operator.

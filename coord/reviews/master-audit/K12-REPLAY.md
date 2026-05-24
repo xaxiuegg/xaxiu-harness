@@ -1,24 +1,12 @@
-<!-- name=K12-REPLAY latency_ms=47768 error='' -->
+<!-- name=K12-REPLAY latency_ms=58534 error='' -->
 
 ## Score
 
-1. **Correctness — 2**  
-   `replay` claims v1/v2 coord-run reconstruction in help, yet no spec or shipped Wn row validates decision-chain fidelity.
+1. **Correctness** — 2. Help text claims v1/v2 reconstruction, yet no spec, sample output, or runbook step confirms it tells the right story.
+2. **Robustness** — 2. No evidence of handling missing logs, partial coord runs, or v1/v2 schema drift; likely raw-dump or silent failure.
+3. **Operator-usability** — 1. The non-technical operator has zero runbook guidance on when to invoke it, and the CLI description promises data, not decision archaeology.
+4. **Test discipline** — 1. None of the 1,576 visible tests cover replay; regressions in reconstruction logic would slip through undetected.
+5. **Risk** — 3. When a coord run fails, the operator will need narrative context and instead find an undocumented data hose, forcing escalation.
 
-2. **Robustness — 2**  
-   Peer CLI verbs (`today`, `preflight`) time out after 30 s; replay lacks visible truncation or streaming guards for long histories.
-
-3. **Operator-usability — 1**  
-   The non-technical runbook never mentions `replay`, and truncated CLI help offers no cue on when or why to invoke it.
-
-4. **Test discipline — 1**  
-   The 1,576-test roll-up and mutation tables omit replay entirely; a regression in reconstruction logic would go unnoticed.
-
-5. **Risk — 3**  
-   Without usable replay, the operator cannot self-service investigate coord-run failures, guaranteeing future L5 escalations.
-
-6. **Top blocker**  
-   Add a runbook section “Investigate a failed coord run” that demonstrates `harness replay --human` with plain-language decision narration and sample output.
-
-7. **Verdict — SHIP-WITH-FIXES**  
-   Replay is technically present but operator-invisible; the runbook gap turns decision archaeology into dead code.
+6. **Top blocker** — Add `replay --human` (plain-language timeline: what was decided, why, by whom) and an OPERATOR_RUNBOOK section naming the exact failure signature that triggers invocation.
+7. **Verdict** — SHIP-WITH-FIXES. Daily pulse and preflight are operator-ready, but `replay` is a dark corner: it answers neither when to use it nor how to understand the output.

@@ -141,34 +141,107 @@ Commands:
 ## `harness preflight --skip-engines`
 
 ```
-<FAILED: Command '['C:\\Users\\xaxiu\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\python.exe', '-X', 'utf8', '-m', 'harness', 'preflight', '--skip-engines']' timed out after 30 seconds>
+harness preflight — autonomous-mode readiness gate
+============================================================
+  [!] dead_engines         dead engines: deepseek:5  (18ms)
+          fix: Inspect state/engine_performance_log.jsonl; rotate keys or quarantine the affected engine.
+  [OK] git_clean            working tree clean  (1379ms)
+  [!] loops                dev loop task not registered  (6345ms)
+          fix: harness loop start
+  [!] observer             observer probe timed out (5s); will retry next preflight  (5842ms)
+          fix: re-run preflight or run `harness observer scheduler-status`
+  [OK] pytest_cache         last pytest run green  (0ms)
+  [OK] status_csv           writable, last touched 0.0h ago  (0ms)
+============================================================
+  3 ok, 3 warn, 0 fail in 6346ms
+
 ```
 
 ## `harness today`
 
 ```
-<FAILED: Command '['C:\\Users\\xaxiu\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\python.exe', '-X', 'utf8', '-m', 'harness', 'today', '--since-hours', '48']' timed out after 30 seconds>
+============================================================
+  Today — what happened in the last 48 hours
+============================================================
+
+## What shipped
+
+  2026-05-23T001153Z — Dispatch 2026-05-23T001153Z
+  2026-05-23T011153Z — Dispatch 2026-05-23T011153Z
+  2026-05-23T021153Z — Dispatch 2026-05-23T021153Z
+  W5-M — PID-sentinel prevents duplicate worker spawn across coordinator instances
+  W5-PILOT — Real-engine Path 2 pilot SUCCEEDED on attempt 6 with MiMo Pro
+  2026-05-23T031346Z — Dispatch 2026-05-23T031346Z
+  2026-05-23T041153Z — Dispatch 2026-05-23T041153Z
+  W5-N — Force DeepSeek v4-flash via xaxiu-swarm --model override
+  W5-O — Engine fallback within worker: retry once on different engine when primary produces 0 edits
+  W5-P — Universal in-place edit detector for agentic engines (git status)
+  W5-3ENGINE — 3-engine production matrix: MiMo/Kimi/DeepSeek all demonstrably work via the harness
+  2026-05-23T051153Z — Dispatch 2026-05-23T051153Z
+  ... and 110 more
+
+## Audit results (recent reviews)
+
+  34 PASS, 27 STOP, total 61 in this window
+    PASS 0.85  W8-PREFLIGHT-FIX
+    STOP 0.40  W8-STOP-HOOK
+    STOP 0.60  W8-STATUS-HUMAN
+    STOP 0.58  W8-OPERATOR-RUNBOOK
+    PASS 0.70  W7-SPEC-DRIFT
+    STOP 0.25  W8-AUDIT-PROMPT
+    ... and 55 more
+
+## Current blockers
+
+  [!] dead_engines: dead engines: deepseek:5
+
+## Suggested next actions
+
+  1. `harness preflight --fix` for the warnings (or ignore — warnings don't block).
+  2. `harness dashboard-serve` if you want a visual.  Closes when you Ctrl-C.
+  3. If anything looks wrong, run `harness panic-dump` and ping engineering.
+
+============================================================
+  For the full daily playbook: docs/OPERATOR_RUNBOOK.md
+============================================================
+
+
 ```
 
-## STATUS.csv (285 rows)
+## STATUS.csv (309 rows)
 
 ```csv
 ID,Category,Title,Status,Owner,Effort,Updated,Notes
 W19-STATUS-TRACKER,Wave 5.5,Canonical STATUS tracker as harness primitive (src/harness/status/ + harness status CLI verbs),shipped,Kimi+Claude,~45 min,2026-05-21,Commit 514945f; hybrid Kimi-CLI partial + Claude inline; 305/305 tests; 90% coverage
 W20-OBSERVER,Wave 5.6,Independent observer primitive (the check on dev-manager authority),shipped,Kimi via swarm,~60 min,2026-05-21,Kimi-CLI landed 6 module files (state/scheduler/cycle/audit_prompt/flags/__init__) + tests/test_observer.py (22KB; 41 tests) + cli.py observer group (12 subcommands) + manager.md Step 0 during 1200s timeout per feedback_kimi_cli_incremental_edits. Claude removed obsolete observer_tick stub test. 346/346 tests pass; 79% coverage on harness.observer.
 ...
-(277 rows omitted)
+(301 rows omitted)
 ...
-W9-PREFLIGHT-FIX-NOSTASH,Production,preflight --fix should not silently stash work,todo,Claude,-,2026-05-24,"harness preflight --fix runs git stash on git_clean fail. Silently dropped in-progress code during W8-AUDIT-FOLLOWUP. Recovered via git stash pop but the operator-facing surprise is real. Fix: surface 'X files stashed - recover with git stash pop' loudly, OR prompt for confirmation, OR skip the stash for git_clean entirely."
-W9-READINESS-PANEL-RERUN,Review,Re-run 10-reviewer readiness panel post-W8,todo,Claude,-,2026-05-24,"W8 readiness panel returned 0/10 YES at wave-start. Now that all 4 convergent blockers (preflight --fix, runbook, status --human, engines heal) shipped, re-run via scripts/run_readiness_panel.py. Expected: YES vote count rises; new blockers surface for Wave 9 planning."
-W9-MUTATION-CANARY,Process,3-mutant rolling spot-check (deferred from W8 Track A),todo,Claude,-,2026-05-24,"Deferred from W8 plan. Now load-bearing per the W8 audit non-determinism evidence: the canary bypasses MiMo entirely and gives a deterministic regression signal. Approach: pick 3 known-killer mutants per top module, apply each, expect >=1 test failure per mutant. Failing mutant = real regression. Daily Task Scheduler run."
-W8-CLOSEOUT,Production,Wave 8 closeout report + STATUS finalize,shipped,Claude,-,2026-05-24,"coord/reviews/wave-8-closeout.md authored. Three MiMo audit sweeps tracked across the wave fix-throughs. Final roll-up: 5 hard-PASS rows (every sweep >=0.7), 3 non-deterministic (PASS in at least one sweep, flipped to STOP with no code change), 2 persistent-STOP (W8-STOP-HOOK + W8-AUDIT-PROMPT) accepted-as-shipped per W6-PANEL non-determinism precedent and with documented multi-commit-anchor caveat. Five Wave 9 candidates queued: W9-AUDIT-ANCHOR-MULTI-COMMIT, W9-AUDIT-NONDETERMINISM-AVG, W9-PREFLIGHT-FIX-NOSTASH, W9-READINESS-PANEL-RERUN, W9-MUTATION-CANARY. 1576 tests pass + 6 skip. Pending next session: re-run 10-reviewer readiness panel; inspect/pop residual git stash from --fix auto-stash."
-W9-ONCOMMIT-HOOK-CRLF,Process,on-commit hook false-positive on Windows CRLF,todo,Claude,-,2026-05-24,".claude/hooks/check-csv-on-commit.sh greps with anchor regex ^coord/STATUS.csv$ against git log --name-only output. Windows git emits CRLF line endings so the dollar-anchor never matches and the hook fires even when the commit DID touch coord/STATUS.csv. Fix: strip CR before grep, or use git log --name-only --pretty= -- coord/STATUS.csv -1 + check exit code. Surfaced during W8-CLOSEOUT commit which clearly touched STATUS.csv but the hook blocked anyway."
+W10-PROFILE-AWARE-DEFAULTS,Production,--profile non_technical default OR saved-profile mechanism,todo,Claude,-,2026-05-24,W9 readiness panel cited: --profile non_technical exists for some commands but isn't the default. Either default it OR add a saved-profile mechanism (harness profile set non_technical) so the operator opts in once.
+W10-DPAPI-SEEDING-VISIBILITY,Production,Document DPAPI seed path in OPERATOR_RUNBOOK,todo,Claude,-,2026-05-24,W9 readiness panel cited (M1 + M2): DPAPI seed step is invisible in the snapshot a reviewer reads. doctor reports DPAPI as readable but doesn't explain WHERE keys come from initially. Operator runbook section needed.
+W10-FRESH-CANARY-MODULES,Process,Run canary on observer/cycle loops/runner dashboard/app to populate manifest,todo,Claude,-,2026-05-24,W9-MUTATION-MANIFEST has these 3 modules in WARM tier with last_sweep_sha=null. Each canary run rotates one module; after 3 sessions they all have a kill rate logged. Update mutation_targets.yaml after each run.
+W10-MIMO-FILTER-INVESTIGATION,Process,Investigate MiMo content filter blocking every W9 audit,todo,Claude,-,2026-05-24,Every W9 audit hit MiMo internal error after ~60s and fell back to DeepSeek successfully. Either rephrase the audit prompt to not trip the filter OR accept DeepSeek as primary auditor and demote MiMo to backup. Cost implication: DeepSeek is pay-per-token vs MiMo subscription.
+W10-AUDIT-FOLLOWUP-COMMIT-POLICY,Process,When a followup commit lands the followup deserves its own audit pass,todo,Claude,-,2026-05-24,W9 hit this: W9-CLI-TIMEOUT-BUDGET + W9-SILENT-EXCEPTION-AUDIT STOPped at original commit; followup commit 34c97bd addressed the gaps but inherits the original commit's STOP verdict. Either auto-fire audit on detected followup commits OR add a --reaudit flag to audit_task_with_mimo.py that re-runs against the latest commit touching that row's files.
 ```
 
 ## Recent commits (last 25)
 
 ```
+bad66c1 W9-CLOSEOUT: wave 9 closeout + 10 Wave 10 candidates queued
+afed9ba W9-PROXY-FAILURE-MATRIX + W9-MUTATION-MANIFEST
+c5670a9 W9-REDACTION-INTEGRITY-TEST: consolidate patterns + integrity gate
+1840132 W9-STATE-ATOMIC-WRITES + W9-STATE-FILE-LOCK: consolidate state safety
+8169254 W9-ONCOMMIT-HOOK-CRLF: strip CR in check-csv-on-commit.sh
+34c97bd W9-ANCHOR-MULTI + audit-followups + readiness-panel-rerun
+5d3bddd W9-SILENT-EXCEPTION-AUDIT: inventory + harden + lint baseline
+239e233 W9-CLI-TIMEOUT-BUDGET: bound PowerShell shell-outs + graceful degrade
+c5aab57 W9-PREFLIGHT-FIX-NOSTASH: invert default + --allow-stash opt-in
+e81cbdb W9-MUTATION-CANARY: 3-mutant rolling spot-check + first run
+5d0d6cc W9-PLAN: wave-9 plan with acceptance criteria for all 14 rows
+99d316a W9-AUDIT-NONDETERMINISM-AVG: --avg-of-N flag on the audit gate
+72613c2 SESSION_HANDOFF: add autonomous-loop discipline to master prompt
+cbb589b W8-SESSION-HANDOFF: Wave 9 kickoff doc + master prompt for next session
+6160a4f W9-MASTER-AUDIT-PANEL — 40-reviewer audit synthesis + 7 new W9 rows
 ee0b693 W9-ONCOMMIT-HOOK-CRLF queued — false-positive on the commit hook
 49327ad W8-CLOSEOUT — three audit sweeps, MiMo non-determinism + 5 W9 candidates queued
 5c42489 W8 audit follow-through #2: hook regression fix + runbook precision + 5 hook tests
@@ -179,21 +252,6 @@ ee0b693 W9-ONCOMMIT-HOOK-CRLF queued — false-positive on the commit hook
 083a1bf W7-AUDIT-POLICY + retro audits + interaction panel — all 3 deliverables landed
 0c9fdf6 W7-AUDIT-POLICY: extend audit gate to all Wn waves + retroactive W7 sweep + interaction panel
 8831d18 W7-CLOSEOUT: Wave 7 closeout report — test-quality recovery shipped clean
-8cc50f4 W7-SPEC-DRIFT: planner enforces operator's single-worker directive
-d074321 W7-B1-RETROFIT: DeepSeek + Kimi inherit from StreamingTransport
-9ed0e37 W7-MUTATION-CONCRETE GATE CLEARED (3.33 ≥ 3)
-91489f8 W7-MUTATION-CONCRETE: +2 tests targeting the line 450 gt_to_ge gap
-1dae478 W7-MUTATION-ORCH shipped + W7-MUTATION-CONCRETE tests (sweep pending)
-da47f2a W7 unlock: mutation gate cleared + Kimi reasoning_only + max_tokens floor
-5253e64 W7-MUTATION-WORKER: expand to 20 tests targeting eq_to_neq + plus1 first-occurrence
-334beef W7-MUTATION-WORKER: 14 behavioral tests targeting worker.py mutations
-ece783b STATUS.csv: W7-WORKER-BUDGET-HOOK shipped at 33be9d6
-33be9d6 W7-WORKER-BUDGET-HOOK: split tokens_in/tokens_out in worker budget recording
-0d09e5a W6 closeout: operator decision recorded after W6-PANEL
-3db281b STATUS.csv: 2 W7 rows from the panel synthesis
-64c23bb W6-PANEL: 10-reviewer panel (5 MiMo + 5 Kimi) on the closeout doc
-dc13aee W6-CLOSEOUT: wave-6-closeout report + audit-trail finalization
-12991d0 STATUS.csv: append W6-C2 audit followup notes
 
 ```
 

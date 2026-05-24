@@ -1,12 +1,26 @@
-<!-- name=K20-NEXT-WAVE latency_ms=119545 error='' -->
+<!-- name=K20-NEXT-WAVE latency_ms=64593 error='' -->
 
 ## Score
-1. **Correctness** — 3. Core operator commands (`preflight`, `today`) time out; two W8 rows remain persistent STOP and the MiMo gate is nondeterministic.
-2. **Robustness** — 3. Silent `git stash` in `--fix`, blanket `except Exception: continue` masked the quarantine schema bug, and preflight hangs rather than degrading.
-3. **Operator-usability** — 3. Runbook and `--human` exist but the operator cannot reliably run a morning pulse or safe preflight without hangs or data loss.
-4. **Test discipline** — 4. 1576 tests pass and mutation gates clear, yet the quarantine path was uncaught until audit; deterministic canary is still deferred.
-5. **Risk** — 4. Nondeterministic audit + missing canary + hanging core commands mean regressions can ship silently and readiness cannot be verified.
 
-## Plus
-6. **Top blocker** — W9-MUTATION-CANARY (detection). Stack-rank: detection > operator UX > engine reliability > v2 maturity > scope reduction. Detection is #1 because MiMo nondeterminism has already allowed persistent STOPs to ship and the operator cannot trust the audit gate to catch regressions.
-7. **Verdict** — SHIP-WITH-FIXES. Readiness features exist but core CLI paths hang and the audit gate is unreliable, so Wave 9 must land the canary and timeout fixes before scaling usage.
+1. **Correctness — 3**  
+Persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT mean the detection layer does not yet meet its own spec; the schema-bug fix proves silent failures were slipping through.
+
+2. **Robustness — 3**  
+`except Exception: continue` masked a load-bearing schema mismatch for an unknown duration; observer probes time out; detection noise undermines failure response.
+
+3. **Operator-usability — 4**  
+Preflight --fix, `today`, engines-heal and the runbook clear W8 readiness blockers, though `--profile non_technical` still is not the default.
+
+4. **Test discipline — 3**  
+1576 tests pass and mutation rates exceed gates, yet the quarantine path had zero coverage for the invalid-Literal rejection that silently broke every health write.
+
+5. **Risk — 4**  
+W9 must stack-rank detection > operator UX > engine reliability > v2 maturity > scope reduction; without a deterministic audit gate, regressions slip in silently or reviewer trust collapses under false-positive fatigue.
+
+## Top blocker
+
+Ship `W9-AUDIT-NONDETERMINISM-AVG` and eliminate the two persistent STOP rows so the audit gate becomes a trustworthy signal rather than a source of noise.
+
+## Verdict
+
+SHIP-WITH-FIXES — operator readiness is good enough to proceed, but W9 must not layer new features atop an audit gate that cries wolf (or stays silent on real wolves).

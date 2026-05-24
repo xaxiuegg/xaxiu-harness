@@ -1,11 +1,13 @@
-<!-- name=K05-HONEST-READINESS latency_ms=55061 error='' -->
+<!-- name=K05-HONEST-READINESS latency_ms=78523 error='' -->
 
 ## Score
-1. **Correctness** — 2 — `preflight --skip-engines` and `today` both timeout and fail; a schema bug silently broke every quarantine write until W8 follow-through.
-2. **Robustness** — 2 — `preflight --fix` auto-stashes work without confirmation or recovery instructions; the operator cannot survive a hang or data loss alone.
-3. **Operator-usability** — 2 — The two commands a non-technical operator needs most hang indefinitely; a single-page runbook is dwarfed by a 30+ verb CLI.
-4. **Test discipline** — 3 — High count missed the `EngineHealth` Literal mismatch that neutered quarantine; mutation rates mask real gaps.
-5. **Risk** — 4 — Day-one hangs on readiness and status checks plus silent stash data loss make 30-day unsupervised operation dangerous.
 
-6. **Top blocker** — Make `harness preflight` and `harness today` complete reliably in <10s, remove auto-stash from `--fix`, and add an integration test enforcing both.
-7. **Verdict** — HOLD — The operator’s two most critical commands timeout, the audit gate is a coin-flip, and silent stash behavior guarantees data loss for a non-technical user.
+1. **Correctness — 3/5.** The schema bug proved quarantine silently failed; persistent STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT show spec gaps remain unclosed.
+2. **Robustness — 2/5.** Observer probe times out by default, dead engines warn on every preflight, and the old `except Exception: continue` pattern shows failure modes were masked, not handled.
+3. **Operator-usability — 2/5.** The runbook is readable, but a non-technical operator seeing daily yellow warnings for dead engines and observer timeouts will not know whether to restart, ignore, or escalate.
+4. **Test discipline — 3/5.** 1576 tests are theater when the audit gate gives different verdicts on identical commits; persistent STOP rows mean regressions can hide in noise.
+5. **Risk — 4/5.** Thirty days of unsupervised operation guarantees the operator will learn to dismiss warnings, then miss the next load-bearing failure because signal-to-noise is broken.
+
+6. **Top blocker.** A guaranteed all-green `harness preflight` on a correctly seeded system, plus a single `harness doctor --repair` that resolves yellow warnings automatically without editing JSON or understanding engine health schemas.
+
+7. **Verdict.** SHIP-WITH-FIXES. The operator has a playbook, but the harness currently trains them to ignore yellow warnings on startup—which is exactly how silent failures become outages.

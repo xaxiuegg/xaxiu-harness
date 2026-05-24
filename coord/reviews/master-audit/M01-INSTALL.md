@@ -1,13 +1,17 @@
-<!-- name=M01-INSTALL latency_ms=22414 error='' -->
+<!-- name=M01-INSTALL latency_ms=23674 error='' -->
 
 ## Score
 
-1. **Correctness (3/5)**: Preflight timed out with `--skip-engines` on Windows — the exact cold-start gate the fresh-install reviewer needs is non-functional at HEAD. Schema bug was real and fixed, but the timeout means we can't confirm the fix works for a new operator.
-2. **Robustness (2/5)**: Two commands timed out (preflight, today). `--fix` silently stashed work (W9-PREFLIGHT-FIX-NOSTASH). CRLF false-positive on the commit hook blocks Windows operators. The Python Foundation Store path in the timeout trace signals PATH/install issues the runbook doesn't cover.
-3. **Operator-usability (2/5)**: The `--help` tree has 40+ CLI verbs with flags like `--explore-on-uncertainty [dispatch_alternatives|inline|ask_operator]`. No mention of Python install, venv, or `pip install -e .` anywhere in the snapshot. The operator runbook assumes harness is already running — the gap from "cloned repo" to "preflight green" is undocumented.
-4. **Test discipline (4/5)**: 1576 tests, mutation kill rates above gate, 32 new tests in W8. The schema bug slipped through *tests* but was caught by audit. Strong regression signal.
-5. **Risk (4/5)**: A fresh-install reviewer literally cannot complete their task. The preflight timeout means the cold-start path is broken, and there's zero evidence of install/bootstrap documentation.
+1. **Correctness** — 3. Preflight runs and `--fix` resolves git/pytest issues, but dead_engines warns immediately on a fresh clone where no keys exist yet; that's an expected state, not a real failure, yet the operator sees `[!]` with no "you need keys first" context.
 
-6. **Top blocker**: A `harness bootstrap` or `preflight` that actually succeeds — the Windows timeout trace (`PythonSoftwareFoundation.Python.3.13`) suggests the shebang/module invocation path is broken on Windows Store Python. Either fix the invocation (use `python -m harness` directly from documented entrypoint) or add a one-line install script (`pip install -e . && harness preflight`). The runbook must start at `git clone`, not at "run harness."
+2. **Robustness** — 2. The schema bug (Literal rejected `quarantined`/`recovering` silently swallowed by bare `except Exception`) is exactly the failure mode a fresh-install reviewer fears most — the fix shipped, but the pattern recurs: `_check_dead_engines` still fires on a keyless clone, observer times out because it's not running, loops warn because nothing's registered. Three warnings at first boot, none explained.
 
-7. **Verdict**: **HOLD.** The cold-start gate (`preflight --skip-engines`) times out on Windows — no fresh-install reviewer can validate anything until that path works end-to-end in <30 seconds.
+3. **Operator-usability** — 2. There is **no cold-start path visible in this snapshot**. No `pip install -e .`, no `pyproject.toml`, no "clone → install → run" sequence. The operator runbook (`docs/OPERATOR_RUNBOOK.md`) exists but isn't referenced until the final line of `harness today`. A non-technical operator cloning this repo doesn't know whether to run `pip install`, `poetry install`, or `python -m harness` directly. The CLI entry point is `python -m harness` — not mentioned anywhere in the preflight output.
+
+4. **Test discipline** — 4. 1576 tests, mutation kill rates above gate, the schema bug caught by audit. But the `except Exception: continue` pattern that hid the quarantine bug is a test-discipline smell — the fix addressed the symptom, and no new test asserts "quarantined status actually persists."
+
+5. **Risk** — 3. The cold-start story is invisible to the snapshot audience. Every new operator will hit the same wall: clone, stare at CLI help, guess at installation, get three warnings they can't interpret.
+
+6. **Top blocker** — Add a `README.md` or `docs/COLD_START.md` with the exact 5-command path: clone → `pip install -e .` → set 3 API keys → `harness preflight --fix --skip-engines` → `harness today`. Without it, the operator runbook is unreachable.
+
+7. **Verdict** — **HOLD.** The harness works once bootstrapped, but there is literally zero documentation for the first 5 minutes after clone — the exact window this lens audits.

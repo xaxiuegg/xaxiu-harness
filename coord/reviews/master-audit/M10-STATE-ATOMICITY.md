@@ -1,21 +1,24 @@
-<!-- name=M10-STATE-ATOMICITY latency_ms=20438 error='' -->
+<!-- name=M10-STATE-ATOMICITY latency_ms=31126 error='' -->
 
 ## Score
 
-**Correctness**: 2/5 — Quarantine writes to `engine_health` silently failed *every time* until W8; Pydantic rejected `quarantined` status and `except Exception: continue` swallowed it. State files told lies.
+1. **Correctness**: 2 — W8 schema bug proves state writes silently swallowed failures for *weeks*; `except Exception: continue` is the anti-pattern that corrupts silently.
+2. **Robustness**: 2 — W9-STATE-ATOMIC-WRITES committed but no evidence of write-temp+fsync+rename pattern; kill-9 during `engine_performance_log.jsonl` append or `engine_health` update leaves partial/truncated state with zero detection.
+3. **Operator-usability**: 1 — `doctor`/`preflight` never validates state-file integrity; a corrupted `engine_health.json` silently feeds bad routing until operator notices phantom cooldowns weeks later.
+4. **Test discipline**: 2 — no kill-9/mid-write simulation tests; the quarantine bug was caught by *audit sweep*, not by 1576 tests — that's a red flag for state-write coverage specifically.
+5. **Risk**: 3 — silent state corruption during autonomous overnight loops can compound: one bad `engine_health` write → phantom quarantine → routing misbehavior → operator discovers Monday.
 
-**Robustness**: 1/5 — No evidence of atomic writes (temp+rename), no WAL for sqlite, no `StateFileCorruptError` anywhere, and the one observed failure mode was *silent data loss*. `kill -9` mid-write is an open question with no documented mitigation.
+## State-atomicity specifics unresolved
 
-**Operator-usability**: 3/5 — Preflight `--fix` and `engines-heal` give the operator recovery verbs, but if those verbs *themselves* silently corrupt state (as the schema bug proved), the UX is a trap.
-
-**Test discipline**: 2/5 — The schema bug survived through W7 *and* was reproduced by the audit tooling — tests never caught a rejected Pydantic write to engine_health. No crash-recovery / mid-write tests visible.
-
-**Risk**: 4/5 — State is the single source of truth for engine routing, quarantine, and cooldown. Silent write failure = operator thinks engine is quarantined, harness keeps dispatching to it. Next outage is load-bearing.
+- `db.sqlite`: no WAL-mode or journal-mode evidence; `PRAGMA integrity_check` absent from preflight.
+- `*.json` files: JSONL append is natively non-atomic; `*.json` writes need write-replace pattern explicitly.
+- `YAML configs`: PyYAML `safe_dump` to same path = truncate-then-write = data loss on kill-9.
+- `StateFileCorruptError`: **never observed** in any sweep, test, or log — meaning either (a) it doesn't exist as a class, or (b) it exists but has zero test coverage. Either is a gap.
 
 ## Top blocker
 
-Add `state/atomic.py` — a write helper that: (a) writes to `.tmp` then `os.replace`, (b) wraps all JSON/SQLite writes, (c) raises `StateFileCorruptError` on any serialization failure instead of swallowing. Then add a kill-during-write integration test. This single artifact closes the atomicity gap and makes the `except Exception: continue` class of bug structurally impossible.
+Add `state_integrity` to preflight: validate every `state/*.json` parses, `db.sqlite` passes `PRAGMA integrity_check`, and all YAML configs load — *before* any autonomous dispatch fires. Without this, the W9 atomic-write commit is unverifiable in production.
 
 ## Verdict
 
-**HOLD** for state write atomicity — the W8 proof that *every quarantine write silently failed* is a ship-blocker until the state layer has crash-safe writes and surface-on-failure error handling.
+**HOLD** — W9 landed atomic-write infrastructure but zero integration tests prove it works under kill-9, and the preflight gate has no state-integrity check to catch corruption before autonomous loops consume bad data.

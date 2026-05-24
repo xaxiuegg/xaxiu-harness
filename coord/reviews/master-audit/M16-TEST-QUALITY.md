@@ -1,22 +1,27 @@
-<!-- name=M16-TEST-QUALITY latency_ms=24470 error='' -->
+<!-- name=M16-TEST-QUALITY latency_ms=32151 error='' -->
 
 ## Score
 
-1.  **Correctness** — **4/5**. Core features (preflight --fix, engines-heal, status human) work as specified. Persistent audit STOPs on two rows indicate specified behavior isn't fully validated.
-2.  **Robustness** — **4/5**. Schema bug fix shows good failure recovery. However, the `preflight --fix` auto-stash is a robustness risk (silent stash drop).
-3.  **Operator-usability** — **5/5**. Single-page runbook, `today` command, and `engines-heal` directly address the W8 readiness panel's 0/10 blocker.
-4.  **Test discipline** — **3/5**. 1576 tests pass, but MiMo audit non-determinism and two persistent STOPs suggest test boundaries are fuzzy or flaky, masking real gaps.
-5.  **Risk** — **3/5**. Primary risk is MiMo audit non-determinism eroding trust in the gate; secondary is the stash surprise for operators.
+**Correctness: 4/5** — Tests pass and mutations kill, but the `EngineHealth` schema bug *survived* 1544 tests undetected because `except Exception: continue` swallowed it. Behavioral correctness was asserted; error-path correctness was not.
 
-**Top blocker**: **Implement `W9-AUDIT-NONDETERMINISM-AVG`**. The `--avg-of-N` flag for the audit command would make verdicts deterministic, turning non-det STOPs into actionable signals or confirmed passes.
+**Robustness: 3/5** — The schema-bug silent-failure pattern (`except Exception: continue`) is the smoking gun. It means tests *did* exercise quarantine writes, but Pydantic validation errors were swallowed before any assertion could fire. Happy-path robust: yes. Failure-path robust: demonstrably not.
 
-**Verdict**: **SHIP-WITH-FIXES**. The operator-readiness foundation is solid and the harness is functional, but the flaky audit gate undermines the "every Wn row gets a MiMo audit" policy.
+**Operator-usability: 4/5** — `harness today` and `harness preflight` are clean, plain-language surfaces. Irrelevant to my lens directly, but readable error messages reduce support load, which frees test-budget time.
 
----
-**Test Quality Deep-Dive**:
-- **Overall**: Tests are **mostly behavioral**, focusing on module outputs and state changes (e.g., engine health transitions, fix outcomes). Mock usage is strategic for external APIs and file system calls, not heavy.
-- **Sampled Modules**:
-    1.  `engines/dispatcher.py` (Score: 5/5): Tests are highly behavioral, verifying routing logic and error handling. High mutation kill rate confirms effectiveness.
-    2.  `coord/worker.py` (Score: 4/5): Strong behavioral tests after W7 recovery. Minor concern: some tests may mock too much of the integrator.
-    3.  `orchestrator.py` (Score: 3/5): Tests are adequate but likely mock-heavy on the underlying `coord` module, reducing confidence in full integration.
-- **Dead Test Code**: No significant dead code indicated. The 6 skipped tests appear intentional. The primary "dead" signal is the **non-deterministic audit verdicts**, which make certain test outcomes unreliable for decision-making.
+**Test discipline: 3/5** — 1576 passing is table stakes. The real question is **mutation kill rate coverage**: only 5 modules swept (W6), no W7/W8 re-sweep despite 8 new rows shipping. Three random modules I'd audit:
+
+| Module (random pick) | Rating | Why |
+|---|---|---|
+| `engines/heal.py` (W8-ENGINES-HEAL) | ⚠️ Weak | Quarantine writes passed through the broken `EngineHealth` schema — tests only passed because exceptions were swallowed. Behavioral? Mock-heavy with dict stubs vs Pydantic production paths. |
+| `preflight/fix.py` (W8-PREFLIGHT-FIX) | ✅ Decent | 3 fix functions + `FixOutcome` struct; L4 toast wiring tested. But `--skip-engines` path masks what actually fires in production. |
+| `cli/status_human.py` (W8-STATUS-HUMAN) | ⚠️ Untested edge | CLI output formatting rarely gets snapshot/diff tests; `--since-hours N` boundary likely only mocked. |
+
+**Risk: 3/5** — The `except Exception: continue` pattern is almost certainly duplicated elsewhere. Without a W7/W8 mutation sweep, I can't confirm kill rates held. Dead test code: the old `observer_tick` stub (removed in W5) and any W7-era quarantine tests that assert on the *pre-fix* `Literal["up","degraded","down"]` schema are now testing a dead contract — they pass vacuously.
+
+## Top blocker
+
+**Run a targeted mutation sweep on `engines/heal.py` and `preflight/fix.py` with the new `quarantined`/`recovering` states.** The fix landed, but the test that *would have caught the original bug* still doesn't exist — no test asserts that `engine_health.json` actually contains the expected status after `--fix`. Add one behavioral integration test that reads the file post-fix and asserts on the written value. This lifts test discipline from 3→4 and correctness from 4→5.
+
+## Verdict
+
+**SHIP-WITH-FIXES.** The silent-exception-into-schema-mismatch bug class is real and likely repeated; one integration test that asserts on *file contents* post-quarantine-write closes the gap that let 1544 tests miss a load-bearing bug for an entire wave.

@@ -1,17 +1,13 @@
-<!-- name=K06-DOGFOOD latency_ms=59840 error='' -->
+<!-- name=K06-DOGFOOD latency_ms=59303 error='' -->
 
 ## Score
 
-1. **Correctness — 3.** 1576 tests pass and the closeout was self-authored, yet `harness preflight --skip-engines` and `harness today` both hang, so the harness cannot execute its own daily self-check.
+1. **Correctness** — 3: Heavy dogfooding, yet a load-bearing schema mismatch silently broke every quarantine write, and persistent STOPs on hook and audit prompt reveal unfilled spec gaps in the meta-layer.
+2. **Robustness** — 3: Self-healing paths masked Pydantic failures with `except Exception: continue`; observer probes timeout; the audit gate flips verdict on unchanged code.
+3. **Operator-usability** — 3: Runbook and `harness today` exist, but preflight still surfaces dead engines, observer timeouts, and unregistered loops—noise a non-technical operator cannot action.
+4. **Test discipline** — 3: 1576 tests pass, yet the quarantine bug escaped because test stubs used dicts while production used Pydantic models; tests didn't match reality.
+5. **Risk** — 4: The meta-layer is becoming a tower of indirection; silent failures in self-heal plus non-deterministic audits risk alert fatigue or missed regressions within 30 days.
 
-2. **Robustness — 2.** Silent `except Exception: continue` masked a schema bug that broke every quarantine write, and the core dogfood CLI now hits 30-second timeouts suggesting a liveness failure in the self-hosted loop.
+**Top blocker**: Harden all self-healing exception handlers to emit L4 toasts on unexpected schema/validation errors, eliminating `except Exception: continue` in fix/heal paths.
 
-3. **Operator-usability — 2.** A runbook and `status --human` exist, but the non-technical operator cannot run the daily pulse or readiness gate without hangs, making the surface theoretical.
-
-4. **Test discipline — 3.** Mutation kill rates exceed the ≥3 gate, yet the deferred W9 mutation-canary leaves no deterministic regression signal independent of MiMo roulette, so the meta-layer guards nothing deterministically.
-
-5. **Risk — 4.** Hanging self-checks block operator reliance today, and persistent MiMo STOPs on audit-config rows (STOP-HOOK, AUDIT-PROMPT) prove the audit layer is auditing itself with broken tooling.
-
-6. **Top blocker:** Fix the 30-second hangs in `harness preflight --skip-engines` and `harness today` so the harness can actually run its own operator-facing dogfood commands.
-
-7. **Verdict:** SHIP-WITH-FIXES. The architecture is self-hosted on paper, but the meta-layer is a tower of indirection while its own `preflight` and `today` commands deadlock.
+**Verdict**: SHIP-WITH-FIXES — extensive dogfood usage is healthy, but the self-monitoring loop is too noisy and too silent in the wrong places; harden before operator handoff.
