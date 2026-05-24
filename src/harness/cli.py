@@ -2125,6 +2125,109 @@ def today_cmd(since_hours: int) -> None:
     click.echo(f"{'=' * 60}\n")
 
 
+@cli.command(name="daily")
+@click.option("--full", is_flag=True, default=False,
+              help="Include live engine probes (slower; default is "
+                   "--skip-engines for snappier morning routine).")
+@click.option("--since-hours", type=int, default=12,
+              help="How far back to look for activity (default 12).")
+def daily_cmd(full: bool, since_hours: int) -> None:
+    """W10-DAILY-QUICKSTART-VERB: operator-friendly daily routine.
+
+    Sequences the four commands a non-technical operator runs every
+    morning into one verb, with phase headings + a single aggregate
+    verdict at the end.  Replaces the memorized four-step incantation:
+
+      [1/4] harness preflight --skip-engines  (or --full)
+      [2/4] harness morning-brief --since-hours N
+      [3/4] harness today --since-hours N
+      [4/4] harness observer flags
+
+    Each phase prints its output + a one-line status.  The final
+    verdict matches the worst phase's verdict (using the same
+    plain-language labels as `harness preflight`).
+
+    Exit codes: same as `harness preflight` (0/1/4).  See the
+    preflight verdict semantics table in OPERATOR_RUNBOOK.
+    """
+    from harness.preflight import verdict_label
+
+    repo = Path.cwd()
+    env = {**os.environ, "PYTHONPATH": str(repo / "src")}
+
+    def _run_phase(label: str, args: list[str], timeout: int = 30) -> int:
+        """Run one phase as a subprocess; print output + return exit code."""
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"  [{label}]")
+        click.echo(f"{'=' * 60}")
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-X", "utf8", "-m", "harness", *args],
+                cwd=repo, capture_output=True, text=True, timeout=timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            click.echo(
+                f"  [TIMEOUT] phase exceeded {timeout}s — "
+                f"degrading to warn for aggregate.")
+            return 1
+        # Stream the output through (operator wants to see it)
+        if proc.stdout:
+            click.echo(proc.stdout.rstrip())
+        if proc.stderr:
+            # stderr usually carries operator-facing diagnostics too
+            click.echo(proc.stderr.rstrip(), err=True)
+        return proc.returncode
+
+    click.echo("=" * 60)
+    click.echo("  harness daily — operator morning routine")
+    click.echo(f"  ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+    click.echo("=" * 60)
+
+    phases: list[tuple[str, list[str], int]] = [
+        ("1/4 preflight",
+         ["preflight"] if full else ["preflight", "--skip-engines"],
+         30 if full else 12),
+        ("2/4 morning-brief",
+         ["morning-brief", "--since-hours", str(since_hours)],
+         20),
+        ("3/4 today",
+         ["today", "--since-hours", str(since_hours)],
+         15),
+        ("4/4 observer flags",
+         ["observer", "flags"],
+         10),
+    ]
+
+    exit_codes: list[int] = []
+    for label, args, t in phases:
+        rc = _run_phase(label, args, timeout=t)
+        exit_codes.append(rc)
+
+    # Aggregate verdict: worst exit code across phases
+    # (4 dominates 1 dominates 0)
+    if any(rc >= 4 for rc in exit_codes):
+        worst = 4
+    elif any(rc != 0 for rc in exit_codes):
+        worst = 1
+    else:
+        worst = 0
+    label, explanation = verdict_label(worst)
+
+    click.echo("\n" + "=" * 60)
+    click.echo("  Daily routine complete")
+    click.echo("=" * 60)
+    click.echo(f"\n  Aggregate verdict: {label}  (exit code {worst})")
+    click.echo(f"  {explanation}")
+    if worst != 0:
+        click.echo(
+            "\n  Per-phase exit codes: "
+            + ", ".join(f"{lbl.split()[0]}={rc}"
+                        for (lbl, _, _), rc in zip(phases, exit_codes))
+        )
+    sys.exit(worst)
+
+
 @cli.command(name="panic-dump")
 @click.option("--target-dir", default=None, type=click.Path(path_type=Path),
               help="Output dir (defaults to cwd).")

@@ -68,6 +68,7 @@ _PLAN_BY_TASK_PREFIX = {
     "W7-": "spec/wave-7-plan.md",
     "W8-": "spec/wave-8-plan.md",
     "W9-": "spec/wave-9-plan.md",
+    "W10-": "spec/wave-10-plan.md",
 }
 
 
