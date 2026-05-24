@@ -38,6 +38,79 @@ from harness.state import jsonl_log
 logger = logging.getLogger(__name__)
 
 
+# W11-CONTEXT-FRUGAL-RETURN-SCHEMA 2026-05-25: env flag preserves
+# pre-W11 behavior (text=full response).  Flipped to False in
+# W11-CONTEXT-FRUGAL-RETURN-LAZY after existing tests verified
+# under the new default.
+def _dispatch_full_by_default() -> bool:
+    """Read HARNESS_DISPATCH_FULL_BY_DEFAULT env var; default True
+    for backwards-compat with existing callers (worker.py,
+    integrator.py, coord pipeline, etc.)."""
+    val = os.environ.get("HARNESS_DISPATCH_FULL_BY_DEFAULT", "True")
+    return val.strip().lower() not in ("0", "false", "no", "off")
+
+
+# W11-CONTEXT-FRUGAL-RETURN-SCHEMA 2026-05-25: cheap rule-based
+# head+tail extraction for DispatchResult.summary.  No engine call;
+# preserves the agent's context budget by giving them the first +
+# last lines + a "[N chars elided]" marker.  When the agent needs
+# more, they call .full() (W11-CONTEXT-FRUGAL-RETURN-LAZY).
+def _extract_summary(text: str, *, max_chars: int = 300,
+                     head_lines: int = 5, tail_lines: int = 5) -> str:
+    """Return a head+tail extract of *text* capped at ~max_chars.
+
+    Strategy:
+      - If text fits within max_chars, return it verbatim.
+      - Otherwise: first head_lines + tail_lines lines joined by an
+        "[N chars elided]" marker, total bounded by max_chars.
+      - Tail-preservation is critical per panel C5 (auditor's last
+        line is often the load-bearing one).
+    """
+    if not text:
+        return ""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    lines = text.splitlines()
+    if len(lines) <= head_lines + tail_lines:
+        # Short by line count but long by char count — just truncate
+        # the middle.
+        head_chars = max_chars // 2
+        tail_chars = max_chars - head_chars - 30  # reserve for marker
+        elided = len(text) - head_chars - tail_chars
+        return (
+            text[:head_chars]
+            + f"\n[{elided} chars elided]\n"
+            + text[-tail_chars:]
+        )
+    head = "\n".join(lines[:head_lines])
+    tail = "\n".join(lines[-tail_lines:])
+    elided_lines = len(lines) - head_lines - tail_lines
+    summary = (
+        f"{head}\n[{elided_lines} lines / "
+        f"{len(text) - len(head) - len(tail)} chars elided]\n{tail}"
+    )
+    # Final cap (defensive — head + tail could exceed max_chars on
+    # pathological long-line content)
+    if len(summary) > max_chars + 100:
+        # Hard truncate but keep the elision marker
+        summary = summary[:max_chars] + "..."
+    return summary
+
+
+# W11-CONTEXT-FRUGAL-RETURN-SCHEMA 2026-05-25: extract the first
+# ~200 chars of an error string as a top-level signal the agent
+# can check without reading the full body / traceback.
+def _extract_error_excerpt(error: str | None, *,
+                            max_chars: int = 200) -> str | None:
+    if not error:
+        return None
+    err = str(error).strip()
+    if len(err) <= max_chars:
+        return err
+    return err[:max_chars - 3] + "..."
+
+
 # W9-SILENT-EXCEPTION-AUDIT 2026-05-24: every telemetry / log / cost-
 # ledger write in this module is wrapped to keep dispatch resilient
 # against logging-layer failures — a failed ledger insert MUST NOT
@@ -98,6 +171,19 @@ class DispatchResult:
     # DispatchResult exposed only the aggregate.
     tokens_in: int = 0
     tokens_out: int = 0
+    # W11-CONTEXT-FRUGAL-RETURN-SCHEMA 2026-05-25: agent-facing
+    # context-preservation fields.  When the env flag HARNESS_DISPATCH_
+    # FULL_BY_DEFAULT is True (the W11-A.5 default; preserves pre-W11
+    # behavior), `text` is populated with the full response and
+    # `summary` is computed via cheap head+tail extraction for
+    # informational use.  When the flag flips to False (W11-CONTEXT-
+    # FRUGAL-RETURN-LAZY row, after existing tests pass under the
+    # new default), `text` becomes "" by default and the SDK wrapper
+    # surfaces `.full()` lazy-fetch from `content_ref`.
+    summary: str = ""               # head+tail extract; ≤300 chars typical
+    truncated: bool = False         # True when full text NOT loaded in .text
+    error_excerpt: str | None = None  # first ~200 chars of error (top-level signal)
+    content_ref: str | None = None  # opaque ref for lazy retrieval (set when cache populated)
 
 
 # ---------------------------------------------------------------------------
@@ -737,17 +823,29 @@ def dispatch_packet(
             except Exception as _exc:
                 _swallow_telemetry("line737", _exc)
 
+            # W11-CONTEXT-FRUGAL-RETURN-SCHEMA: compute summary cheaply.
+            # text-population gated on feature flag so existing callers
+            # (worker.py, integrator.py, coord) unchanged under default.
+            _full_text = response.text or ""
+            _summary = _extract_summary(_full_text)
+            _full_by_default = _dispatch_full_by_default()
+            _populated_text = _full_text if _full_by_default else ""
+            _truncated = not _full_by_default
             return DispatchResult(
                 success=True,
                 engine_used=current_engine,
                 fallback_chain=list(tried),
-                text=response.text,
+                text=_populated_text,
                 error=None,
                 dispatch_id=dispatch_id,
                 tokens_used=response.tokens_in + response.tokens_out,
                 cost_usd=response.cost_usd,
                 tokens_in=int(response.tokens_in or 0),
                 tokens_out=int(response.tokens_out or 0),
+                summary=_summary,
+                truncated=_truncated,
+                error_excerpt=None,
+                content_ref=None,  # W11-DISPATCH-CACHE will populate
             )
 
         # --- 9c. Failure path ------------------------------------------------
