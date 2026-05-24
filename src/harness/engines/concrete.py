@@ -435,9 +435,25 @@ class KimiConcrete(Engine):
                     success=False, text="", latency_ms=latency_ms,
                     error="parse_error_no_chunks",
                 )
+            # W7-KIMI-REASONING-EMPTY 2026-05-23: detect the case where
+            # Kimi spent its entire max_tokens budget on reasoning
+            # tokens and emitted ZERO user-facing content.  Pre-fix:
+            # callers saw success=True text='' with no signal to retry;
+            # the W6-PANEL retry sequence hit this for 4 of 5 Kimi
+            # reviewers because the panel script passed max_tokens=4000
+            # (or 2500 on retry) and reasoning_content ate the budget.
+            # Surface a distinct reasoning_only=True flag so the
+            # dispatcher's fallback chain + operator-facing callers can
+            # detect and retry with a larger budget instead of relaying
+            # the empty response downstream.
+            reasoning_only = (
+                len(content_chunks) == 0
+                and len(reasoning_chunks) > 0
+            )
             return EngineResponse(
                 success=True, text=text, latency_ms=latency_ms,
                 error=None, tokens_in=tokens_in, tokens_out=tokens_out,
+                reasoning_only=reasoning_only,
             )
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -485,11 +501,21 @@ class KimiConcrete(Engine):
         temperature = extra.get("temperature", 0.6)
         # W5-W 2026-05-23 (operator directive): "do not limit max_tokens
         # of Kimi" — Kimi is unlimited via tp- Token Plan subscription.
-        # Capping output tokens leaves capability on the table.  Default
-        # raised from 32K to 200K (Kimi K2.6 supports 256K total context,
-        # 200K output leaves a small input budget; explicit override via
-        # extra_args still respected for callers that want a cap).
-        max_tokens = int(extra.get("max_tokens", 200_000))
+        # Default raised from 32K to 200K.  W7-KIMI-MAX-TOKENS-FLOOR
+        # 2026-05-23: clamp explicit caller overrides UP to a safety
+        # floor so reasoning_content can't exhaust the budget before
+        # any user-facing content is emitted.  The W6-PANEL retry hit
+        # this when the panel script passed 2_500 and 4_000 — both
+        # below the floor, both resulted in success=True text=''.
+        # Operators who genuinely need a smaller cap can set
+        # extra_args["max_tokens_override_floor"] = True to bypass.
+        _KIMI_REASONING_FLOOR = 8_000
+        raw_max_tokens = int(extra.get("max_tokens", 200_000))
+        if (raw_max_tokens < _KIMI_REASONING_FLOOR
+                and not extra.get("max_tokens_override_floor", False)):
+            max_tokens = _KIMI_REASONING_FLOOR
+        else:
+            max_tokens = raw_max_tokens
         return {
             "model": model,
             "messages": [{"role": "user", "content": content}],

@@ -935,3 +935,138 @@ def test_deepseek_payload_alternate_no_thinking_alias() -> None:
     p = DeepSeekConcrete._build_payload("hi", "deepseek-v4-flash",
                                         {"--no-thinking": True})
     assert p["temperature"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# W7-KIMI-REASONING-EMPTY: reasoning_only flag
+# W7-KIMI-MAX-TOKENS-FLOOR: clamp small caller overrides up
+# ---------------------------------------------------------------------------
+
+
+def test_kimi_reasoning_only_set_when_content_empty_but_reasoning_present(
+    monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete
+) -> None:
+    """W7-KIMI-REASONING-EMPTY 2026-05-23: when Kimi exhausts max_tokens
+    on reasoning_content and emits ZERO user-facing content, the
+    EngineResponse must set reasoning_only=True so the caller can
+    retry with a larger budget instead of relaying empty text."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Stream: reasoning_content only (no content), plus usage block
+        sse = (
+            'data:{"choices":[{"delta":{"reasoning_content":"thinking..."}}]}\n\n'
+            'data:{"choices":[{"delta":{"reasoning_content":" more"}}]}\n\n'
+            'data:{"choices":[{"finish_reason":"length"}],"usage":'
+            '{"prompt_tokens":100,"completion_tokens":2500}}\n\n'
+            'data:[DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
+
+    monkeypatch.setattr(
+        httpx, "Client",
+        lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler)),
+    )
+
+    resp = kimi_engine.dispatch("hello", "kimi-model", {})
+
+    assert resp.success is True, (
+        "API call succeeded (200) — the response is a parseable "
+        "reasoning-only stream"
+    )
+    assert resp.text == "", "no user-facing content was emitted"
+    assert resp.reasoning_only is True, (
+        "reasoning_only must be True when content_chunks=[] but "
+        "reasoning_chunks > 0 — this is the W6-PANEL footgun signal"
+    )
+
+
+def test_kimi_reasoning_only_false_when_content_present(
+    monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete
+) -> None:
+    """Normal happy path: content emitted → reasoning_only=False even
+    if reasoning_content also appeared earlier in the stream."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        sse = (
+            'data:{"choices":[{"delta":{"reasoning_content":"think"}}]}\n\n'
+            'data:{"choices":[{"delta":{"content":"answer"}}]}\n\n'
+            'data:{"choices":[{"finish_reason":"stop"}],"usage":'
+            '{"prompt_tokens":10,"completion_tokens":5}}\n\n'
+            'data:[DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
+
+    monkeypatch.setattr(
+        httpx, "Client",
+        lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler)),
+    )
+
+    resp = kimi_engine.dispatch("hello", "kimi-model", {})
+    assert resp.success is True
+    assert resp.text == "answer"
+    assert resp.reasoning_only is False
+
+
+def test_kimi_reasoning_only_false_when_nothing_at_all_parsed(
+    monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete
+) -> None:
+    """Edge: parse_error_no_chunks (success=False) returns the default
+    reasoning_only=False — it's success=True with empty content that
+    indicates reasoning-exhausted, not total parse failure."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"")  # empty body
+
+    monkeypatch.setattr(
+        httpx, "Client",
+        lambda **kwargs: _ORIGINAL_HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler)),
+    )
+
+    resp = kimi_engine.dispatch("hello", "kimi-model", {})
+    assert resp.success is False
+    assert resp.error == "parse_error_no_chunks"
+    assert resp.reasoning_only is False
+
+
+def test_kimi_payload_max_tokens_floor_clamps_low_caller_values() -> None:
+    """W7-KIMI-MAX-TOKENS-FLOOR 2026-05-23: when the caller passes a
+    max_tokens below the 8K safety floor, the payload clamps UP to 8K
+    so reasoning_content can't exhaust the entire budget before any
+    content emits.  The W6-PANEL retry hit max_tokens=4000 and
+    max_tokens=2500 — both must be bumped."""
+    for low in (100, 1000, 2500, 4000, 7999):
+        p = KimiConcrete._build_payload("hi", "kimi-model",
+                                        {"max_tokens": low})
+        assert p["max_tokens"] == 8_000, (
+            f"max_tokens={low} should clamp to 8000; got {p['max_tokens']}"
+        )
+
+
+def test_kimi_payload_max_tokens_respects_caller_when_at_or_above_floor() -> None:
+    """At-or-above-floor caller values pass through unchanged."""
+    for ok in (8_000, 10_000, 16_000, 100_000, 200_000, 256_000):
+        p = KimiConcrete._build_payload("hi", "kimi-model",
+                                        {"max_tokens": ok})
+        assert p["max_tokens"] == ok, (
+            f"max_tokens={ok} should pass through unchanged; got {p['max_tokens']}"
+        )
+
+
+def test_kimi_payload_max_tokens_floor_override_escape_hatch() -> None:
+    """Callers who genuinely need a small cap can opt-out via the
+    `max_tokens_override_floor=True` flag.  The floor still defaults
+    to applying to protect naive callers."""
+    p = KimiConcrete._build_payload("hi", "kimi-model", {
+        "max_tokens": 1_000,
+        "max_tokens_override_floor": True,
+    })
+    assert p["max_tokens"] == 1_000, (
+        "explicit floor-override should respect the small cap"
+    )
+
+
+def test_kimi_payload_max_tokens_default_unchanged() -> None:
+    """Caller-omitted max_tokens still defaults to 200K (W5-W).  The
+    floor logic only applies when the caller passes a value."""
+    p = KimiConcrete._build_payload("hi", "kimi-model", {})
+    assert p["max_tokens"] == 200_000

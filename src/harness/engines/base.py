@@ -28,6 +28,13 @@ class EngineResponse:
         text: Generated output text (may be empty on failure).
         latency_ms: Round-trip time in milliseconds.
         error: Human-readable failure reason, or None on success.
+        reasoning_only: W7-KIMI-REASONING-EMPTY 2026-05-23.  True when
+            the engine emitted reasoning_content but exhausted its
+            max_tokens budget BEFORE producing any user-facing content.
+            success is True (the API call worked) but text is empty
+            and the caller should retry with a larger budget rather
+            than relay the empty response downstream.  Currently set
+            by KimiConcrete; other engines may opt in similarly.
     """
 
     success: bool
@@ -37,6 +44,7 @@ class EngineResponse:
     tokens_in: int = 0
     tokens_out: int = 0
     cost_usd: float = 0.0
+    reasoning_only: bool = False
 
 
 class Engine(ABC):
