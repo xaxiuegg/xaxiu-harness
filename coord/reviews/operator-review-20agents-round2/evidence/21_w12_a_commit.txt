@@ -1,0 +1,75 @@
+commit 60ecfcf9c6038ea2424b80cb0fe6a662ae913ed1
+Author: xaxiuegg <xaxiu.egg@gmail.com>
+Date:   Sun May 24 13:42:16 2026 -0700
+
+    W12-A operator-blocker triage: kills 20-agent panel's universal blockers
+    
+    Per 20-agent operator-review panel (commit 7e6a16c, 19/19 personas
+    voted WAIT-FOR-WAVE-12), five rows shipped this commit close the
+    universal blocker findings:
+    
+    W12-WINDOWS-CP1252-FIX (S, panel finding #1, 19/19 personas):
+      - Three CLI entry points crashed with UnicodeEncodeError on Windows
+        cp1252 console (preflight emits U+2192, --help emits U+03B1, agent
+        init emits U+2713).
+      - Fix: _bootstrap_utf8_stdout in cli.py::main() reconfigures
+        sys.stdout/stderr with encoding='utf-8' errors='replace' BEFORE
+        click writes a byte.  Idempotent + safe on POSIX.
+      - 11 regression tests in tests/test_cli_unicode_safety.py including
+        parametrized coverage for the 3 specific panel-flagged glyphs.
+    
+    W12-DASHBOARD-WIRE-V2-ROUTES (M, panel finding #2, 16/19 personas):
+      - /api/cost, /api/preflight-latency, /api/l5-events, /api/loop all
+        returned 404, leaving Wave 11 work invisible on the dashboard
+        (panel quote: "shipped-but-invisible").
+      - Wired through to existing backend modules: harness.cost_widget,
+        harness.preflight_latency, harness.l5_escalation, observer.state.
+      - /api/loop adds is_stale + minutes_since_last_tick computation so
+        the dashboard can highlight the 3-day-stale-loop problem the
+        panel called out.
+      - /api/l5-events surfaces CRITICAL observer flags + watchdog
+        consecutive_restart_failures >= 3.
+      - 10 regression tests covering shape contract + the explicit "no 404"
+        regression in tests/test_dashboard_w12_routes.py.
+    
+    W12-CI-WINDOWS-CLI-SMOKE (S, panel finding K01/K09/K06):
+      - GitHub Actions Windows runner uses utf-8 console, hiding the cp1252
+        bug.  New CI step sets PYTHONIOENCODING=cp1252 + runs 6 CLI verbs
+        (--help, preflight, agent init, l5-banner-demo, cost-today,
+        observer watchdog-status) so any regression breaks CI before ship.
+    
+    W12-WATCHDOG-HUMAN-FORMAT (S, panel finding M07):
+      - watchdog_status() output was machine-shaped (`stale_seconds:
+        1209.65`) requiring mental math.
+      - Added stale_human + cadence_human + verdict + summary_line fields.
+      - CLI now leads with `Watchdog: OK - last cycle 17min ago (cadence:
+        every 60m)` matching the cost-widget operator-friendly pattern.
+    
+    W12-LOOP-STALENESS-WATCHDOG (M, panel finding K10/M03):
+      - Dashboard claimed "Loop: armed" while last tick was 3 days ago.
+      - `harness today` now has a "Loop health" section reading
+        coord/dev_loop/state.json; flags age >24h with [!] warning.
+    
+    Tests: 2165 passed (24 net new), 6 skipped pre-existing.
+    Full suite: no regressions.
+    
+    Verbatim ground-truth from the operator-review panel that drove this work:
+      "UnicodeEncodeError: 'charmap' codec can't encode character '→'"
+      - evidence file 04, the very first preflight remediation crash.
+      "A dashboard that partially renders stale data and partially 404s is
+      worse than no dashboard."
+      - M02-spec-vs-reality.
+    
+    Next step per panel synthesis: re-fire the 20-agent panel to confirm
+    votes shift to APPROVE-AND-SHIP, then proceed to real-day-of-use.
+    
+    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+ .github/workflows/test.yml         |  22 ++++++
+ coord/STATUS.csv                   |  10 +++
+ src/harness/cli.py                 |  97 ++++++++++++++++++++++--
+ src/harness/dashboard/app.py       | 107 ++++++++++++++++++++++++++
+ src/harness/observer/watchdog.py   |  48 +++++++++++-
+ tests/test_cli_unicode_safety.py   | 150 +++++++++++++++++++++++++++++++++++++
+ tests/test_dashboard_w12_routes.py | 110 +++++++++++++++++++++++++++
+ 7 files changed, 533 insertions(+), 11 deletions(-)

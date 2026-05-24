@@ -1,0 +1,8 @@
+=== /api/loop ===
+{"status":"unknown","tick":0,"last_tick_at":null,"minutes_since_last_tick":null,"is_stale":false}
+=== /api/cost ===
+{"spent_usd":0.195896,"budget_usd":5.0,"remaining_usd":4.804104,"pct_of_budget_used":0.0392,"offload_ratio":0.0382,"dispatches":3164,"subscription_dispatches":1880,"paid_dispatches":1284,"window_label":"today","status":"ok","tokens_total":188058}
+=== /api/preflight-latency ===
+{"count":283,"p50":863,"p95":7060,"p99":8228,"mean":2280,"max":8723,"window_hours":24.0,"per_check":{"dead_engines":{"count":46,"p50":19,"p95":22,"max":23},"git_clean":{"count":67,"p50":880,"p95":3959,"max":4100},"loops":{"count":53,"p50":4812,"p95":8253,"max":8723},"observer":{"count":81,"p50":4423,"p95":5972,"max":7073},"engine:kimi":{"count":11,"p50":2000,"p95":2000,"max":2000},"pytest_cache":{
+=== /api/l5-events ===
+{"count":0,"events":[]}

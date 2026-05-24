@@ -1,0 +1,12 @@
+============================================================
+L5 ESCALATION — L5.observer.OBSERVER_RESTART_LOOP
+============================================================
+observer scheduler restart failed 3 consecutive times — the watchdog cannot self-recover
+
+ACTION: Inspect scheduler manually: on Windows run `Get-ScheduledTask -TaskName XaxiuHarnessObserver*`; on Linux/Mac run `crontab -l | grep HARNESS_OBSERVER`.
+
+Evidence:
+  - latest register message: PowerShell exit code 1
+  - cadence: every 60 min
+  - daily retro at: 23:00
+============================================================

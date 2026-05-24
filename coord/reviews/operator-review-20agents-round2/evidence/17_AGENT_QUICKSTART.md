@@ -55,7 +55,7 @@ harness agent init --target ./my-project --project-type python
 
 This writes 7 files non-destructively: `.env`, `.gitignore`, `adapter.py`, `CLAUDE.md` (marker-gated append), `.harness/config.json`, `.harness/STATUS.csv`, `.harness/dispatched/.gitkeep`. Re-running is safe — existing files are not overwritten.
 
-Works on Windows / Linux / macOS (Wave 12-A fix to `_bootstrap_utf8_stdout` in `cli.py::main()` reconfigures stdout/stderr to UTF-8 before click writes anything, so the `✓` success-summary glyph and other Unicode in CLI output no longer crash cp1252 consoles).
+**Heads-up (Windows)**: as of 2026-05-24, `agent init`'s success summary uses a Unicode checkmark (`✓`) that crashes Windows console (cp1252) with `UnicodeEncodeError`. The files ARE created — the traceback comes AFTER the writes — so you can still `ls --target/` to confirm. Tracked for fix in Wave 12.
 
 For the harness repo itself, skip this step.
 
