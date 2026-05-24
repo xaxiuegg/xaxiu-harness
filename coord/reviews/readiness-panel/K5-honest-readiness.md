@@ -1,11 +1,15 @@
-<!-- name=K5-honest-readiness latency_ms=95004 error='' -->
+<!-- name=K5-honest-readiness latency_ms=120026 error='' -->
 
 ## Rubric
-1. **Install** — 2. Preflight exits 1 on untracked files with no actionable remediation; a non-technical user cannot clear the readiness gate.
-2. **Daily run** — 2. Twenty-plus verbs and cryptic flags (`--explore-on-uncertainty`) with no obvious single “start my day” command.
-3. **Observe** — 3. Dashboard and morning-brief exist, but output is jargon-heavy and the 296-row STATUS.csv is unfiltered noise.
-4. **Recover** — 2. `engines-heal` exists, yet preflight git warnings lack fix hints and open W9 proxy/redaction gaps leave critical failures undocumented.
 
-5. **Hand to a non-technical operator today?** NO. The preflight readiness gate fails with an ambiguous git warning that would halt a non-technical user before day one. The CLI is a dense forest of expert flags rather than a guided workflow. Most critically, open security gaps (secret exfiltration path, undocumented proxy fail-open behavior) mean typical failures become silent data-loss events that a non-technical operator cannot detect or remediate.
+1. **Install** — 1. Preflight exits 4 with git_clean and observer timeout; “commit or stash” is not something a non-technical user does.  
+2. **Daily run** — 2. `harness daily` exists, but the routine is blocked by preflight failures and an unregistered dev loop.  
+3. **Observe** — 3. Dashboard and morning-brief are operator-friendly, yet the observer probe timing out means the picture cannot be trusted without help.  
+4. **Recover** — 2. Engine-specific healing exists, but bootstrap failures (git state, loop registration, observer hang) lack one-button remediation.  
 
-6. **Top 3 blockers:** (1) A single `harness daily` verb that sequences morning-brief → dispatch → observer → status, hiding advanced flags. (2) A `harness preflight --fix` that auto-resolves git warnings, stash issues, and engine cooldowns without Python knowledge. (3) Ship W9-PROXY-FAILURE-MATRIX and W9-REDACTION-INTEGRITY-TEST and wire them into `harness doctor` so key-leak scenarios are caught and reported in plain language.
+5. **Hand to a non-technical operator today?** NO. The surface area is impressive, but the very first gate—`harness preflight`—hard-fails with a git hygiene error and an observer timeout. A non-technical friend cannot stash commits or debug why the observer probe hangs. Until the harness can bootstrap itself from a fresh clone to a green preflight without Python or git knowledge, it remains a dev tool, not an operator appliance.
+
+6. **Top 3 blockers**
+   - `harness install --autonomous` that auto-resolves git_clean (auto-stash or ignore), registers the dev loop, and seeds the observer so preflight exits 0 on first run.
+   - `harness daily --repair` that internally fixes preflight/loop/observer warnings before doing work, collapsing the morning routine to one command.
+   - A bulletproof `dashboard-serve` that falls back to a static, engine-less status page when the observer is down, guaranteeing the operator always has a readable health view.

@@ -1,21 +1,22 @@
-<!-- name=K3-failure-modes latency_ms=131162 error='' -->
+<!-- name=K3-failure-modes latency_ms=152806 error='' -->
 
 ## Rubric
 
-**First-month failure modes**
-1. **Preflight halts on `git_clean` warning.** Error: visible (`3 untracked files`) but not actionable. Recovery: not obvious (stash? delete?). → Ping engineering.
-2. **Engine proxy fail-closed / key exhaustion.** Error: absent or engineering-level (W9-PROXY-FAILURE-MATRIX is todo). Recovery: undocumented. → Ping engineering.
-3. **Task Scheduler silent death.** Error: none; preflight only checks “armed,” not last-run health. Recovery: unclear. → Ping engineering.
-4. **Engine quarantine cascade.** Error: preflight notes dead engines. Recovery: `engines-heal` exists but is not suggested in output. → Ping engineering.
+**Failure modes (first month):**
+1. **Git-dirty preflight FAIL** — Message is clear to a developer, but “Commit or stash” assumes git fluency; a non-technical operator will ping engineering. Recovery is not CLI-obvious.
+2. **Observer probe timeout** — “Timed out” is clear, but the fix (`harness observer scheduler-status`) is opaque; if re-running preflight fails, operator pings engineering.
+3. **Both-engines-failed (DeepSeek+MiMo cascade)** — The error is explicit, yet no CLI verb resolves a content-filter/key root cause; operator must ping engineering.
+4. **Loop not registered** — Clear warning with exact fix (`harness loop start`); recovery is obvious without help.
+5. **STATUS.csv blindness** — No error message, but 310 rows drown signal; operator lacks a filtered view and likely gives up reading it.
 
-1. **Install** — 2. Preflight exits 1 on a soft git warning with no `--fix` or plain-language hint, stalling non-technical users.
-2. **Daily run** — 3. `morning-brief` exists, but hidden Task Scheduler dependencies and lack of a single curated checklist add toil.
-3. **Observe** — 2. STATUS.csv mixes 296 wave and dispatch rows; no evidence the dashboard is deployed for non-technical readability.
-4. **Recover** — 1. Critical failures (proxy, engine death, silent exceptions) lack CLI-guided remediation or operator-facing runbooks.
+1. **Install** — 2. `env-wizard` eases API keys, but the git-dirty hard block + observer warnings make a ≤30-min green preflight unlikely without engineering help.
+2. **Daily run** — 3. `daily` and `morning-brief` exist, yet sequencing isn’t self-evident; low-toil only after memorization or docs.
+3. **Observe** — 3. Dashboard and `heartbeat` help, but observer timeout in preflight and noisy CSV erode confidence.
+4. **Recover** — 2. `engines-heal`/`env-wizard` cover simple paths, yet git blocks and engine-cascade failures lack operator-grade recovery.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. Core verbs and checks exist, but the first month will repeatedly surface ambiguous preflight halts, opaque proxy failures, and silent scheduler deaths that require engineering escalation because self-service recovery paths are not yet wired or documented.
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. Core commands exist, but preflight assumes git literacy, STATUS.csv is a firehose, and engine outages degrade to opaque errors. It is usable only if an engineer pre-clears git/loop state and remains on-call for engine-level failures.
 
-6. **Top 3 blockers**
-   - `harness preflight --fix` or guided plain-language remediation for git/stash warnings.
-   - Shipped W9-PROXY-FAILURE-MATRIX plus `harness engines` surfacing one recommended recovery verb when quarantined.
-   - Operator-filtered status view (e.g., `harness status --operator`) that hides raw dispatch logs and surfaces only health and next actions.
+6. **Top 3 blockers:**
+- **`harness morning` unified verb**: Sequences daily/brief/preflight and narrates blockers in plain English.
+- **`harness status today` filter**: Hides 300+ shipped rows to surface only active blockers.
+- **`--operator-safe` preflight flag**: Auto-stashes or bypasses git dirty state so non-coders aren’t hard-blocked.

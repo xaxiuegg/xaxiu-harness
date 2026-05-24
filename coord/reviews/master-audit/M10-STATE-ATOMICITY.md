@@ -1,24 +1,19 @@
-<!-- name=M10-STATE-ATOMICITY latency_ms=31126 error='' -->
+<!-- name=M10-STATE-ATOMICITY latency_ms=31648 error='' -->
 
 ## Score
 
-1. **Correctness**: 2 — W8 schema bug proves state writes silently swallowed failures for *weeks*; `except Exception: continue` is the anti-pattern that corrupts silently.
-2. **Robustness**: 2 — W9-STATE-ATOMIC-WRITES committed but no evidence of write-temp+fsync+rename pattern; kill-9 during `engine_performance_log.jsonl` append or `engine_health` update leaves partial/truncated state with zero detection.
-3. **Operator-usability**: 1 — `doctor`/`preflight` never validates state-file integrity; a corrupted `engine_health.json` silently feeds bad routing until operator notices phantom cooldowns weeks later.
-4. **Test discipline**: 2 — no kill-9/mid-write simulation tests; the quarantine bug was caught by *audit sweep*, not by 1576 tests — that's a red flag for state-write coverage specifically.
-5. **Risk**: 3 — silent state corruption during autonomous overnight loops can compound: one bad `engine_health` write → phantom quarantine → routing misbehavior → operator discovers Monday.
-
-## State-atomicity specifics unresolved
-
-- `db.sqlite`: no WAL-mode or journal-mode evidence; `PRAGMA integrity_check` absent from preflight.
-- `*.json` files: JSONL append is natively non-atomic; `*.json` writes need write-replace pattern explicitly.
-- `YAML configs`: PyYAML `safe_dump` to same path = truncate-then-write = data loss on kill-9.
-- `StateFileCorruptError`: **never observed** in any sweep, test, or log — meaning either (a) it doesn't exist as a class, or (b) it exists but has zero test coverage. Either is a gap.
+| Dim | Score | Justification |
+|---|---|---|
+| **Correctness** | 2 | W8 schema bug proved EngineHealth writes silently failed for an entire wave; the `except Exception: continue` anti-pattern still lurks in any path that hasn't been individually audited. No proof all JSON/CSV/SQLite writes go through validated models. |
+| **Robustness** | 1 | No evidence of atomic write primitives (tmp+rename, SQLite WAL/journal). `kill -9` mid-write of `status.csv` (310 rows) or any `state/*.json` yields partial/truncated files with zero automatic recovery. `StateFileCorruptError` is never mentioned as caught, raised, or tested — it either doesn't exist or is never triggered, meaning corruption is silent. |
+| **Operator-usability** | 4 | `preflight --fix` and `engines-heal` give the operator self-service repair; `status_csv writable` check exists. Usable surface is good. |
+| **Test discipline** | 2 | 1576 tests but none exercised `kill -9` recovery, corrupt-file simulation, or partial-write rollback. The W8 quarantine bug evaded every test because they tested the happy path, not the failure path. The `except Exception: continue` pattern is untestable by design. |
+| **Risk** | 4 | Silent state corruption on process kill is the single highest-impact failure mode in a long-running autonomous loop. Operator trusts the state to make routing/health decisions; if it's stale or truncated, cascading bad dispatches follow. |
 
 ## Top blocker
 
-Add `state_integrity` to preflight: validate every `state/*.json` parses, `db.sqlite` passes `PRAGMA integrity_check`, and all YAML configs load — *before* any autonomous dispatch fires. Without this, the W9 atomic-write commit is unverifiable in production.
+Ship a **`state/_atomic_write.py`** utility that every state path must use: write-to-temp → `fsync` → `os.replace` (POSIX atomic rename) → verify re-read checksum. Retrofit `status.csv`, all `state/*.json`, and `engine_health` writes to go through it. Add a `--corrupt-state` preflight check that detects zero-byte or unparseable files and surfaces a `StateFileCorruptError` with recovery guidance. This single artifact lifts Robustness from 1→3 and Risk from 4→2.
 
 ## Verdict
 
-**HOLD** — W9 landed atomic-write infrastructure but zero integration tests prove it works under kill-9, and the preflight gate has no state-integrity check to catch corruption before autonomous loops consume bad data.
+**SHIP-WITH-FIXES.** The W8 schema bug proves silent-write failures are not hypothetical; without atomic write guarantees and corruption detection, the next `kill -9` during an autonomous overnight loop will produce unrecoverable stale state that no preflight or heal command knows to look for.

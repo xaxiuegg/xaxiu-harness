@@ -1,21 +1,14 @@
-<!-- name=M1-install latency_ms=33800 error='' -->
+<!-- name=M1-install latency_ms=16465 error='' -->
 
 ## Rubric
+1. **Install (2/5)** – `harness doctor` shows env vars can be set via `env-wizard`, but the fresh-clone operator hits `preflight` blockers (git dirty, loop task not registered) that require understanding git and Task Scheduler beyond basic commands.
+2. **Daily run (3/5)** – The `daily` verb exists, but the example `preflight` output shows a FAIL with instructions like "Commit or stash"—toil that requires git knowledge.
+3. **Observe (4/5)** – `STATUS.csv`, `dashboard-serve`, and CLI commands (`heartbeat`, `morning-brief`) give visibility without reading raw files.
+4. **Recover (4/5)** – Preflight errors have explicit "Run to fix" commands; `engines-heal` and `doctor` provide guided recovery.
 
-**Install (3/5):** `harness install` with a first-run wizard and `harness doctor` diagnostics are strong scaffolding. However, env-var setup (`KIMI_API_KEY`, `DEEPSEEK_API_KEY`) has no visible wizard step — the operator must know *where* to set Windows environment variables, which is non-trivial without guidance. DPAPI says "read works" but the *seeding* step (writing keys into DPAPI initially) isn't shown — likely undocumented for the happy path. Exit code 1 on `preflight` due to a git warning will alarm a non-technical operator who doesn't know `1 ≠ fail`.
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The operator can run commands and follow guided wizards, but the initial `preflight` failure due to git state and unregistered loops would stop them cold. They’d need a one-time setup script that automates git commit and loop registration, or a human helper for that first hurdle.
 
-**Daily run (3/5):** `harness morning-brief` plus `harness coord status` is a reasonable two-command cadence, and `harness dashboard-serve` exists for visual monitoring. The `--profile non_technical` flag reduces verbosity. But the *default* flags (mode, escalation-threshold, explore-on-uncertainty) aren't obviously set once — the operator must either always pass flags or edit a config file. A `daily` or `start` verb that loads a saved profile is missing.
-
-**Observe (4/5):** Observer primitives, heartbeat, STATUS.csv, dashboard, and `morning-brief` all target the non-technical lens directly. The 296-row STATUS.csv is readable in Excel. Engine cooldowns/reliability have dedicated verbs. Only gap: no `--watch` or live-updating view for dispatch runs.
-
-**Recover (2/5):** `engines-heal` is a good one-command recovery. But the proxy failure matrix (W9, still `todo`) means proxy failures are opaque. `preflight` exit-code ambiguity hides real problems. No `harness fix --auto` verb that resolves common warnings (e.g., git clean) without the operator understanding git.
-
-## 5. Hand to a non-technical operator today?
-
-**WITH GUARDRAILS.** The CLI surface is rich and `--profile non_technical` exists, but three critical seams require hand-holding: (a) initial env-var population has no guided path, (b) DPAPI seeding is invisible in the snapshot, and (c) preflight's warning-vs-failure semantics will confuse anyone who doesn't know exit codes. A 30-minute pairing session would cover it; alone, expect 90+ minutes of floundering.
-
-## 6. Top 3 blockers
-
-1. **`harness install --wizard` must demo env-var setting end-to-end** — show the exact Windows Settings dialog or auto-populate from a `.env` file.
-2. **`harness preflight` needs human-readable pass/fail** — replace exit code 1 for warnings with "PASS with notes"; save exit 1 for actual failures.
-3. **`harness quickstart` verb** — a single command that runs `doctor` → `install` → `init` → `preflight` with progress narration in `non_technical` profile, replacing the 4-step sequence the operator must currently memorize.
+6. **Top 3 blockers**
+   - **First-run script missing** that auto-commits/stashes and runs `harness loop start` to clear common `preflight` fails.
+   - **Git-clean check in preflight** is too strict for a fresh clone; it should allow a known-clean repo or provide a non-interactive fix command.
+   - **Loop registration** must be part of `install` or `init`, not a manual step.

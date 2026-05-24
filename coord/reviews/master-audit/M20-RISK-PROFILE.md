@@ -1,12 +1,13 @@
-<!-- name=M20-RISK-PROFILE latency_ms=38180 error='' -->
+<!-- name=M20-RISK-PROFILE latency_ms=31082 error='' -->
 
 ## Score
-1. **Correctness** 3 — Core ops work, but 2 persistent audit STOPs and 3 non-det rows indicate spec-misalignment in the detection/audit layer.
-2. **Robustness** 3 — Schema bug fix was load-bearing and good. However, MiMo audit non-determinism is a major fragility; the system's quality gate is probabilistic.
-3. **Operator-usability** 4 — Runbook, `preflight --fix`, and `harness today` are solid wins. The persistent STOPs on the runbook and status human (non-det) suggest residual gaps.
-4. **Test discipline** 4 — +32 tests, mutation canary running. The audit non-determinism itself is a testing problem that W9 aims to address.
-5. **Risk** 4 — **Audit gate unreliability** is the top risk. 3 of 8 W8 rows have non-deterministic PASS/STOP verdicts with no code change, making the gate untrustworthy for holding the line. This directly threatens correctness.
 
-**Top blocker**: Ship the `--avg-of-N` audit flag (W9-AUDIT-NONDETERMINISM-AVG) and use it as the default gate. Until the audit verdict is stable, the harness cannot be trusted to catch real regressions.
+1. **Correctness**: 4/5 — Core flows work post-schema-fix, but persistent audit STOPs on STOP-HOOK and AUDIT-PROMPT indicate unresolved spec deviations.
+2. **Robustness**: 3/5 — Silent quarantine failure (now fixed) exposed a fragility pattern: exceptions swallowed with `continue`. The `git_clean` preflight fail blocks autonomous mode; no auto-fix offered.
+3. **Operator-usability**: 3/5 — Runbook and `harness today` are good, but non-deterministic audit flips (PASS→STOP with no code change) will confuse a non-technical operator expecting consistency.
+4. **Test discipline**: 3/5 — 1576 tests and mutation gates are solid, but the audit gate itself is the primary regression detector—and it's non-deterministic. Tests don't catch audit-flip drift.
+5. **Risk** (next 30 days): 4/5 — **Engine collapse is the top risk**: MiMo content filter blocks audit prompts; DeepSeek is now primary but has no proven fallback if it degrades. Key revocation by any provider could silently break dispatch. Cost overrun is secondary (~$0.03/wave, but Wave 10 scope is wide). Scope creep is medium—autonomous loop can keep adding rows without operator review.
 
-**Verdict**: SHIP-WITH-FIXES. The operator-readiness foundation is valuable, but the audit layer's non-determinism is a critical weakness that must be stabilized before claiming production readiness.
+**Top blocker**: Implement `W9-AUDIT-NONDETERMINISM-AVG` (`--avg-of-N`) before Wave 10 closes. The audit gate is the harness's quality backbone, and right now a single sweep has ~40% false-positive/negative noise. Averaging 3+ sweeps would collapse the noise floor and let operators trust the verdict. Without it, every future wave risks shipping on a STOP or holding on a false PASS.
+
+**Verdict**: SHIP-WITH-FIXES. The harness is functional and the schema bug is fixed, but the audit non-determinism and lack of cross-engine fallback resilience mean the operator cannot fully trust the system's self-diagnosis yet.

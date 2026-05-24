@@ -1,10 +1,17 @@
-<!-- name=K07-DEAD-CODE latency_ms=100269 error='' -->
+<!-- name=K07-DEAD-CODE latency_ms=183679 error='' -->
 
 ## Score
-1. **Correctness**: 2 — Only ~60% of the ~30 listed verbs are live; the rest are stubs or pending-wave scaffolding (`swarm-verify` truncates mid-string, `observer` probe times out, W8-STOP-HOOK is persistently STOP).
-2. **Robustness**: 2 — The `quarantined` write path was dead code masked by bare `except Exception: continue`; dead-engine handling fails silently without the schema patch.
-3. **Operator-usability**: 3 — `today` and `preflight --fix` work, but the help surface mixes live features with unfinished scaffolding the non-technical operator cannot distinguish.
-4. **Test discipline**: 2 — 1,576 tests missed the silently failing quarantine path, and W8 skipped the mutation sweep, leaving scaffolded modules unaudited.
-5. **Risk**: 4 — A non-technical operator will invoke a stub verb or trust a broken hook; confusion or state corruption is a near-term ship blocker.
-6. **Top blocker**: A `--stub-audit` gate that hides every CLI verb whose help text is truncated, times out in preflight, or references an unshipped Wave prefix.
-7. **Verdict**: SHIP-WITH-FIXES — cull the dead verbs and hardened hooks before handing this surface to an operator.
+
+1. **Correctness — 2/5** At least 8 of ~37 visible verbs carry wave-ID scaffolding, `start` is a naked stub, and `today` is live yet absent from `--help`, so the manifest is materially false.
+
+2. **Robustness — 2/5** Ghost verbs (`today`) and duplicate aliases (`engines-heal` / `engines heal`) create bifurcated paths; stubs fail silently or opaquely under operator use.
+
+3. **Operator-usability — 2/5** A non-technical operator depends on `--help`; ticket-number descriptions and missing entries force runbook dependency for basic discovery.
+
+4. **Test discipline — 2/5** 1576 tests guard logic but none appear to assert CLI-tree completeness or stub absence, allowing dead surface code to persist.
+
+5. **Risk — 3/5** Scaffolding debt will confuse incident response and erode trust as the operator discovers unlisted verbs and stubs; fix before next wave.
+
+6. **Top blocker** — One CLI-hygiene commit: strip wave IDs from all `--help` strings, delete or implement the `start` stub, and register `today` / `status human` in the top-level Click group so `--help` becomes a truthful manifest.
+
+7. **Verdict** — SHIP-WITH-FIXES. The harness works, but its CLI surface is still a construction site; the operator cannot trust the verb tree they see.

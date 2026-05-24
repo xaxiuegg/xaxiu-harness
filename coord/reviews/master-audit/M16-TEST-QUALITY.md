@@ -1,27 +1,22 @@
-<!-- name=M16-TEST-QUALITY latency_ms=32151 error='' -->
+<!-- name=M16-TEST-QUALITY latency_ms=29485 error='' -->
 
 ## Score
 
-**Correctness: 4/5** — Tests pass and mutations kill, but the `EngineHealth` schema bug *survived* 1544 tests undetected because `except Exception: continue` swallowed it. Behavioral correctness was asserted; error-path correctness was not.
+1. **Correctness** — 3/5. The quarantine schema bug (`except Exception: continue` + wrong Literal values) proves behavioral assertions weren't validating actual Pydantic writes. Tests passed while the feature silently failed every quarantine — a test discipline gap.
 
-**Robustness: 3/5** — The schema-bug silent-failure pattern (`except Exception: continue`) is the smoking gun. It means tests *did* exercise quarantine writes, but Pydantic validation errors were swallowed before any assertion could fire. Happy-path robust: yes. Failure-path robust: demonstrably not.
+2. **Robustness** — 2/5. `except Exception: continue` was load-bearing masking code. Mock dict stubs in engines-heal tests allowed dict-path to pass while Pydantic-path was broken in production. Tests should have caught the schema mismatch.
 
-**Operator-usability: 4/5** — `harness today` and `harness preflight` are clean, plain-language surfaces. Irrelevant to my lens directly, but readable error messages reduce support load, which frees test-budget time.
+3. **Operator-usability** — 4/5. `harness today`, preflight, engines-heal are non-technical-usable. Runbook exists. Minor: observer timeout warning leaks internal concepts.
 
-**Test discipline: 3/5** — 1576 passing is table stakes. The real question is **mutation kill rate coverage**: only 5 modules swept (W6), no W7/W8 re-sweep despite 8 new rows shipping. Three random modules I'd audit:
+4. **Test discipline** — 3/5. 1576 tests but the three modules I sampled reveal pattern: tests validate dict stubs not real Pydantic models. The engines-heal `isinstance(v, dict)` dual-path exists *because* tests use dicts. This inverts the relationship — production code adapts to test stubs.
 
-| Module (random pick) | Rating | Why |
-|---|---|---|
-| `engines/heal.py` (W8-ENGINES-HEAL) | ⚠️ Weak | Quarantine writes passed through the broken `EngineHealth` schema — tests only passed because exceptions were swallowed. Behavioral? Mock-heavy with dict stubs vs Pydantic production paths. |
-| `preflight/fix.py` (W8-PREFLIGHT-FIX) | ✅ Decent | 3 fix functions + `FixOutcome` struct; L4 toast wiring tested. But `--skip-engines` path masks what actually fires in production. |
-| `cli/status_human.py` (W8-STATUS-HUMAN) | ⚠️ Untested edge | CLI output formatting rarely gets snapshot/diff tests; `--since-hours N` boundary likely only mocked. |
+5. **Risk** — 3/5. Mock-heavy tests that don't exercise Pydantic schemas will miss the next schema mutation. The mutation canary (3 patterns, rolling) helps but doesn't cover schema evolution.
 
-**Risk: 3/5** — The `except Exception: continue` pattern is almost certainly duplicated elsewhere. Without a W7/W8 mutation sweep, I can't confirm kill rates held. Dead test code: the old `observer_tick` stub (removed in W5) and any W7-era quarantine tests that assert on the *pre-fix* `Literal["up","degraded","down"]` schema are now testing a dead contract — they pass vacuously.
+**Three modules sampled** (highest mutation-kill-rate first):
+- `engines/dispatcher.py` (17.30 kill-rate) — likely behavioral; kill rate suggests real edit detection. **A-**.
+- `coord/worker.py` (recovered to 4.00) — test stubs use dicts not real schemas; the quarantine bug's sibling risk. **C+**.
+- `proxy/circuit` (2/2 killed, consistent) — circuit breaker is inherently behavioral (state transitions). **B+**.
 
-## Top blocker
+6. **Top blocker** — Replace dict-based test stubs with real Pydantic `EngineHealth(...)` construction in engines-heal and preflight-fix tests. This one change would have caught the schema bug that silently failed every quarantine, and would generalize to future schema mutations.
 
-**Run a targeted mutation sweep on `engines/heal.py` and `preflight/fix.py` with the new `quarantined`/`recovering` states.** The fix landed, but the test that *would have caught the original bug* still doesn't exist — no test asserts that `engine_health.json` actually contains the expected status after `--fix`. Add one behavioral integration test that reads the file post-fix and asserts on the written value. This lifts test discipline from 3→4 and correctness from 4→5.
-
-## Verdict
-
-**SHIP-WITH-FIXES.** The silent-exception-into-schema-mismatch bug class is real and likely repeated; one integration test that asserts on *file contents* post-quarantine-write closes the gap that let 1544 tests miss a load-bearing bug for an entire wave.
+7. **Verdict** — **SHIP-WITH-FIXES.** Tests catch regressions in behavioral modules but mask bugs where mock dicts diverge from Pydantic schemas — the quarantine flow proves this isn't theoretical.

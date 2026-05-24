@@ -1,16 +1,15 @@
-<!-- name=K2-documentation latency_ms=106047 error='' -->
+<!-- name=K2-documentation latency_ms=86512 error='' -->
 
 ## Rubric
 
-1. **Install** — **2**. `harness doctor` is readable, but `preflight` exits 1 on a cryptic `git_clean` warning with no remediation hint, and no simple first-run wizard output is shown.
-2. **Daily run** — **2**. `morning-brief` and `dashboard-serve` suggest routine awareness, yet the CLI presents 20+ undifferentiated commands with no obvious daily sequence or plain-language “what do I run today?” guide.
-3. **Observe** — **2**. Observer and dashboard primitives exist, but `STATUS.csv` is packed with ticket IDs, mutation metrics, and arcane module names; no evidence of a non-technical summary view.
-4. **Recover** — **2**. `engines-heal` and `doctor` are discoverable, but preflight warnings lack remediation steps and `STATUS.csv` explicitly flags undocumented proxy failure modes and missing recovery matrices.
+1. **Install** — 3. Preflight emits a hard FAIL (exit code 4) for git dirty and observer timeout that expects the operator to understand git stash or scheduler diagnostics, which is too much for a non-technical user.
+2. **Daily run** — 4. Dedicated `daily` and `morning-brief` verbs show intentional low-toil design, though we cannot see their actual output to confirm the workflow is fully self-explanatory.
+3. **Observe** — 4. Dashboard, morning-brief, and STATUS.csv provide multiple non-code views, yet the observer probe timeout proves the health pipeline itself can become opaque without warning.
+4. **Recover** — 3. `engines-heal` and `env-wizard` cover engine and key issues, but typical first-run failures (git state, observer timeout) lack one-click remediation from the CLI.
 
-## Hand to a non-technical operator today?
-**WITH GUARDRAILS.** A motivated operator could run pre-canned commands like `morning-brief` and `dashboard-serve` if a technical user performs initial setup, hides the full `--help` surface, and provides a 1-page cheat sheet. They cannot self-install or self-recover from warnings like `git_clean` or dead engines without a runbook.
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The CLI already surfaces plain-language "Run to fix" hints and operator-centric verbs (`daily`, `morning-brief`, `env-wizard`), so a non-technical user could likely run the routine day-to-day once past setup. However, the initial bootstrap still crashes into a hard preflight FAIL that requires git and scheduler literacy, meaning they would need a technical buddy on-call for installation and any observer hiccup.
 
-## Top 3 blockers
-- **Plain-language install runbook**: translate `preflight`/`doctor` outputs into “if you see X, do Y” steps.
-- **Simplified daily operator view**: collapse the 20+ CLI verbs into an opinionated daily checklist (e.g., `harness today`) instead of requiring the operator to navigate subcommands.
-- **Failure-mode recovery cards**: attach human-readable remediation to every `preflight` warning and `STATUS.csv` `todo` so the operator knows which single command to run next.
+6. **Top 3 blockers**
+- `harness preflight --fix` (or `harness fix`): a single command that auto-stashes git, registers the dev loop, and restarts the observer so the operator never manually touches git or Task Scheduler.
+- `harness observer start` with guaranteed bootstrap: eliminate the timeout-based hard blocker by shipping a resilient start verb that retries and self-heals instead of surfacing FAIL.
+- `docs/OPERATOR_QUICKSTART.md`: one-page morning routine with exact copy-paste blocks and a jargon glossary (DPAPI, packet, retro), because `--help` and preflight still read like developer tools.

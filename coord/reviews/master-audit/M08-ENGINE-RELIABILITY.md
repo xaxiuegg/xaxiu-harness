@@ -1,17 +1,19 @@
-<!-- name=M08-ENGINE-RELIABILITY latency_ms=38757 error='' -->
+<!-- name=M08-ENGINE-RELIABILITY latency_ms=35283 error='' -->
 
 ## Score
 
-1. **Correctness** — 3. Quarantine/recovery lifecycle now implements the spec post-schema-fix (7081d93), but a bug that silently swallowed every quarantine write for weeks proves the spec was unmet until very recently.
+**Engine Reliability Reviewer — single-engine-collapse lens**
 
-2. **Robustness** — 2. The `except Exception: continue` that hid the schema bug is a **pattern-level hazard**. One was found; the question is how many remain. DeepSeek is currently dead (`deepseek:5`) and recovery hasn't been demonstrated end-to-end in production — only manually verified with `--skip-engines`.
+1. **Correctness** — 3/5: Schema bug fix (`EngineHealth` Literal missing `quarantined`/`recovering`) was load-bearing and resolved. But the quarantine flow was silently failing *every* write until W8 audit sweep caught it — meaning the production engine layer ran broken for potentially weeks. Correctness is now *claimed*, not yet *proven* across all states.
 
-3. **Operator-usability** — 4. `engines-heal` exists, `harness today` surfaces the blocker, and the runbook documents recovery steps. Minor gap: key-rotation vs. quarantine decision isn't guided in the CLI output itself.
+2. **Robustness** — 3/5: Post-fix, `engines-heal` walks the recovery chain correctly (dead→quarantined→recovering→blocked). Dispatcher fallback (W5-O: retry-on-different-engine) handles the primary collapse case. However, zero tests validate the end-to-end cascade: *engine goes down → alarm fires → heal quarantines → dispatcher skips → operator sees toast*. The `_check_dead_engines` excluding already-quarantined is correct, but `engines-heal` has no timeout/retry if `read_engine_health` itself fails during recovery.
 
-4. **Test discipline** — 2. Tests passed *throughout* the broken-quarantine period because the same `except Exception: continue` masked failures in test stubs too. The follow-through explicitly notes stubs had to be taught to match Pydantic forms — meaning tests were validating a different code path than production ran.
+3. **Operator-usability** — 3/5: `harness engines-heal` is a clean verb. The L4 toast fires. But non-det audit scores (PASS/STOP/STOP) mean *neither the operator nor I can trust that the module behaves as specified* — MiMo itself can't reach stable verdict on it.
 
-5. **Risk** — 3. DeepSeek is dead *right now*. The schema fix is <1 commit old, the non-det audit on ENGINES-HEAL means we can't rely on automated verification, and autonomous overnight loops will degrade silently if a second engine fails while the recovery path has an undiscovered bug.
+4. **Test discipline** — 3/5: 1576 tests pass, dispatcher.py mutation kill-rate 17.30 is excellent. But the quarantine schema bug evaded all tests — `except Exception: continue` swallowed Pydantic rejection silently. No integration test exercises `preflight --fix` → `preflight --skip-engines` roundtrip and verifies the dead-engine warning *actually clears*.
 
-6. **Top blocker** — Systematic grep for `except Exception` with bare `continue`/`pass` in every engine-health, quarantine, and dispatcher-fallback path. The schema bug proves these patterns hide load-bearing failures. Each hit needs a logged warning or explicit re-raise. Estimate: 2 hours, eliminates the entire category.
+5. **Risk** — 3/5: The non-determinism on W8-ENGINES-HEAL (the only row *directly* in my scope) means I cannot confirm the module is audit-clean. If a *second* engine collapses while the first is `recovering`, the current heal walk has no documented handling.
 
-7. **Verdict** — **SHIP-WITH-FIXES.** The single-engine-collapse path exists and the schema bug is patched, but the silent-swallow pattern that hid it for weeks is a systemic defect that must be hunted before we can trust the recovery lifecycle under real autonomous load.
+6. **Top blocker**: Add a **roundtrip integration test** — `read_engine_health` returns `{"status": "down"}` → `preflight --fix` quarantines → next `read_engine_health` returns `quarantined` → `engines-heal` marks `recovering` → subsequent preflight shows `[OK]`. This one test would have caught the schema bug *and* would anchor the non-det audit score.
+
+7. **Verdict**: **SHIP-WITH-FIXES.** The schema fix is real and critical, but the engine layer's only proof-of-correctness is a single manual verification and three contradictory audit runs — one integration test closes the gap.

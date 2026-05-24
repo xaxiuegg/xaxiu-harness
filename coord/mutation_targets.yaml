@@ -98,8 +98,8 @@ modules:
     tier: warm
     last_sweep_sha: 7698602
     last_sweep_date: "2026-05-25"
-    expected_kill_rate: null  # to be verified — canary in flight at commit time
-    notes: "W10-FRESH-CANARY-MODULES: canary run in flight. Update once mutation kill-rate confirmed."
+    expected_kill_rate: 1.0
+    notes: "W10-FRESH-CANARY-MODULES: 2/2 applicable mutations killed — both via 180s pytest -x timeout (mutation made test suite hang; canary correctly interprets timeout-as-killed per the safety design). bool_return_flip pattern absent."
 
   # ---- COLD (best-effort, no current sweep; flag if SHA changes too much) ----
   - path: src/harness/preflight.py

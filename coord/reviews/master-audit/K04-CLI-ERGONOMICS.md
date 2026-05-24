@@ -1,18 +1,12 @@
-<!-- name=K04-CLI-ERGONOMICS latency_ms=90785 error='' -->
+<!-- name=K04-CLI-ERGONOMICS latency_ms=85454 error='' -->
 
 ## Score
 
-1. **Correctness — 2/5** Taxonomy is broken: ~38 top-level verbs (lens spec expected 22), `loop`/`loops` collide, `engines-heal` mirrors `engines heal`, and `doctor`/`preflight` overlap.
-2. **Robustness — 2/5** No visible typo correction or subcommand-Levenshtein guard; plausible mis-typings like `harness engine cooldowns` fail opaquely.
-3. **Operator-usability — 2/5** Non-technical operator faces an undifferentiated flat list; `spec-init`, `spec-register`, `spec-verify` are separate incantations instead of a `spec` family, and `--help` lacks workflow grouping.
-4. **Test discipline — 1/5** 1,576 tests pass, yet no CLI-ergonomics regression coverage is evidenced (no `--help` snapshot tests, no subcommand-discovery assertions).
-5. **Risk — 4/5** Every wave adds top-level verbs rather than nesting; operator-readiness foundation from W8 will be undermined by CLI sprawl.
+1. **Correctness** — 3. Functional, but the flat 38-verb surface with fractured namespaces (`engines-heal` vs `engines`, `spec-init` with no `spec` group) breaches the ergonomic consistency implied by operator-readiness specs.
+2. **Robustness** — 2. No visible typo tolerance or collision guard; a non-technical operator mistyping `engine` instead of `engines` gets no corrective nudge.
+3. **Operator-usability** — 1. `--help` is an ungrouped wall; three random samples: `coord` hints at subcommands in its description (2/5), `engines` hides `heal`/`cooldowns` as hyphenated top-level commands (1/5), and `observer` lists 12 subcommands with zero top-level hint (1/5).
+4. **Test discipline** — 1. Thousands of tests exist, yet none enforce CLI taxonomy, help formatting, or verb-naming conventions.
+5. **Risk** — 4. High probability of operator confusion between `engines-heal` and `engines heal`, missing `--fix` flags, and inability to browse commands without the runbook open.
 
-**Three-verb discoverability spot-check:**
-- `engines`: 1/5 — `heal`, `cooldowns`, `reliability` are hidden as hyphenated top-level aliases, not listed under `engines`.
-- `observer`: 2/5 — 12 subcommands exist but top-level `--help` only gives an abstract tagline.
-- `coord`: 4/5 — `plan`, `run`, `integrate`, `status` are explicitly advertised in the short help.
-
-**Top blocker:** Reify a true noun/verb hierarchy (`harness engines heal`, `harness spec init`) and prune duplicate top-level aliases; group `--help` by operator workflow.
-
-**Verdict:** SHIP-WITH-FIXES. W8 operator-readiness gains are real, but the flat CLI surface is a self-inflicted maze that will trap the non-technical operator.
+6. **Top blocker** — Collapse hyphenated top-level verbs into nested subcommands (`harness engines heal`, `harness spec init`, `harness env wizard`) and add logical groups to `--help`.
+7. **Verdict** — SHIP-WITH-FIXES: the core works, but the flat CLI namespace is a daily tax on the non-technical operator that directly undermines Track B goals.

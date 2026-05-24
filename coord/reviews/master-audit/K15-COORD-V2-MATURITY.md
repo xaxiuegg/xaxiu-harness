@@ -1,13 +1,13 @@
-<!-- name=K15-COORD-V2-MATURITY latency_ms=60620 error='' -->
+<!-- name=K15-COORD-V2-MATURITY latency_ms=73753 error='' -->
 
 ## Score
 
-1. **Correctness** — 2. Worktree and checkpoint primitives compile, but the integrator leaves the progress-stream broken after observer timeout and dead-engine quarantine, so unattended runs silently stall.
-2. **Robustness** — 2. No cascading-fault recovery: a single engine death plus observer timeout collapses the unattended loop because neither auto-restarts nor fails over to a degraded-but-up state.
-3. **Operator-usability** — 3. CLI surface is friendly, yet the non-technical operator must manually patch loop registration and observer health every morning—unattended autonomy is still aspirational.
-4. **Test discipline** — 3. High unit count misses the overnight unattended scenario; the schema-silent-failure and persistent hook STOPs show the integration harness lacks a 24h bootstrap regression suite.
-5. **Risk** — 4. Within 30 days an unattended run will halt on unregistered tasks or unhealed engines, confirming v2 coord is demo-ware with prod aspirations.
+1. **Correctness** — 3. Core verbs ship, but persistent STOPs on hook/prompt and the silent schema bug show failure-path correctness is unreliable.
+2. **Robustness** — 3. `except Exception: continue` masked total quarantine failure; observer timeout kills unattended starts.
+3. **Operator-usability** — 4. Runbook and `harness today` help, but 30+ CLI verbs and unfixable observer warnings still bury a non-technical user.
+4. **Test discipline** — 3. High count, yet dict-stub tests completely missed a Pydantic schema rejection that broke production quarantine.
+5. **Risk** — 4. Silent failure patterns plus non-deterministic audit gate equal high regression escape probability in unattended mode.
 
-6. **Top blocker** — `harness install` must auto-register the dev-loop Task Scheduler entry and couple the observer to a watchdog that self-restarts on timeout, eliminating the two manual preflight warnings permanently.
+**Top blocker** — Add one integration test that writes real Pydantic `EngineHealth` through the quarantine path and lint-ban bare `except Exception:` in production code; the W8 bug proves dict stubs give false confidence.
 
-7. **Verdict** — SHIP-WITH-FIXES. Multi-agent coordination is structurally sound, but the absence of self-bootstrapping loop and observer recovery means unattended operation remains a supervised demo, not production.
+**Verdict** — SHIP-WITH-FIXES. The unattended shell is real, but silent exception swallowing and a persistently STOPped hook mean v2 is still demo-ware with ambitions, not production-ready.

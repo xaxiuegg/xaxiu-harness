@@ -1,17 +1,21 @@
-<!-- name=M09-SECURITY-POSTURE latency_ms=35131 error='' -->
+<!-- name=M09-SECURITY-POSTURE latency_ms=31646 error='' -->
 
 ## Score
 
-**Correctness — 4/5**: DPAPI key storage, JSONL+redaction logging, and `panic-dump` scrubbing are present and functionally correct. The redaction integrity gate (W9) landed. However, the DPAPI *seed* path is undocumented and unverified — `doctor` reports DPAPI as readable but never explains provenance, a gap acknowledged only as a W10 todo.
+**Correctness (3/5):** DPAPI + env-wizard path is documented and functional; redaction integrity test exists (W9); but `panic-dump` secret-scrubbing is untested — no evidence of a redaction-canary that verifies output before it leaves the process.
 
-**Robustness — 2/5**: The EngineHealth `except Exception: continue` pattern that silently failed every quarantine write is a **class defect**, not a one-off. No evidence anyone audited DPAPI reads, redaction pipelines, or key-rotation paths for the same swallow-and-continue pattern. One such block in a redaction path means secrets leak to JSONL permanently with zero surface signal.
+**Robustness (2/5):** L5 DPAPI fallback path is a blind spot — what materializes when DPAPI is broken? If it falls back to plaintext env vars or an unprotected `secrets.json`, that's your leak. The `except Exception: continue` pattern discovered in the quarantine schema bug tells me the same anti-pattern likely exists near secrets.
 
-**Operator-usability — 3/5**: `harness env` reports per-key presence, `status --human` is readable, and the runbook is single-page. But a non-technical operator hitting a DPAPI seeding failure has no remediation path — `doctor` says "readable" without explaining where keys originate. Invisible until production breaks.
+**Operator-usability (4/5):** `harness env-wizard` + `harness env` + DPAPI section in runbook is solid for non-technical operators. Rotation flow documented. L5 fallback surfaced as "call engineering" — correct.
 
-**Test discipline — 3/5**: 1576 tests + redaction integrity gate are solid foundations. Missing: DPAPI failure-mode tests, redaction pattern coverage completeness (does every new log sink inherit redaction?), and file-permission enforcement assertions (`0600` mentioned in the prompt but not in any shipped row I can verify).
+**Test discipline (2/5):** Redaction-integrity-test exists but no mutation kill-rate data for `redact/` or `secrets/` modules — they're not in the top-5 or even warm-tier canary. The injection scanner (W8-AUDIT-PROMPT) scores 0.25 STOP and is **not load-bearing** — it's a post-hoc review tool, not a pre-commit gate. If an engine returns a dispatch containing raw DPAPI-decrypted material, no scanner catches it before commit.
 
-**Risk — 4/5**: The silent-failure pattern is proven to hide load-bearing security bugs. The injection scanner question is unanswered — I see no explicit injection-scanning primitive in the CLI tree or shipped rows. Trust on `env` means any process inheriting the operator's environment sees all API keys; no scoping or least-privilege boundary exists.
+**Risk (3/5):** Modified tracked files (`git_clean` fail) could include secrets in working tree. The `git status` detector (W5-P) catches edits but not content. A `.env` or `secrets.json` staged for commit has no pre-commit content-scan.
 
-**Top blocker**: Run a targeted grep for every `except Exception: continue` (and `except: pass`) in security-sensitive modules — DPAPI, redaction, key rotation, state writes — and replace each with explicit `logging.error` + surface to operator. The EngineHealth bug proves this pattern silently breaks security guarantees; the same class of bug is almost certainly hiding in a redaction path.
+## Top blocker
 
-**Verdict**: SHIP-WITH-FIXES — the silent-failure audit is non-negotiable; one leaked API key in a JSONL log is an irreversible exposure.
+Add a **pre-commit hook that scans staged content for DPAPI-decrypted patterns** (API key regex, `secrets.json` content hashes). The redaction-integrity-test proves the *regexes* work; wire them into `git diff --cached --name-only` filtering. One concrete file: `hooks/pre-commit` calling the existing redaction patterns against staged blobs. This closes the path where secrets leak through version control — the only unmonitored egress.
+
+## Verdict
+
+**SHIP-WITH-FIXES.** The DPAPI layer itself is sound; the gap is the egress path — no gate between DPAPI decryption and git/logs/process-snapshot. The pre-commit redaction hook plus a `panic-dump` redaction-canary test would close it.

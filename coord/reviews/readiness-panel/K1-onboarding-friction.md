@@ -1,18 +1,18 @@
-<!-- name=K1-onboarding-friction latency_ms=93391 error='' -->
+<!-- name=K1-onboarding-friction latency_ms=120566 error='' -->
 
 ## Rubric
 
-1. **Install** — 2. Doc triad splits authority; operator faces conflicting gates (`doctor` OK vs `preflight` fail) and an unguided sequence of ≥5 decisions (which doc? `doctor`/`install`/`init`? fix `git_clean`? UNSET keys okay? brief now?). Non-technical users cannot self-remediate untracked-file failures.
+1. **Install** — 2. `doctor` reports OK while `preflight` hard-fails (exit 4) on dirty git, unregistered loop, and observer timeout; the 6+ remediation decisions (commit vs stash, loop start, observer retry vs scheduler check) exceed a non-technical operator's 30-minute runway.
 
-2. **Daily run** — 3. `morning-brief` is buried in a 30-verb CLI with no daily alias or checklist, forcing the operator to remember the exact incantation amid irrelevant commands.
+2. **Daily run** — 3. `daily` and `morning-brief` are discoverable, but the CLI never signals that `install` → `env-wizard` → `loop start` → green `preflight` must precede them, forcing 6+ operator decisions before the first brief.
 
-3. **Observe** — 4. STATUS.csv is readable; `dashboard-serve` and `observer` surfaces are usable without opening `runs/`. Engine root-cause still requires log literacy, but the panel is viable.
+3. **Observe** — 4. `dashboard-serve`, `heartbeat`, `STATUS.csv`, and engine reliability commands give strong visibility without reading run files; only the observer probe timeout in preflight hints the observation layer may need a manual kick-start.
 
-4. **Recover** — 2. `engines-heal` covers engine death, but preflight false-positives and proxy failures lack operator-visible remediation; the `git_clean` warn→fail path has no CLI fix.
+4. **Recover** — 3. `doctor`, `engines-heal`, and preflight fix-hints exist, but divergent advice (`doctor` OK vs `preflight` FAIL) and branching fixes (commit *or* stash; re-run *or* check scheduler) force decisions rather than a single obvious path.
 
-5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The operator can read STATUS.csv and run CLI commands, but the first-run experience forces a high-stakes doc choice and a preflight git failure they cannot self-resolve. Once past the wall, daily observation is viable; recovery from non-engine failures is not.
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The CLI surface is rich with diagnostics and wizards, yet the first-run path is blocked by a failing preflight that demands git operations and distributed-system intuition; an operator needs a human runbook or babysitter for the initial 30-minute bootstrap, after which daily verbs are manageable.
 
-6. **Top 3 blockers**
-   - **`GETTING_STARTED.md`** prescribing exact first-run sequence and explicitly excluding CLAUDE.md/SESSION_BOOTSTRAP.md from operator scope.
-   - **`harness preflight --operator`** (or profile-aware default) that suppresses `git_clean` blockers and explains fixes in plain language.
-   - **`harness day-start`** meta-command wrapping `preflight` + `morning-brief` + `observer status` into one daily report to eliminate decision fatigue.
+6. **Top 3 blockers**:
+   - `harness onboard` quickstart artifact — one ordered checklist/script from clone to first `morning-brief` replacing guesswork.
+   - `harness preflight --fix` — auto-stash dirty files, start the loop, and retry observer probe instead of printing branching options.
+   - `harness observer bootstrap` — one-shot scheduler registration that eliminates the ambiguous timeout remediation.

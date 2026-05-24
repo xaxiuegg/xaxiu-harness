@@ -1,12 +1,12 @@
-<!-- name=K12-REPLAY latency_ms=58534 error='' -->
+<!-- name=K12-REPLAY latency_ms=60380 error='' -->
 
 ## Score
+1. **Correctness** — 3: The command exists for v1/v2 reconstructions, but zero operator-facing artifacts (runbook, `today`, preflight) describe when to invoke it, so the decision-archaeology promise is unfulfilled.
+2. **Robustness** — 3: The tool likely tolerates truncated logs, yet the operator's mental model is fragile—without guided entry points they will not use it under pressure.
+3. **Operator-usability** — 2: Completely absent from `harness today` suggested actions and the runbook excerpts shown; indistinguishable from a debug utility for engineers, not a non-technical operator.
+4. **Test discipline** — 2: No test row or canary sweep validates the operator replay journey; a regression in CLI flags or output schema would only be caught by chance.
+5. **Risk** — 3: The next time an engine quarantines or a dispatch loops, the operator lacks self-service archaeology, forcing escalation to engineering for decisions that replay data already holds.
 
-1. **Correctness** — 2. Help text claims v1/v2 reconstruction, yet no spec, sample output, or runbook step confirms it tells the right story.
-2. **Robustness** — 2. No evidence of handling missing logs, partial coord runs, or v1/v2 schema drift; likely raw-dump or silent failure.
-3. **Operator-usability** — 1. The non-technical operator has zero runbook guidance on when to invoke it, and the CLI description promises data, not decision archaeology.
-4. **Test discipline** — 1. None of the 1,576 visible tests cover replay; regressions in reconstruction logic would slip through undetected.
-5. **Risk** — 3. When a coord run fails, the operator will need narrative context and instead find an undocumented data hose, forcing escalation.
+6. **Top blocker** — Add a `--human` flag to `replay` that emits a numbered decision narrative (why engine X, why stop, what diff) and link it from `harness today` whenever audit STOPs or dead engines appear.
 
-6. **Top blocker** — Add `replay --human` (plain-language timeline: what was decided, why, by whom) and an OPERATOR_RUNBOOK section naming the exact failure signature that triggers invocation.
-7. **Verdict** — SHIP-WITH-FIXES. Daily pulse and preflight are operator-ready, but `replay` is a dark corner: it answers neither when to use it nor how to understand the output.
+7. **Verdict** — SHIP-WITH-FIXES: The harness is operator-ready for day-to-day driving, but `replay` is a dead verb until decision-archaeology is surfaced in the daily pulse and runbook for non-technical users.

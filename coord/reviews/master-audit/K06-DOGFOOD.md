@@ -1,13 +1,24 @@
-<!-- name=K06-DOGFOOD latency_ms=59303 error='' -->
+<!-- name=K06-DOGFOOD latency_ms=62500 error='' -->
 
 ## Score
 
-1. **Correctness** — 3: Heavy dogfooding, yet a load-bearing schema mismatch silently broke every quarantine write, and persistent STOPs on hook and audit prompt reveal unfilled spec gaps in the meta-layer.
-2. **Robustness** — 3: Self-healing paths masked Pydantic failures with `except Exception: continue`; observer probes timeout; the audit gate flips verdict on unchanged code.
-3. **Operator-usability** — 3: Runbook and `harness today` exist, but preflight still surfaces dead engines, observer timeouts, and unregistered loops—noise a non-technical operator cannot action.
-4. **Test discipline** — 3: 1576 tests pass, yet the quarantine bug escaped because test stubs used dicts while production used Pydantic models; tests didn't match reality.
-5. **Risk** — 4: The meta-layer is becoming a tower of indirection; silent failures in self-heal plus non-deterministic audits risk alert fatigue or missed regressions within 30 days.
+**Correctness — 3**  
+Ships features reliably, but the audit gate persistently STOPs its own hook and prompt tuning, indicating the spec-to-verification loop is self-inconsistent.
 
-**Top blocker**: Harden all self-healing exception handlers to emit L4 toasts on unexpected schema/validation errors, eliminating `except Exception: continue` in fix/heal paths.
+**Robustness — 3**  
+Healing, fallback, and quarantine exist, yet `except Exception: continue` swallowed schema violations and the observer probe times out—silent failures in the self-monitoring layer.
 
-**Verdict**: SHIP-WITH-FIXES — extensive dogfood usage is healthy, but the self-monitoring loop is too noisy and too silent in the wrong places; harden before operator handoff.
+**Operator-usability — 4**  
+`today`, `status human`, and the runbook are genuinely accessible, but audit non-determinism forces a non-technical operator to ignore red flags, eroding trust.
+
+**Test discipline — 3**  
+1576 tests and a mutation canary show volume, yet the `EngineHealth` schema regression and audit-flip noise both escaped automated detection in the meta-layer.
+
+**Risk — 3**  
+The harness is becoming a tower of indirection where process (STATUS.csv at 310 rows, audit panels, canary manifests) could outpace product; audit drift threatens autopilot legitimacy.
+
+**Top blocker**  
+Ship `W9-AUDIT-NONDETERMINISM-AVG` with `--avg-of-N ≥ 3` and hard-fail only on consensus, eliminating MiMo noise so the audit gate can judge itself.
+
+**Verdict**  
+SHIP-WITH-FIXES: the dogfood loop is productive but the meta-layer currently cannot reliably audit its own audits, creating a recursive credibility gap.

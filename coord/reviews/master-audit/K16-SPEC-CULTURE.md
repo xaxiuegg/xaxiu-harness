@@ -1,13 +1,23 @@
-<!-- name=K16-SPEC-CULTURE latency_ms=71940 error='' -->
+<!-- name=K16-SPEC-CULTURE latency_ms=70977 error='' -->
 
 ## Score
 
-1. **Correctness — 2**: W8-STOP-HOOK’s spec claimed exclusions absent until follow-through commit `7081d93`, and the `EngineHealth.status` Literal omitted `quarantined`/`recovering` that production code was already writing.
-2. **Robustness — 3**: Failure modes (schema rejection, hook noise) are patched in follow-throughs rather than anticipated in the original spec.
-3. **Operator-usability — 3**: Runbook and `harness today` exist, but DPAPI seeding is invisible (W10 todo) and W8-OPERATOR-RUNBOOK criteria are soft enough to flip PASS/STOP.
-4. **Test discipline — 4**: 1,576 tests catch code regressions, yet persistent STOPs on spec-audit rows prove acceptance criteria aren’t crisp enough to be spec-driven or automatable.
-5. **Risk — 4**: W9’s 14-row backlog will amplify spec debt if implementation continues to outpace `spec/*.md`.
+1. **Correctness — 2**  
+   The W8-PLAN spec at `9aea866` preceded its implementation rows, yet the `EngineHealth` schema (`Literal["up","degraded","down"]`) was stale against the quarantine logic, causing silent failures; persistent MiMo STOPs on W8-STOP-HOOK and W8-AUDIT-PROMPT signal residual drift.
 
-**Top blocker**: Gate every W9 row on a frozen `spec/*.md` that passes `harness spec-verify` before code is written; retroactively patch W8-STOP-HOOK and W8-PREFLIGHT-FIX specs to match commit `7081d93`.
+2. **Robustness — 2**  
+   `spec-verify` and `lint-spec` provide provenance tracking, but the commit hook (W8-STOP-HOOK) is a persistent audit failure and needed retroactive exclusion tuning, showing the spec gate frays under real repo churn.
 
-**Verdict**: SHIP-WITH-FIXES — Spec culture is retroactive-edit, not lead; freeze specs pre-implementation or spec debt will outpace test coverage.
+3. **Operator-usability — 4**  
+   Non-technical operators can scaffold, lint, and SHA-verify specs via `harness spec-init / lint-spec / spec-verify` without touching Python.
+
+4. **Test discipline — 2**  
+   Every Wn row gets a MiMo audit, but identical commits produce PASS/STOP flips (W8-ENGINES-HEAL, STATUS-HUMAN), so the gate detects noise more reliably than drift.
+
+5. **Risk — 3**  
+   If the audit gate is perceived as random, developers will silence or skip it, and specs will diverge from code just as the `EngineHealth` schema did.
+
+6. **Top blocker**  
+   A deterministic `spec-verify --fresh` pre-commit check that maps each `spec/*.md` acceptance-criteria bullet to an existing CLI verb, schema field, or test path, replacing MiMo as the sole drift detector.
+
+7. **Verdict** — SHIP-WITH-FIXES. Spec-first process exists but lacks a trustworthy mechanical freshness check; once deterministic, the culture will stick.

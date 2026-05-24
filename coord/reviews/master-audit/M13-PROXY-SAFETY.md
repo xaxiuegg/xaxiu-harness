@@ -1,21 +1,19 @@
-<!-- name=M13-PROXY-SAFETY latency_ms=24628 error='' -->
+<!-- name=M13-PROXY-SAFETY latency_ms=26822 error='' -->
 
-## Score
-
-**Through the PROXY SAFETY REVIEWER lens:**
+## Score (Proxy Safety Reviewer lens: 4-key proxy + circuit breaker + auto-quarantine)
 
 | Dimension | Score | Justification |
-|-----------|-------|---------------|
-| **Correctness** | 3 | Proxy exists as CLI primitive (`harness proxy`), 4-key rotation + circuit breaker spec'd; but W9-PROXY-FAILURE-MATRIX (afed9ba) never proves the proxy is safer than direct HTTPS — it catalogs failure modes without showing the attack surface delta. |
-| **Robustness** | 2 | Circuit breaker + auto-quarantine-on-flap is the right architecture, but **no evidence of adversarial key-exhaustion testing** — what happens when all 4 keys are quarantined simultaneously? The fallback path is unspecified in the snapshot. |
-| **Operator-usability** | 2 | `harness --help` shows `proxy` with zero detail. Non-technical operator can't tell if proxy is active, healthy, or in circuit-open state. No `proxy status` surfaced in `harness today` or `preflight`. |
-| **Test discipline** | 3 | 1576 tests, mutation kill ≥3 on engine modules; but proxy-specific failure-matrix tests (flap detection, key-exhaustion, circuit-open → half-open transitions) aren't evidenced. W9-PROXY-FAILURE-MATRIX commit name suggests analysis, not validation. |
-| **Risk** | 4 | **If the proxy silently degrades to passthrough or blocks all traffic on 4-key exhaustion, it's strictly worse than direct HTTPS** — it adds latency and a single point of failure without proving the threat model it defends against is real. No kill-switch for direct-fallback is documented. |
+|---|---|---|
+| Correctness | 3 | Circuit breaker exists and mutation-kills at 2/2; but the quarantine path silently failed for unknown duration until W8 caught it — proxy's safety claims are load-bearing on code that was demonstrably broken |
+| Robustness | 2 | The `except Exception: continue` that swallowed the EngineHealth schema rejection is exactly the anti-pattern a safety reviewer flags. If quarantine writes fail silently, circuit-breaker state is untrustworthy. No evidence of tombstone or dead-letter for failed quarantine attempts |
+| Operator-usability | 3 | `engines-heal` surfaces blocked/recovering states; `preflight --fix` works post-W8. But operator cannot distinguish "proxy protected the key" from "proxy failed open and forwarded to upstream directly" — visibility gap |
+| Test discipline | 2 | 6 new tests for quarantine flow post-fix, but zero tests asserting the proxy **refuses to forward traffic when circuit is open**. Mutation kill on `proxy/circuit` confirms idioms exist, but no integration test proves end-to-end fail-closed behavior |
+| Risk | **4** | Silent schema bug proves the safety path was untested in production. DPAPI + 4-key rotation is sound architecture but the failure mode is: proxy circuit trips → quarantine fails silently → next request uses a compromised or rate-limited key → cascade to operator-visible error with no recovery path. The content-filter incident (MiMo tripping on verbatim API keys) also suggests key material may leak into log/prompts |
 
 ## Top blocker
 
-Ship a **proxy failure-mode matrix that proves the proxy's attack surface is smaller than direct HTTPS** — specifically: (a) what threat model justifies 4-key rotation vs. 1 key, (b) simultaneous-key-exhaustion behavior, and (c) circuit-open fallback to direct HTTPS or explicit halt. Without (a), the proxy is complexity theater.
+**Add a fail-closed integration test that kills the upstream HTTP client, triggers circuit-breaker, and asserts the proxy returns 503 (not passthrough).** The `except Exception: continue` pattern must be replaced with `except Exception: log_and_escalate` on the quarantine path specifically. One test, ~30 lines, transforms the risk posture from "assumed safe" to "verified safe."
 
 ## Verdict
 
-**HOLD.** The proxy adds a single point of failure and key-management complexity but hasn't demonstrated it's safer than the thing it replaces — the failure-matrix commit catalogs modes without proving the net security delta is positive.
+**SHIP-WITH-FIXES** — The proxy architecture is sound and the W8 quarantine fix landed correctly, but the proven-existence of silent-failure anti-patterns on the safety path means shipping without a fail-closed assertion is shipping on faith, not evidence.

@@ -1,15 +1,18 @@
-<!-- name=M3-error-recovery latency_ms=23769 error='' -->
+<!-- name=M3-error-recovery latency_ms=29256 error='' -->
 
 ## Rubric
 
-1. **Install** — 3/5. Preflight exits with code 1 on a non-fatal warning (untracked files), which could confuse a non-technical operator who expects green=all clear.
-2. **Daily run** — 4/5. The morning sequence (`doctor`, `preflight`, `morning-brief`) is clear and CLI-driven. Low toil.
-3. **Observe** — 3/5. `status`, `heartbeat`, and `dashboard-serve` exist, but a typical failure (e.g., an engine timeout) isn't guaranteed to surface as a clear, actionable item in the dashboard without the operator knowing to run `engines-heal` or check logs.
-4. **Recover** — 2/5. A Python traceback from an unexpected exception (e.g., a network blip causing a module error) would block the operator dead. They can't interpret it. The `engines-heal` and `panic-dump` commands are recovery tools, but the path *to* them from an opaque error is unclear.
+1. **Install** — **4/5.** `doctor` and `preflight` are clean, one-command gates. But the `git_clean` fail says "Commit or stash" without the exact command — a non-technical operator will stall here and have to escalate. Needs `git stash` copy-paste guidance inline.
 
-5. **Hand to a non-technical operator today?** **WITH GUARDRAILS**. The operator can run the daily commands and use the dashboard for visibility. However, any failure that results in a raw Python exception will halt them. They need a "handle" for every common error type that avoids tracebacks and points to a CLI recovery command, or a reliable on-call Python-savvy backup.
+2. **Daily run** — **4/5.** `harness morning-brief` + `harness daily` exist; loop start hint is explicit. The observer warning ("will retry next preflight") means the operator just re-runs — acceptable. Minor toil: if re-run also times out, there's no second-step guidance.
 
-6. **Top 3 blockers**:
-   - **Standardize error surfacing.** All exceptions must be caught and rendered as a non-technical "operator packet" with a severity (e.g., `[L4]`), a plain-English summary, and a recommended CLI fix (e.g., `Run 'harness engines-heal --engine DeepSeek'`).
-   - **Add a `harness recover` command.** A single entry point that runs a sequence of checks (`doctor`, `engines-heal`, `preflight`) and presents a pass/fail summary, giving the operator one command to try first.
-   - **Make the escalation threshold contract explicit in output.** The `--escalation-threshold` setting should be printed in the `doctor` or `preflight` header so the operator knows what level of issue will surface vs. be silently handled.
+3. **Observe** — **3/5.** STATUS.csv is scannable, `dashboard-serve` exists, `heartbeat` is listed. But we see no evidence the dashboard surfaces engine health, escalation history, or loop status in non-technical language. The 310-row CSV is the primary observability surface — that's a raw file, not an operator experience.
+
+4. **Recover** — **3/5.** `engines-heal` is a strong verb for the most common failure. Preflight gives "Run to fix:" hints, which is the right pattern. But two gaps: (a) the L5 escalation contract has no visible output template — when an L5 fires, what does the operator *see* and *do*? Unknown. (b) Observer timeout → "re-run or check scheduler-status" — if the scheduler itself is broken, the operator is dead with no next step.
+
+5. **Hand to non-technical operator today?** **WITH GUARDRAILS.** The CLI verbs and preflight hints are 80% there. A non-technical operator can install, run daily, and recover from dead engines. But the `git_clean` blocker has no copy-paste fix, L5 escalation behavior is undocumented in the snapshot, and observability requires reading raw CSV. With a short runbook covering those three gaps, this is hand-offable within a day.
+
+6. **Top 3 blockers**
+   - **`git_clean` remediation is not copy-pasteable.** Preflight should print `git stash` or auto-stash with `--fix` flag. Single biggest blocker for non-technical operator.
+   - **No L5 escalation output contract visible.** Operator needs to see what an L5 surface looks like and what the single action is. Without this, autonomous mode is a black box on hard failures.
+   - **Observer has no second-tier recovery path.** If `observer scheduler-status` also fails, the operator needs `engines-heal`-style one-command recovery or a clear "file this" packet — neither is present.

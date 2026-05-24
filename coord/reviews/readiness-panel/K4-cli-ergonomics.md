@@ -1,18 +1,14 @@
-<!-- name=K4-cli-ergonomics latency_ms=105931 error='' -->
+<!-- name=K4-cli-ergonomics latency_ms=88648 error='' -->
 
 ## Rubric
+1. **Install** — 2. `env-wizard` and `doctor` are clear, but preflight hard-blocks on git cleanliness and loop registration, forcing git fluency and navigation of the `loop` vs `loops` naming split.
+2. **Daily run** — 2. `daily` and `morning-brief` exist, yet the 22-verb surface offers no obvious sequencing guardrails; a non-technical operator cannot infer the morning ritual from `--help` alone.
+3. **Observe** — 2. `dashboard-serve` and the `observer` group exist, but there is no top-level `status` verb; the operator must read `STATUS.csv` or know to invoke `coord status` and `observer scheduler-status`.
+4. **Recover** — 3. `doctor`, `engines-heal`, and preflight fix-hints are strong, but recovery is fragmented across `loop start`, nested `observer` subcommands, and manual git steps.
 
-1. **Install — 3** `doctor` reads clearly, but `preflight` is missing from `--help`, exits 1 on `git_clean` without a remediation hint, and requires the operator to reason about untracked files.
+5. **Hand to a non-technical operator today?** WITH GUARDRAILS. The first-run wizards and preflight gate pattern are solid, but the 22-verb API surface is overwhelming, status is fragmented across files and nested subcommands, and hard blockers require git operations and precise verb recall that a runbook alone cannot bridge without L1 support.
 
-2. **Daily run — 3** `morning-brief` exists, yet there is no single obvious daily entry-point; the operator must guess whether to run `loop`, `loops`, `coord`, or just read the dashboard.
-
-3. **Observe — 4** Dashboard, observer, and STATUS.csv provide good visibility, but the CLI lacks a unified `harness today` summary that surfaces all three for a non-technical user.
-
-4. **Recover — 3** `engines-heal` and `doctor` cover some failures, but common stale states (untracked files, routing locks) lack a one-step remediation verb such as `harness fix` or `harness unlock`.
-
-5. **Hand to a non-technical operator today?** **WITH GUARDRAILS**. Installation and daily observation are possible, but the 60+ subcommand surface is overwhelming, verb naming is inconsistent (`loop` vs `loops`, hidden `preflight`), and recovery requires interpreting diagnostic badges rather than running a guided repair command. A printed runbook is mandatory.
-
-6. **Top 3 blockers**
-   - **`harness today` meta-command**: rolls up `preflight`, `observer`, and `coord status` into one daily operator summary.
-   - **`harness tidy` / `preflight --fix`**: auto-remediate `git_clean`, lock drift, and stale caches without manual git commands.
-   - **Discoverability fix for `preflight`**: surface it in `harness --help` and add a `--fix` flag so the readiness gate is findable and actionable.
+6. **Top 3 blockers**:
+   - **Top-level `harness status` verb**: A single daily, non-CSV, dashboard-in-terminal summary of loop, observer, and engine health (not buried under `coord`).
+   - **`harness fix` meta-recovery verb**: One-command auto-remediation of preflight failures (git stash, observer restart, loop re-register) so the operator never touches git directly.
+   - **Operator-slim CLI mode**: A `--simple` flag or role that hides the 15+ advanced verbs (adapter, lint-spec, lock, burst, etc.) and surfaces only daily, status, stop, and fix.

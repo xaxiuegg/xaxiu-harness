@@ -1,19 +1,17 @@
-<!-- name=M02-CLI-COMPLETENESS latency_ms=49816 error='' -->
+<!-- name=M02-CLI-COMPLETENESS latency_ms=38801 error='' -->
 
 ## Score
 
-| Dimension | Score | Justification |
-|---|---|---|
-| **Correctness** | 4 | Core verbs work as specced. Schema bug was load-bearing and got fixed. `doctor`/`preflight` split is semantically unclear in the help tree. |
-| **Robustness** | 3 | Quarantine flow silently failed until caught; no `rollback` or `observer reset` for stuck states; `--skip-engines` is a manual escape hatch, not auto-degrade. |
-| **Operator-usability** | 3 | `today`, `preflight --fix`, `engines-heal` are good on-ramps. But 22 top-level verbs + 60+ subcommands is high discovery friction for non-technical profile. `--profile non_technical` isn't the default. |
-| **Test discipline** | 4 | 1576 tests, mutation kill rates ≥3 on all top-5 modules. Audit gate catches real regressions (schema bug). |
-| **Risk** | 3 | Verb explosion makes the CLI hard to navigate blind. Missing lifecycle gap: no `rollback` for bad dispatches, no `upgrade` for harness updates, no key-rotation verb for the dead-engines path. |
+**Correctness: 4/5** — The verb tree covers every lifecycle phase. The quarantine schema bug (silently swallowed `quarantined` status) was load-bearing and is fixed. `doctor` and `preflight` overlap with no documented distinction — one is redundant or orphaned.
 
-## Top blocker
+**Robustness: 3/5** — The W8 schema fix (`EngineHealth` Literal missing `quarantined`/`recovering`) means *every* prior `preflight --fix` quarantine silently failed. That's a foundational robustness gap that existed for weeks. Fixed now, but it reveals insufficient integration-test coverage on the write-path.
 
-**Consolidate `doctor` into `preflight` and add `harness rollback`.** `doctor` and `preflight` are 80%+ overlapping (both check git, python, secrets); the split forces the operator to guess which one to run. A single `preflight` with `--fix` and `--quick` flags covers both. Meanwhile, the dead-engines fix mentions "rotate keys" but there's no `harness keys rotate` or `harness rollback <dispatch-id>` — a bad overnight dispatch currently has no undo path except `panic-dump` + ping engineering. Either verb closes a real lifecycle gap.
+**Operator-usability: 3/5** — `today`, `env-wizard`, `preflight --fix`, and the runbook are strong. But 40+ verbs with three overlapping execution paths (`loop`, `orchestrator`, `coord`) and two overlapping health checks (`doctor`, `preflight`) overwhelm the non-technical operator. No lifecycle grouping in `--help`.
 
-## Verdict
+**Test discipline: 4/5** — 1576 passing, mutation kill ≥3 on all top-5 modules. Audit-gate policy is enforced. Persistent STOPs on STOP-HOOK and AUDIT-PROMPT suggest the audit infrastructure itself needs dogfooding.
 
-**SHIP-WITH-FIXES.** The CLI covers install → daily run → recover → retro → debug, but the 22-verb surface is bloated (4 verbs could be folded into `engines` subcommands; `doctor`/`preflight` should merge) and the missing `rollback` leaves a production hole that `replay` doesn't fill — `replay` reconstructs, it doesn't undo.
+**Risk: 2/5** — No ship-blocker. The non-determinism is accepted with a queued mitigation. Missing verbs (`uninstall`, `rollback`, `pause`) are convenience gaps, not safety gaps.
+
+**Top blocker** — **Collapse `doctor` into `preflight` or document the distinction in `--help`.** Add lifecycle groupings to the help output (`## Setup`, `## Daily`, `## Recover`, `## Debug`). The non-technical operator's first 10 minutes with `harness --help` should map to the runbook's sections. Today it's an alphabetical wall of 40+ verbs with no entry point.
+
+**Verdict: SHIP-WITH-FIXES.** The CLI is functionally complete across the lifecycle, but verb-tree sprawl (three execution verbs, two preflight verbs, no grouping) and the now-fixed-but-revealing quarantine schema bug indicate the operator-facing surface needs a focused deduplication pass before handoff.

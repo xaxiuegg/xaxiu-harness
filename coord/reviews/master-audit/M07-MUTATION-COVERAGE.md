@@ -1,17 +1,17 @@
-<!-- name=M07-MUTATION-COVERAGE latency_ms=28836 error='' -->
+<!-- name=M07-MUTATION-COVERAGE latency_ms=35754 error='' -->
 
 ## Score
 
-**Correctness (3):** The ≥3 gate is met for all 5 hot modules — the spec says what it says and the code delivers. But the spec itself is narrow: 5 modules out of ~40 production files get mutation coverage. The gate is correct *for its scope*; the scope is insufficient.
+1. **Correctness**: 4 — Top-5 modules clear the ≥3 gate, but the full sweep wasn't re-run in W8, and the manifest notes modules with 0 kill-rate (observer/cycle) that need pattern expansion.
+2. **Robustness**: 3 — The mutation canary and manifest exist, but MiMo audit non-determinism (which drives mutation checks) is a fragile layer; the `--avg-of-N` fix is queued but not shipped.
+3. **Operator-usability**: 4 — The operator never directly touches mutation coverage, but the system's reliability underpins autonomous mode trust. The runbook and `harness today` abstract this well.
+4. **Test discipline**: 4 — Mutation-orchestrator tests exist and the W8 schema-bug fix landed with tests. However, we lack proof that mutations kill bugs in the newly added W8 features (preflight-fix, engines-heal).
+5. **Risk**: 3 — The main risk is coverage stagnation as the codebase grows. Without re-running the full sweep and expanding patterns for all warm-tier modules, the gate becomes a historical artifact, not a current guarantee.
 
-**Robustness (2):** W8 did not re-run the sweep. W9-MUTATION-MANIFEST has 3 warm-tier modules with `last_sweep_sha=null`. Three of the five tracked modules had 0.00 kill rate as recently as W6 and only recovered because they were explicitly targeted. No mechanism auto-fires a mutation run when a hot-module file changes — regressions land silently until the next manual sweep.
+## Top blocker
 
-**Operator-usability (2):** A non-technical operator has no CLI verb to see which modules are mutation-tracked, what the kill rates are, or whether a sweep is stale. `harness today` and `harness status human` surface test counts and audit verdicts but not mutation coverage. The operator cannot distinguish "covered and green" from "never tested."
+Run a full mutation sweep (not just canary) on the current HEAD and update `coord/mutation_targets.yaml` with fresh kill-rates for all modules. This would reveal which modules are currently untested and allow the ≥3 gate to be enforced globally, lifting my score by ≥1 on Correctness and Risk.
 
-**Test discipline (3):** Tests exist that *generate* mutation scores, and 1576 tests pass. But 0 tests assert that the mutation manifest is consistent (e.g., "every `src/harness/**/*.py` appears in at least one tier"). The gate itself — "≥3 kill rate" — has no property-test verifying it's applied on every CI run or preflight cycle.
+## Verdict
 
-**Risk (3):** The sustainable bar is the real question. ≥3 is fine for a codebase with 5 tracked modules. At 10 modules, you need 10 sweeps. At 20, the sweep cost dominates. No tier graduation policy exists — modules never move from warm to hot. W10-FRESH-CANARY-MODULES is queued but unshipped, meaning 3 manifest gaps persist.
-
-**Top blocker:** Execute `W10-FRESH-CANARY-MODULES` immediately (3 canary runs, ~30 min total) to populate `last_sweep_sha` for the 3 warm-tier nulls. Then add a preflight check: `mutation_manifest_completeness` that fails if any tier has `null` sha older than 7 days. This makes the ≥3 gate *self-enforcing* rather than manually refreshed.
-
-**Verdict:** SHIP-WITH-FIXS. The gate works for the 5 modules it covers; the coverage gap and stale-sweep risk are real but addressable in one focused session.
+SHIP-WITH-FIXES. The ≥3 gate is currently met for the top 5, but the system's credibility as a regression net depends on continuous, comprehensive mutation sweeps—a practice not yet normalized.

@@ -1,24 +1,12 @@
-<!-- name=K09-COSTS-BUDGET latency_ms=47032 error='' -->
+<!-- name=K09-COSTS-BUDGET latency_ms=40683 error='' -->
 
 ## Score
 
-1. **Correctness — 2**  
-   `budget` CLI exists but snapshot shows no per-session cost attribution; ledger wiring is opaque.
+1. **Correctness** — 2 — `budget` verb exists but snapshot shows no per-session cost output or ledger validation; operator cannot answer "what did this session cost" in one command.
+2. **Robustness** — 2 — No evidence ledger handles write failures or token-skew; the W8 EngineHealth silent-schema bug shows similar data paths can fail undetected.
+3. **Operator-usability** — 1 — `harness today` surfaces zero cost data; non-technical operator has no runbook step for spend checks and no proven one-command cost query.
+4. **Test discipline** — 1 — 1,576 tests cite no budget/ledger coverage; mutation sweeps ignore cost modules.
+5. **Risk** — 5 — Autonomous loops across three paid engines without real-time spend visibility is a runaway-budget ship-blocker.
 
-2. **Robustness — 2**  
-   No cost-cap alarms, overrun circuit breakers, or pricing-drift guards visible in preflight or `today`.
-
-3. **Operator-usability — 1**  
-   `harness today` omits spend entirely; a non-technical operator has no obvious one-command answer for session cost.
-
-4. **Test discipline — 1**  
-   1,576 tests cite zero ledger-reconciliation or cost-accuracy coverage; mutation table ignores budget modules.
-
-5. **Risk — 3**  
-   Silent spend accumulation across Kimi/DeepSeek/MiMo with no meter visibility is a credible 30-day bill shock.
-
-6. **Top blocker**  
-   Add a plain-language cost stanza to `harness today` (or a `harness budget --last-session` human output) so the operator can read spend without interpreting a ledger.
-
-7. **Verdict**  
-   SHIP-WITH-FIXES: plumbing is present but the operator lacks a single, human-readable command to answer "how much did this session cost."
+6. **Top blocker** — A single human-readable `harness budget today` command (or `--costs` flag on `today`) printing per-engine and total session spend, backed by at least one pytest on ledger arithmetic.
+7. **Verdict** — HOLD — the harness can spend money autonomously but cannot yet show the operator what was spent; ship when cost visibility matches dispatch velocity.

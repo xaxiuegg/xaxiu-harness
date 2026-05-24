@@ -1,13 +1,12 @@
-<!-- name=K13-SESSION-HANDOFF latency_ms=78512 error='' -->
+<!-- name=K13-SESSION-HANDOFF latency_ms=134593 error='' -->
 
 ## Score
+1. **Correctness** — 3: `session` exists but snapshot shows no output or autonomous-loop integration, so the proactive-transfer spec is unverified.
+2. **Robustness** — 3: Exit codes and fallback CLIs are clear, yet no evidence the session monitor captures state if the loop crashes ungracefully.
+3. **Operator-usability** — 4: `today` and `preflight` give excellent plain-language blockers and exact commands, but lack a proactive "why you have control" narrative.
+4. **Test discipline** — 2: Thousands of tests pass, but the snapshot shows no test coverage for session-handoff or proactive transfer logic.
+5. **Risk** — 3: Without demonstrated auto-handoff, a non-technical operator may not notice loop pause or understand next steps.
 
-1. **Correctness — 3**: `harness today` and the runbook provide static handoff context, but the snapshot shows no `session` output proving a proactive, actionable transfer recommendation fires when the loop yields.
-2. **Robustness — 3**: `heartbeat` and `panic-dump` are present, yet if the loop crashes before emitting a handoff, the operator has no persistent loop-exit artifact to consult.
-3. **Operator-usability — 4**: The plain-language `today` pulse and single-page runbook let a non-technical operator self-orient, though they must actively pull status rather than receiving a pushed handoff.
-4. **Test discipline — 2**: With 1,576 tests and no visible coverage of `harness session` or handoff logic, a regression in transfer signaling would likely slip through undetected.
-5. **Risk — 3**: A non-technical operator could fail to notice the loop has yielded control, leading to stalled work or unreviewed changes sitting idle.
+6. **Top blocker** — Integrate `harness session` into the loop exit path to auto-print a structured handoff packet (last action, blockers, recommended command) on every pause.
 
-**Top blocker:** Force the loop exit path to invoke `harness session --handoff` and write a persistent `SESSION_HANDOFF.md` checklist (shipped blockers, next required operator action).
-
-**Verdict:** SHIP-WITH-FIXES — operator pull-based tools exist, but the loop still lacks an unmissable, push-style transfer packet that screams "take the wheel now."
+7. **Verdict** — SHIP-WITH-FIXES: Strong operator UX exists, but the session-handoff monitor is an unverified stub and proactive loop-to-operator transfer is not demonstrated.

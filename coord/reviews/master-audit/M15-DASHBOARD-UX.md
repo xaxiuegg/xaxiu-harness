@@ -1,19 +1,15 @@
-<!-- name=M15-DASHBOARD-UX latency_ms=22038 error='' -->
+<!-- name=M15-DASHBOARD-UX latency_ms=16708 error='' -->
 
 ## Score
 
-| Row | Score | Justification |
-|---|---|---|
-| **Correctness** | 2 | Dashboard is invoked exactly once (`harness dashboard-serve`) — zero visibility into what it renders, which APIs it hits, or whether it matches the operator's mental model. Correctness is unassessable. |
-| **Robustness** | 2 | WebSocket at 7878 with no mention of reconnect handling, backpressure, or stale-state detection. `harness today` shows live engine warnings but no indication the dashboard mirrors this state. |
-| **Operator-usability** | 3 | CLI surface (`today`, `doctor`, `engines-heal`) is well-designed for non-technical use. But the dashboard — the *visual* operator surface — has zero documented UX flow. Non-technical operator will likely ignore it. |
-| **Test discipline** | 1 | No dashboard API tests, no WebSocket integration tests, no schema contract tests for `/v2/*` endpoints. The 1576 tests cover engine/coord/audit logic but not the presentation layer. |
-| **Risk** | 4 | A cost panel the operator can't read is worse than none — it creates false confidence. If the dashboard silently drops WebSocket updates during an engine-dead event, the operator learns about it from CLI, not the thing they're staring at. |
+1. **Correctness** — 4/5 — Commands work as spec'd (`today`, `preflight`); dashboard (via `dashboard-serve`) surfaces data but its value-add over CLI is unclear from the snapshot.
+2. **Robustness** — 3/5 — `preflight` gracefully handles timeouts; `today` presents known data. No evidence of handling dashboard WebSocket disconnects or large-history performance.
+3. **Operator-usability** — 2/5 — The raw `harness today` output is text-heavy and mixes 121+ events with audit roll-ups. Dashboard likely improves this, but its surface isn't evaluated here. The `--help` tree is comprehensive but overwhelming.
+4. **Test discipline** — 4/5 — 1576 tests + mutation canary suggest good regression catches. The audit-gate test for MiMo non-determinism (`W9-AUDIT-NONDETERMINISM-AVG`) is a direct UX-adjacent fix.
+5. **Risk** — 3/5 — Operator cognitive overload from undifferentiated information (e.g., raw dispatch lists in `today`) is a key UX risk. Could lead to missed critical signals.
 
 ## Top blocker
-
-Ship a **one-page dashboard UX spec**: what each panel shows (status, cost, escalations, engine health), the /v2/* contract, and a screenshot/mockup. Without it, the dashboard is a code artifact nobody audits because nobody can articulate what it *should* do. This single doc would lift Correctness + Test discipline by ≥1 each.
+**Triage `harness today` output.** The current stream (dispatches + audit rolls + blockers) is overwhelming. Group, summarize, and highlight only actionable changes (e.g., "3 dispatches succeeded, 1 audit STOP needs review") to lift usability score by ≥1 point.
 
 ## Verdict
-
-**HOLD for dashboard scope.** The CLI operator surface is production-grade; the dashboard is an invisible, untested, undocumented black box running on a non-technical operator's machine. Ship the CLI; freeze dashboard until a reviewer can actually evaluate what it surfaces.
+**SHIP-WITH-FIXES** — The dashboard infrastructure (CLI, serve, data endpoints) is correct and robust, but the operator-facing information density in `harness today` is counterproductive; it needs summarization to be usable.

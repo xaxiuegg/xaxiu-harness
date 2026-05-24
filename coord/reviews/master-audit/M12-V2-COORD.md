@@ -1,19 +1,17 @@
-<!-- name=M12-V2-COORD latency_ms=25255 error='' -->
+<!-- name=M12-V2-COORD latency_ms=32311 error='' -->
 
 ## Score
 
-| Dimension | Score | Justification |
-|---|---|---|
-| **Correctness** | 3 | Coord modules pass tests and mutation gate, but W8 skipped the full mutation sweep—no fresh proof that orchestrator→integrator→worker contracts still hold after W8 refactors. |
-| **Robustness** | 2 | The EngineHealth schema bug (silently swallowed by `except Exception: continue`) proves the integrator path has untested silent-failure modes. Coord's checkpoint/progress-stream contracts have no explicit invariant tests for partial-write scenarios. |
-| **Operator-usability** | 3 | `harness today` surfaces dispatch-level events but **zero coord-level visibility**—the operator can't see where in the plan→worker→integrate cycle a run stalled. `coord status` exists in `--help` but isn't surfaced in the daily pulse. |
-| **Test discipline** | 3 | 1576 tests pass, kill rates ≥3 on coord modules, but the mutation sweep is stale (last ran W7). No contract-level tests verifying the single-worker directive is enforced across worktree boundaries. |
-| **Risk** | 3 | Cross-worker contract drift is the live risk: if worker A's output schema drifts from what integrator B expects, there's no explicit schema-contract assertion at the boundary. The `except Exception: continue` pattern that hid the EngineHealth bug may exist elsewhere in coord paths. |
+**Correctness: 4** — The EngineHealth schema bug was a genuine cross-contract failure: fix functions wrote `quarantined`/`recovering`, Pydantic silently rejected, consumers never saw it. Fixed now; quarantine flow verified end-to-end. Persistent STOPs on two audit-related rows remain but don't block operator functionality.
 
-## Top blocker
+**Robustness: 3** — The `except Exception: continue` that hid the schema mismatch is exactly this lens's nightmare: a worker contracts to write status, integrator silently drops it. Fixed for this instance, but no grep/lint proves the pattern is gone elsewhere. Audit non-determinism means the robustness *verifier* itself is flaky.
 
-**Add explicit schema-contract tests at each coord boundary** (planner→worker output spec, worker→integrator result spec, integrator→coordinator summary spec). One integration test per boundary asserting the Pydantic models round-trip cleanly would catch the class of silent-failure bugs the EngineHealth incident exemplified. This alone would lift Robustness from 2→4 and Risk from 3→1.
+**Operator-usability: 4** — `preflight --fix` now actually heals, `engines-heal` surfaces recovery states, `harness today` is plain-language. The runbook closes the gap the readiness panel identified. Non-technical operator can recover a dead engine without writing Python.
 
-## Verdict
+**Test discipline: 3** — The schema bug passed 1544 tests. Tests asserted fix functions *returned* success but never asserted on-disk `engine_health` actually contained `"status": "quarantined"`. The audit sweep caught what tests missed — that's the audit doing its job, but it means integration tests at the coordination contract boundary are missing.
 
-**SHIP-WITH-FIXES** — Coord correctness is demonstrated at the module level but unproven at the contract level; one boundary-contract test suite per handoff point closes the gap the EngineHealth bug exposed.
+**Risk: 3** — The `except Exception: continue` + stale-schema pattern could exist in any coordinator→integrator→status path. W9-AUDIT-NONDETERMINISM-AVG is queued but not landed, so the audit gate remains a noisy signal for the next wave.
+
+6. **Top blocker**: Add one integration test per fix function that asserts *on-disk file state* after `preflight --fix` — not function return value, but actual JSON round-trip through the Pydantic schema. This would have caught the W8 schema bug in CI rather than requiring an audit sweep.
+
+7. **Verdict**: **SHIP-WITH-FIXES** — the load-bearing coordination bug is fixed, but the test gap that allowed it to ship needs closing before autonomous mode can trust the preflight→fix→verify contract.
