@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 import yaml
@@ -989,6 +989,19 @@ def status_verify(cadence_minutes: Optional[int]) -> None:
     for i in issues:
         click.echo(i, err=True)
     sys.exit(1)
+
+
+@status.command(name="human")
+@click.option("--since-hours", type=int, default=24,
+              help="How far back to look for activity (default 24).")
+def status_human(since_hours: int) -> None:
+    """W8-AUDIT follow-through 2026-05-24: spec alias for ``harness today``.
+
+    The MiMo audit flagged that the spec calls for both ``harness today``
+    AND ``harness status human``.  Both routes share the same code path.
+    """
+    ctx = click.get_current_context()
+    ctx.invoke(today_cmd, since_hours=since_hours)
 
 
 @cli.command()
@@ -2173,8 +2186,20 @@ def engines(subcmd: str | None, list_: bool, health: bool) -> None:
         list_ = True
     elif subcmd == "health":
         health = True
+    elif subcmd == "heal":
+        # W8-AUDIT follow-through 2026-05-24: route ``engines heal`` to the
+        # standalone engines_heal_cmd so the MiMo-flagged subcommand naming
+        # works as the auditor expected.  Top-level ``harness engines-heal``
+        # also continues to work.
+        from click.testing import CliRunner as _CR  # local import OK
+        runner = _CR()
+        # Reinvoke with default args — operator can still use
+        # ``harness engines-heal --dry-run`` for flags.
+        ctx = click.get_current_context()
+        ctx.invoke(engines_heal_cmd, dry_run=False, engine=None)
+        return
     elif subcmd is not None:
-        click.echo(f"Error: unknown subcommand {subcmd!r}; use 'list' or 'health' "
+        click.echo(f"Error: unknown subcommand {subcmd!r}; use 'list', 'health', or 'heal' "
                    f"(or --list / --health flags)", err=True)
         sys.exit(2)
 
@@ -2282,9 +2307,17 @@ def engines_heal_cmd(dry_run: bool, engine: str | None) -> None:
     except Exception as exc:
         click.echo(f"  [X] Couldn't read engine health: {exc}", err=True)
         sys.exit(2)
+    # W8-AUDIT follow-through 2026-05-24: read_engine_health returns
+    # Pydantic EngineHealth objects in production but tests stub it with
+    # raw dicts — handle both so the quarantined detection actually
+    # fires in both contexts.
+    def _entry_status(entry: Any) -> str | None:
+        if isinstance(entry, dict):
+            return entry.get("status")
+        return getattr(entry, "status", None)
     quarantined_now = {
         name for name, entry in (health or {}).items()
-        if isinstance(entry, dict) and entry.get("status") == "quarantined"
+        if _entry_status(entry) == "quarantined"
     }
     affected = set(dead_streaks.keys()) | quarantined_now
     if engine:

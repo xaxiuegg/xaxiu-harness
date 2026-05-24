@@ -55,6 +55,7 @@ _PLAN_BY_TASK_PREFIX = {
     "C1": "spec/wave-6-plan.md",
     "C2": "spec/wave-6-plan.md",
     "W7-": "spec/wave-7-plan.md",
+    "W8-": "spec/wave-8-plan.md",
 }
 
 

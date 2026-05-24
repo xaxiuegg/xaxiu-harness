@@ -58,6 +58,11 @@ This handles:
    later with `harness engines reset <engine-name>` once your
    engineering teammate has fixed the root cause.
 
+   For a richer view of the dead engine + a key-presence probe in one
+   shot, run `harness engines heal` (or `harness engines-heal`).  It
+   tells you whether the API key is back in DPAPI and, if so, marks the
+   engine `recovering` so the dispatcher gives it one more attempt.
+
 **Always preview first**:
 
 ```powershell

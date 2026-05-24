@@ -328,6 +328,12 @@ def _check_dead_engines() -> PreflightCheck:
     is ``ok``; one or more dead engines is ``warn`` (the loop's
     fallback chain still routes traffic to healthy engines, so this
     isn't an outage — but it warrants operator attention).
+
+    W8-AUDIT follow-through 2026-05-24: engines already marked
+    ``quarantined`` or ``recovering`` in ``engine_health.json`` are
+    treated as already-handled and excluded from the warn list.  This
+    way ``harness preflight --fix`` actually clears the warning the
+    operator sees, instead of repeatedly flagging the same engines.
     """
     started = time.monotonic()
     try:
@@ -339,6 +345,25 @@ def _check_dead_engines() -> PreflightCheck:
             message=f"alarm module unavailable: {exc}",
             duration_ms=int((time.monotonic() - started) * 1000),
         )
+    # W8: filter out engines already quarantined/recovering — those are
+    # acknowledged by the operator (or by --fix).  Empty dict on import
+    # error keeps the legacy behaviour.  Handle both dict and Pydantic
+    # forms so tests stubbing read_engine_health continue to work.
+    try:
+        from harness.state.files import read_engine_health
+        health = read_engine_health()
+        def _status_of(entry: object) -> object:
+            if isinstance(entry, dict):
+                return entry.get("status")
+            return getattr(entry, "status", None)
+        handled = {
+            name for name, entry in (health or {}).items()
+            if _status_of(entry) in ("quarantined", "recovering")
+        }
+        dead = {name: streak for name, streak in dead.items()
+                if name not in handled}
+    except Exception:
+        pass
     duration = int((time.monotonic() - started) * 1000)
     if not dead:
         return PreflightCheck(
@@ -637,6 +662,17 @@ def fix_dead_engines(*, dry_run: bool = False) -> FixOutcome:
                 "Please ask your engineering teammate."
             ),
         )
+    # W8-AUDIT follow-through 2026-05-24: emit the L4 toast that W6-C2 normally
+    # fires when an engine *first* crosses the dead threshold.  The fix path
+    # may quarantine engines whose alarms haven't fired yet (e.g. operator
+    # ran preflight --fix immediately after a streak crossed threshold).  Toast
+    # is best-effort.
+    try:
+        from harness.engine_alarm import fire_dead_engine_alarm
+        for engine_name in quarantined:
+            fire_dead_engine_alarm(engine_name, dead.get(engine_name, 0))
+    except Exception:
+        pass
     return FixOutcome(
         name="dead_engines", applied=True, skipped=False,
         message=(

@@ -95,6 +95,10 @@ RECENT=$(find "D:/xaxiu-harness-standalone" -maxdepth 5 -type f \
   -not -name '*-response.md' \
   -not -name '*-deepseek-*.md' \
   -not -name '*-kimi-*.md' \
+  -not -path '*/src/harness/coord/worker.py' \
+  -not -path '*/src/harness/engines/concrete.py' \
+  -not -path '*/src/harness/coord/orchestrator.py' \
+  -not -path '*/src/harness/coord/integrator.py' \
   -newer "$CSV" -mmin -60 2>/dev/null | head -3)
 
 if [ -z "$RECENT" ]; then

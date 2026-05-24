@@ -100,12 +100,16 @@ class LoopEntry(BaseModel):
 
 
 class EngineHealth(BaseModel):
-    status: Literal["up", "degraded", "down"] = "up"
+    status: Literal[
+        "up", "degraded", "down", "quarantined", "recovering",
+    ] = "up"
     last_fail: str | None = None  # ISO 8601 UTC
     avg_latency_ms: int | None = None
     priority: Literal["HIGH", "NORMAL", "AVOID"] = "NORMAL"
     burst_until: str | None = None
     locked: bool = False
+    last_quarantine: str | None = None  # ISO 8601 UTC — last engines-heal action
+    last_heal_attempt: str | None = None  # ISO 8601 UTC — last recovering mark
     model_config = {"extra": "forbid"}
 
 
