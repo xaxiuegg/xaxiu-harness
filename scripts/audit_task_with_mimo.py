@@ -189,17 +189,38 @@ def git_commit_info(sha: str = "HEAD") -> dict:
     diff = _run(["show", "--format=", full_sha])
     # W6-A1.2-followup: raised from 4000 → 16000 chars after MiMo
     # audit STOPped with "diff missing" complaint on a 203-line commit.
-    # MiMo's 131K input window has plenty of room for richer context.
-    diff_excerpt = diff[:16000] + ("..." if len(diff) > 16000 else "")
+    # W8-AUDIT-PROMPT 2026-05-23: raised from 16000 → 48000 chars after
+    # the W7 retroactive sweep hit 4/9 STOPs because the auditor
+    # objected to truncated diffs.  MiMo's 131K input window easily
+    # handles 48K diff + 64K file content + ~10K prompt boilerplate.
+    # If diff still exceeds 48K, prefer head + tail with a marker so
+    # the auditor sees the beginning AND end of the change (not just
+    # the first 48K of a 100K diff).
+    _DIFF_LIMIT = 48_000
+    if len(diff) > _DIFF_LIMIT:
+        head_chars = int(_DIFF_LIMIT * 0.7)
+        tail_chars = _DIFF_LIMIT - head_chars
+        diff_excerpt = (
+            diff[:head_chars]
+            + f"\n\n... [{len(diff) - _DIFF_LIMIT} chars elided "
+            "between head and tail] ...\n\n"
+            + diff[-tail_chars:]
+        )
+    else:
+        diff_excerpt = diff
     # Pull the current contents of each modified file so the auditor
     # sees the actual post-commit state (not just delta).
     file_list_raw = _run(["show", "--name-only", "--format=", full_sha]).strip()
     modified_files = [p for p in file_list_raw.splitlines() if p.strip()]
     file_contents_blocks: list[str] = []
-    # Limit total file-content budget to ~12KB so prompt+diff stays
-    # under MiMo's 60s gateway timeout for small reasoning tasks.
-    per_file_budget = 3000
-    for rel in modified_files[:4]:  # cap at 4 files
+    # W8-AUDIT-PROMPT 2026-05-23: per-file budget raised 3000 → 8000;
+    # file cap raised 4 → 10.  Same MiMo 131K-window justification as
+    # the diff bump.  Files larger than 8K use the head+tail strategy
+    # so the auditor sees the file's structure top + key changes
+    # bottom (most Python modules put the file's primary exported
+    # function near the end after helpers).
+    _PER_FILE_BUDGET = 8_000
+    for rel in modified_files[:10]:
         path = Path(rel)
         if not path.exists():
             continue
@@ -207,8 +228,15 @@ def git_commit_info(sha: str = "HEAD") -> dict:
             content = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if len(content) > per_file_budget:
-            content = content[:per_file_budget] + f"\n... [+{len(content) - per_file_budget} chars truncated]"
+        if len(content) > _PER_FILE_BUDGET:
+            head = int(_PER_FILE_BUDGET * 0.6)
+            tail = _PER_FILE_BUDGET - head
+            content = (
+                content[:head]
+                + f"\n\n... [{len(content) - _PER_FILE_BUDGET} chars "
+                "elided between head and tail] ...\n\n"
+                + content[-tail:]
+            )
         file_contents_blocks.append(f"## {rel}\n\n```\n{content}\n```")
     file_contents = "\n\n".join(file_contents_blocks) if file_contents_blocks else "(none)"
     return {
