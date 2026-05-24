@@ -34,6 +34,28 @@ jobs:
       - name: Run pytest
         run: python -m pytest tests/ -q --tb=short
 
+      # W12-CI-WINDOWS-CLI-SMOKE (2026-05-24): the 20-agent operator-review
+      # panel found `harness --help`, `harness preflight`, and `harness
+      # agent init` all crashing on Windows cp1252 console with
+      # UnicodeEncodeError because click.echo emits Unicode glyphs.
+      # GitHub Actions' default Windows runner uses utf-8 console, hiding
+      # the bug.  Force PYTHONIOENCODING=cp1252 here to reproduce.  If any
+      # of these crash → CI fails → regression caught before ship.
+      - name: Windows CLI smoke (force cp1252 to catch encoding crashes)
+        if: matrix.os == 'windows-latest'
+        env:
+          PYTHONIOENCODING: cp1252
+        shell: bash
+        run: |
+          set -e
+          python -m harness --help > /dev/null
+          python -m harness preflight --skip-engines > /dev/null || true
+          python -m harness agent init --target ./_smoke_init --project-type python --adapter-name SmokeTest > /dev/null
+          python -m harness l5-banner-demo > /dev/null
+          python -m harness cost-today > /dev/null
+          python -m harness observer watchdog-status > /dev/null || true
+          echo "Windows CLI smoke: PASS (no UnicodeEncodeError)"
+
       - name: Report coverage (best-effort, non-blocking)
         if: matrix.os == 'ubuntu-latest'
         continue-on-error: true

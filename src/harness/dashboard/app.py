@@ -161,6 +161,113 @@ def create_app() -> FastAPI:
         can watch progress without polling git or the filesystem."""
         return _scan_queue()
 
+    # W12-DASHBOARD-WIRE-V2-ROUTES (2026-05-24): the 20-agent operator-
+    # review panel found these endpoints returning 404, leaving Wave 11
+    # work (cost widget, preflight latency, L5 escalations, loop status)
+    # invisible to the dashboard.  Wiring them through to the existing
+    # backend modules so the dashboard finally surfaces the Wave 11 work.
+
+    @app.get("/api/loop")
+    async def api_loop() -> dict[str, Any]:
+        """W12: structured loop status — was previously only in /api/state
+        as a nested dict, breaking dashboards that expect a top-level
+        loop snapshot."""
+        state = _load_json(DEFAULT_STATE_PATH) or {}
+        loop = state.get("loop") or {}
+        # Add a is_stale + minutes_since_last_tick computation so the
+        # dashboard can show the operator how recent the loop actually
+        # ran (the May-21 stale-tick problem the panel found).
+        from datetime import datetime, timezone
+        last_tick = loop.get("last_tick_at") or loop.get("last_tick")
+        minutes_since = None
+        is_stale = False
+        if isinstance(last_tick, str):
+            try:
+                t = datetime.fromisoformat(last_tick.rstrip("Z"))
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+                minutes_since = int((datetime.now(timezone.utc) - t).total_seconds() / 60)
+                is_stale = minutes_since > 60  # >1h since last tick = stale
+            except (ValueError, TypeError):
+                pass
+        return {
+            "status": loop.get("status", "unknown"),
+            "tick": loop.get("tick", 0),
+            "last_tick_at": last_tick,
+            "minutes_since_last_tick": minutes_since,
+            "is_stale": is_stale,
+        }
+
+    @app.get("/api/cost")
+    async def api_cost() -> dict[str, Any]:
+        """W12: cost-today widget — same data as `harness cost-today`."""
+        try:
+            from harness.cost_widget import cost_widget_dict
+            return cost_widget_dict(since_hours=24.0)
+        except Exception as exc:
+            return {"error": str(exc), "spent_usd": 0.0,
+                    "budget_usd": 5.0, "status": "error"}
+
+    @app.get("/api/preflight-latency")
+    async def api_preflight_latency() -> dict[str, Any]:
+        """W12: rolling p50/p95 of preflight checks — same data as
+        `harness preflight-latency --format json`."""
+        try:
+            from harness.preflight_latency import latency_summary
+            return latency_summary(since_hours=24.0)
+        except Exception as exc:
+            return {"error": str(exc), "count": 0,
+                    "p50": 0, "p95": 0, "p99": 0, "per_check": {}}
+
+    @app.get("/api/l5-events")
+    async def api_l5_events() -> dict[str, Any]:
+        """W12: L5 escalations in last 24h — surfaces:
+        - CRITICAL observer flags in coord/observer/flags/
+        - Watchdog consecutive_restart_failures >= 3
+        Same signal `harness today` shows in its L5 section."""
+        events: list[dict[str, Any]] = []
+        # CRITICAL observer flags
+        try:
+            from harness._constants import _REPO_ROOT
+            crit = _REPO_ROOT / "coord" / "observer" / "flags" / (
+                "CRITICAL_FLAG_PENDING.md"
+            )
+            if crit.exists():
+                from datetime import datetime, timezone
+                mtime = datetime.fromtimestamp(
+                    crit.stat().st_mtime, tz=timezone.utc,
+                )
+                events.append({
+                    "source": "observer_critical_flag",
+                    "raised_at": mtime.isoformat(),
+                    "code": "L5.observer.CRITICAL_FLAG",
+                    "summary": "CRITICAL observer flag pending",
+                    "action": "run `harness observer flags` for detail",
+                })
+        except Exception:
+            pass
+        # Watchdog escalation
+        try:
+            from harness.observer import state as _ostate
+            from harness import l5_escalation as _l5
+            st = _ostate.read_state()
+            if _l5.should_escalate_to_l5(st.consecutive_restart_failures):
+                events.append({
+                    "source": "watchdog_consecutive_failures",
+                    "code": "L5.observer.OBSERVER_RESTART_LOOP",
+                    "summary": (f"observer restart failed "
+                                f"{st.consecutive_restart_failures} "
+                                f"consecutive times"),
+                    "action": (
+                        "run `harness observer restart` (will print "
+                        "full L5 banner)"
+                    ),
+                    "consecutive_failures": st.consecutive_restart_failures,
+                })
+        except Exception:
+            pass
+        return {"count": len(events), "events": events}
+
     @app.get("/api/summary")
     async def api_summary() -> dict[str, Any]:
         state = _load_json(DEFAULT_STATE_PATH) or {}

@@ -91,11 +91,20 @@ def watchdog_status(observer_dir: Path | None = None) -> dict:
             "is_stale": bool,
             "last_cycle_at": str | None,
             "stale_seconds": float | None,
+            "stale_human": str,        # W12 add: "20min ago" / "(never)"
             "cadence_minutes": int,
+            "cadence_human": str,      # W12 add: "every 60m"
             "armed": bool,
             "paused": bool,
+            "verdict": str,            # W12 add: "OK" | "STALE" | "PAUSED" | "DISARMED" | "UNINITIALIZED"
+            "summary_line": str,       # W12 add: one-line operator-friendly summary
             "suggested_action": str | None,  # human text or None if healthy
         }
+
+    W12-WATCHDOG-HUMAN-FORMAT (2026-05-24): added stale_human +
+    cadence_human + verdict + summary_line per 20-agent panel finding
+    M07: 'machine-shaped output `stale_seconds: 1209.651516` with no
+    context'.  Now matches the cost-widget pattern with a one-liner.
     """
     try:
         state = observer_state.read_state(observer_dir=observer_dir)
@@ -106,31 +115,64 @@ def watchdog_status(observer_dir: Path | None = None) -> dict:
             "is_stale": True,
             "last_cycle_at": None,
             "stale_seconds": None,
+            "stale_human": "(state file unreadable)",
             "cadence_minutes": 60,
+            "cadence_human": "every 60m (default)",
             "armed": False,
             "paused": False,
+            "verdict": "CORRUPT",
+            "summary_line": (
+                "Watchdog: CORRUPT - observer state file unreadable"
+            ),
             "suggested_action": (
-                "observer state file unreadable — run "
+                "observer state file unreadable - run "
                 "`harness observer reset` to rebuild"
             ),
         }
     now = datetime.now(timezone.utc)
     stale = is_stale(state, now=now)
     elapsed = stale_seconds(state, now=now)
+    elapsed_human = (
+        f"{_humanize_seconds(elapsed)} ago" if elapsed is not None
+        else "(never)"
+    )
+    cadence_human = f"every {state.cadence_minutes}m"
+    # W12-WATCHDOG-HUMAN-FORMAT: verdict + summary_line per panel M07
+    if not state.armed:
+        verdict = "DISARMED"
+        summary = f"Watchdog: DISARMED - observer disarmed (last cycle {elapsed_human})"
+    elif state.paused:
+        verdict = "PAUSED"
+        summary = f"Watchdog: PAUSED - operator paused (last cycle {elapsed_human})"
+    elif state.last_cycle_at is None:
+        verdict = "UNINITIALIZED"
+        summary = f"Watchdog: UNINITIALIZED - observer armed but no cycles yet (cadence: {cadence_human})"
+    elif stale:
+        verdict = "STALE"
+        summary = (
+            f"Watchdog: STALE - last cycle {elapsed_human} (expected: {cadence_human})"
+        )
+    else:
+        verdict = "OK"
+        summary = f"Watchdog: OK - last cycle {elapsed_human} (cadence: {cadence_human})"
+
     action: str | None = None
     if stale:
-        elapsed_human = _humanize_seconds(elapsed) if elapsed else "unknown"
         action = (
-            f"observer last fired {elapsed_human} ago — run "
+            f"observer last fired {elapsed_human} - run "
             f"`harness observer restart` to re-arm the scheduler"
         )
     return {
         "is_stale": stale,
         "last_cycle_at": state.last_cycle_at,
         "stale_seconds": elapsed,
+        "stale_human": elapsed_human,
         "cadence_minutes": state.cadence_minutes,
+        "cadence_human": cadence_human,
         "armed": state.armed,
         "paused": state.paused,
+        "verdict": verdict,
+        "summary_line": summary,
         "suggested_action": action,
     }
 

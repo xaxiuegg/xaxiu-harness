@@ -64,6 +64,36 @@ def cli(ctx: click.Context, **operator_overrides: object) -> None:
     )
 
 
+def _bootstrap_utf8_stdout() -> None:
+    """W12-WINDOWS-CP1252-FIX (2026-05-24): force UTF-8 on stdout/stderr.
+
+    The 20-agent operator-review panel found three distinct CLI entry
+    points (``preflight``, ``--help``, ``agent init``) crashing with
+    ``UnicodeEncodeError`` on Windows console (cp1252) when emitting
+    `\\u2192` (->), `\\u03b1` (alpha), or `\\u2713` (check) glyphs.
+    Reconfigure stdout/stderr at process entry so click.echo never
+    hits cp1252 again.  errors='replace' is a safety belt: if a glyph
+    still cannot encode (older Python without reconfigure, or a fd
+    redirected to a strict file), the glyph is replaced with '?'
+    rather than crashing.
+
+    Safe on POSIX (utf-8 is the default anyway) and on Windows with
+    UTF-8 console codepage.  Idempotent.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue  # piped to a non-TextIOWrapper sink
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            # Some redirected streams refuse reconfigure; not fatal.
+            pass
+
+
 def main(*args, **kwargs):
     """Entry point that wraps click with W5-DD top-level HarnessError handler.
 
@@ -75,6 +105,11 @@ def main(*args, **kwargs):
     Programmatic callers that catch HarnessError themselves can still call
     ``cli`` directly to bypass this.
     """
+    # W12-WINDOWS-CP1252-FIX: force UTF-8 on stdout/stderr before click
+    # writes a single byte.  The 20-agent operator-review panel found
+    # this was the #1 universal blocker (cp1252 crashes on -> alpha check).
+    _bootstrap_utf8_stdout()
+
     from harness.errors import HarnessError, handle_harness_error
     try:
         return cli(*args, **kwargs)
@@ -2459,6 +2494,50 @@ def today_cmd(since_hours: int) -> None:
     else:
         click.echo("  (no audits ran in this window)")
 
+    # Section 1.6: W12-LOOP-STALENESS-WATCHDOG — surface the dev-loop's
+    # own staleness.  The 20-agent panel found the dashboard claiming
+    # "Loop: armed" while last tick was 3 days ago.  Honest 'today'
+    # output must flag this so operator notices a dead loop.
+    click.echo("\n## Loop health\n")
+    try:
+        state_path = repo / "coord" / "dev_loop" / "state.json"
+        if state_path.exists():
+            import json as _json
+            state = _json.loads(state_path.read_text(encoding="utf-8"))
+            loop = state.get("loop", {})
+            last_tick = loop.get("last_tick_at") or loop.get("last_tick")
+            loop_status = loop.get("status", "unknown")
+            if isinstance(last_tick, str):
+                try:
+                    t = datetime.fromisoformat(last_tick.rstrip("Z"))
+                    if t.tzinfo is None:
+                        t = t.replace(tzinfo=timezone.utc)
+                    age = datetime.now(timezone.utc) - t
+                    hours = age.total_seconds() / 3600
+                    if hours < 1:
+                        age_label = f"{int(age.total_seconds() / 60)}min ago"
+                    elif hours < 24:
+                        age_label = f"{hours:.1f}h ago"
+                    else:
+                        age_label = f"{int(hours / 24)}d ago"
+                    if hours > 24:
+                        click.echo(
+                            f"  [!] Loop {loop_status} but last tick "
+                            f"{age_label} - dev-loop may be dead"
+                        )
+                    else:
+                        click.echo(
+                            f"  Loop {loop_status} - last tick {age_label}"
+                        )
+                except (ValueError, TypeError):
+                    click.echo(f"  Loop {loop_status} (last_tick: unparseable)")
+            else:
+                click.echo(f"  Loop {loop_status} (no last_tick_at)")
+        else:
+            click.echo("  (no coord/dev_loop/state.json — loop never armed)")
+    except Exception as exc:
+        click.echo(f"  (couldn't read loop state: {exc})")
+
     # Section 1.7: W11-L5-OUTPUT-CONTRACT — ALWAYS surface L5 events
     # in the last 24h (per spec criterion 3).  Sources of L5:
     #   - observer/flags/CRITICAL_FLAG_PENDING.md (any pending CRITICAL flag)
@@ -3542,16 +3621,18 @@ def observer_watchdog_status(as_json: bool) -> None:
         import json as _json
         click.echo(_json.dumps(status, indent=2, default=str))
     else:
-        click.echo(f"is_stale:        {status['is_stale']}")
-        click.echo(f"last_cycle_at:   {status['last_cycle_at'] or '(never)'}")
-        secs = status['stale_seconds']
-        click.echo(f"stale_seconds:   {secs if secs is not None else '(n/a)'}")
-        click.echo(f"cadence_minutes: {status['cadence_minutes']}")
-        click.echo(f"armed:           {status['armed']}")
-        click.echo(f"paused:          {status['paused']}")
+        # W12-WATCHDOG-HUMAN-FORMAT: lead with the one-liner summary so
+        # operators don't have to do mental math from `stale_seconds: 1209.65`.
+        click.echo(status['summary_line'])
+        click.echo("")
+        click.echo(f"  verdict:         {status['verdict']}")
+        click.echo(f"  last_cycle_at:   {status['last_cycle_at'] or '(never)'}")
+        click.echo(f"  stale:           {status['stale_human']}")
+        click.echo(f"  cadence:         {status['cadence_human']}")
+        click.echo(f"  armed/paused:    armed={status['armed']} paused={status['paused']}")
         if status['suggested_action']:
             click.echo("")
-            click.echo(f"ACTION: {status['suggested_action']}")
+            click.echo(f"  ACTION: {status['suggested_action']}")
     sys.exit(1 if status['is_stale'] else 0)
 
 
