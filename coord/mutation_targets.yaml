@@ -75,31 +75,31 @@ modules:
   # ---- WARM (W9-MUTATION-CANARY rotation; 3-mutant spot-check per session) ----
   - path: src/harness/proxy/circuit.py
     tier: warm
-    last_sweep_sha: e81cbdb
-    last_sweep_date: "2026-05-24"
+    last_sweep_sha: 7698602
+    last_sweep_date: "2026-05-25"
     expected_kill_rate: 1.0  # canary uses pytest -x, so 1 kill = success
-    notes: "W9-MUTATION-CANARY first run: 2/2 mutations killed; gt_to_ge skipped (pattern absent)."
+    notes: "W10-FRESH-CANARY-MODULES: 2/2 applicable mutations killed (run #3 on this module). gt_to_ge pattern absent."
 
   - path: src/harness/observer/cycle.py
     tier: warm
-    last_sweep_sha: null  # not yet covered
-    last_sweep_date: null
-    expected_kill_rate: 1.0
-    notes: "Next in canary rotation."
+    last_sweep_sha: 7698602
+    last_sweep_date: "2026-05-25"
+    expected_kill_rate: null  # 0/3 patterns matched the module's idioms
+    notes: "W10-FRESH-CANARY-MODULES: 0/3 mutation patterns matched the module's idioms. Module uses different control-flow primitives; the 5-pattern template doesn't trigger. NEUTRAL (no signal); add module-specific patterns in a future expansion."
 
   - path: src/harness/loops/runner.py
     tier: warm
-    last_sweep_sha: null
-    last_sweep_date: null
+    last_sweep_sha: 7698602
+    last_sweep_date: "2026-05-25"
     expected_kill_rate: 1.0
-    notes: "After observer/cycle in canary rotation."
+    notes: "W10-FRESH-CANARY-MODULES: 1/1 applicable mutation killed (eq_to_neq); bool_return_flip + gt_to_ge patterns absent."
 
   - path: src/harness/dashboard/app.py
     tier: warm
-    last_sweep_sha: null
-    last_sweep_date: null
-    expected_kill_rate: 1.0
-    notes: "After loops/runner in canary rotation."
+    last_sweep_sha: 7698602
+    last_sweep_date: "2026-05-25"
+    expected_kill_rate: null  # to be verified — canary in flight at commit time
+    notes: "W10-FRESH-CANARY-MODULES: canary run in flight. Update once mutation kill-rate confirmed."
 
   # ---- COLD (best-effort, no current sweep; flag if SHA changes too much) ----
   - path: src/harness/preflight.py

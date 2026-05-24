@@ -442,3 +442,74 @@ def test_git_commits_info_empty_falls_back_to_HEAD(monkeypatch):
     audit.git_commits_info([])
     # First call should rev-parse HEAD
     assert any("HEAD" in c and "rev-parse" in c for c in calls)
+
+
+# -- W10-AUDIT-FOLLOWUP-COMMIT-POLICY -------------------------------------
+
+
+def test_find_latest_commit_returns_first_match(monkeypatch):
+    """Scan git log for the most recent commit subject containing task_id."""
+    git_log = (
+        "abc1234567 W10-FOO followup: address audit gap\n"
+        "def4567890 W10-FOO original: initial implementation\n"
+        "ghi7890123 W9-BAR: unrelated\n"
+    )
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": git_log})())
+    result = audit.find_latest_commit_for_task("W10-FOO")
+    assert result == "abc1234567"
+
+
+def test_find_latest_commit_returns_none_when_no_match(monkeypatch):
+    git_log = (
+        "abc1234567 W9-BAZ: unrelated commit\n"
+        "def4567890 OTHER: another commit\n"
+    )
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": git_log})())
+    assert audit.find_latest_commit_for_task("W10-FOO") is None
+
+
+def test_find_latest_commit_respects_token_boundary(monkeypatch):
+    """W10-FO must NOT match W10-FOO (substring without boundary)."""
+    git_log = "abc1234567 W10-FOO bar baz\n"
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": git_log})())
+    # Searching for "W10-FO" should NOT match "W10-FOO" — the F at the
+    # match end is alphanumeric, so the boundary check rejects.
+    result = audit.find_latest_commit_for_task("W10-FO")
+    # Actually the function allows hyphen-suffixed matches by design
+    # (W10-CLI matches W10-CLI-TIMEOUT-BUDGET), but pure alpha-suffix
+    # should be rejected.
+    assert result is None
+
+
+def test_find_latest_commit_allows_hyphen_suffix(monkeypatch):
+    """A commit with W10-CLI-TIMEOUT-BUDGET should match W10-CLI searches.
+
+    Many followup commits append a suffix; the function permits that
+    because hyphen is a valid id-character.
+    """
+    git_log = "abc1234567 W10-CLI-TIMEOUT-BUDGET: fix\n"
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": git_log})())
+    # NOTE: per the implementation note, hyphen-suffixed matches ARE
+    # accepted (W10-CLI matches W10-CLI-TIMEOUT-BUDGET).  This is by
+    # design — followup commits often append a suffix.
+    result = audit.find_latest_commit_for_task("W10-CLI")
+    assert result == "abc1234567"
+
+
+def test_find_latest_commit_handles_empty_log(monkeypatch):
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": ""})())
+    assert audit.find_latest_commit_for_task("W10-FOO") is None
+
+
+def test_find_latest_commit_skips_substring_in_other_id(monkeypatch):
+    """Boundary check: 'W10-FOO' should NOT match a commit named
+    'XW10-FOO' (the X means it's part of a longer id, not a clean match)."""
+    git_log = "abc1234567 XW10-FOO bar\n"
+    monkeypatch.setattr(audit.subprocess, "run",
+                        lambda args, **kw: type("R", (), {"stdout": git_log})())
+    assert audit.find_latest_commit_for_task("W10-FOO") is None

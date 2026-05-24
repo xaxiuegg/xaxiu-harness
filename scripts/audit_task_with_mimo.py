@@ -188,6 +188,50 @@ def _run_git(args: list[str]) -> str:
         return ""
 
 
+def find_latest_commit_for_task(task_id: str,
+                                lookback: int = 50) -> str | None:
+    """Find the most recent commit whose subject mentions *task_id*.
+
+    W10-AUDIT-FOLLOWUP-COMMIT-POLICY: when an audit STOPed and a
+    followup commit landed, --reaudit uses this to pick the followup
+    commit's SHA instead of the original one.  Looks back through
+    the last *lookback* commits (50 by default — enough to span a
+    wave's worth of work).
+
+    Token-boundary rule: ``task_id`` must appear as a whole token in
+    the subject.  Accepts hyphen-suffixes (W10-CLI matches
+    W10-CLI-TIMEOUT-BUDGET because followup commits often append
+    suffixes).  Rejects bare alphanumeric suffixes (W10-FO does NOT
+    match W10-FOO).  Rejects substring matches with non-boundary
+    prefixes (W10-FOO does NOT match XW10-FOO).
+    """
+    out = _run_git(["log", "-n", str(lookback), "--format=%H %s"])
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Split SHA off the front first so all boundary math is
+        # local to the subject string.
+        if " " not in line:
+            continue
+        sha, subject = line.split(" ", 1)
+        idx = subject.find(task_id)
+        if idx == -1:
+            continue
+        end_idx = idx + len(task_id)
+        char_before = subject[idx - 1] if idx > 0 else " "
+        char_after = subject[end_idx] if end_idx < len(subject) else " "
+        # Pre-boundary: reject if previous char is alphanumeric or hyphen
+        # (means task_id is a tail of a longer id).
+        if char_before.isalnum() or char_before == "-":
+            continue
+        # Post-boundary: hyphen ok (suffix expansion), alphanumeric rejects.
+        if char_after.isalnum():
+            continue
+        return sha
+    return None
+
+
 def resolve_commit_range(spec: str) -> list[str]:
     """Translate ``spec`` into a list of commit SHAs (oldest first).
 
@@ -448,58 +492,68 @@ def parse_audit_response(text: str) -> tuple[float, str, dict]:
 
 
 def _dispatch_with_fallback(prompt: str, max_tokens: int = 8_000) -> AuditRun:
-    """Run one MiMo audit, falling back to DeepSeek on failure.
+    """Run one DeepSeek audit, falling back to MiMo on failure.
+
+    W10-MIMO-FILTER-INVESTIGATION 2026-05-25: primary swapped from
+    MiMo to DeepSeek-v4-flash.  Every W9 audit hit MiMo's content
+    filter (~60s/attempt × 3 in avg-of-3 = 3min wasted before
+    DeepSeek fallback served the audit).  See
+    coord/reviews/audit-engine-choice.md for the decision doc.
+
+    MiMo retained as fallback so the pipeline still has engine
+    redundancy if DeepSeek is unreachable.
 
     Returns AuditRun (success=False sets confidence=0.0 and error= reason).
     """
-    auditor_used = "mimo"
+    auditor_used = "deepseek"
     started = time.monotonic()
     try:
-        eng = get_engine("mimo", prefer_dpapi=False)
+        eng = get_engine("deepseek", prefer_dpapi=False)
     except RuntimeError as exc:
         return AuditRun(confidence=0.0, verdict="?", text="",
-                        latency_ms=0, auditor_used="mimo",
-                        success=False, error=f"mimo init failed: {exc}")
-    resp = eng.dispatch(prompt, "mimo-v2.5-pro", {"max_tokens": max_tokens})
+                        latency_ms=0, auditor_used="deepseek",
+                        success=False, error=f"deepseek init failed: {exc}")
+    resp = eng.dispatch(prompt, "deepseek-v4-flash", {"max_tokens": max_tokens})
     latency = int((time.monotonic() - started) * 1000)
 
-    # W6-A2 audit-script hardening 2026-05-23: MiMo's content filter
-    # rejects prompts that mention API keys verbatim, returning a
-    # response like "The request was rejected because it was
-    # considered high risk".  That's a success=True text response,
-    # so the old fallback gate (only success=False) didn't fire.
-    # Also fall back when the response can't possibly be a JSON
-    # audit verdict — no JSON braces or no "confidence" field.
-    _mimo_rejected = (
-        bool(resp.text)
-        and ("rejected" in resp.text.lower()
-             and "high risk" in resp.text.lower())
-    )
-    _mimo_unparseable = (
+    # Same defensive fallback gate as before: handle empty / unparseable
+    # responses by trying the alternate engine.
+    _unparseable = (
         bool(resp.text)
         and "{" not in resp.text  # no chance of JSON
     )
     if (not resp.success
             or not (resp.text or "").strip()
-            or _mimo_rejected
-            or _mimo_unparseable):
+            or _unparseable):
         reason = (
-            "rejected by content filter" if _mimo_rejected
-            else "unparseable text response" if _mimo_unparseable
+            "unparseable text response" if _unparseable
             else resp.error
         )
-        print(f"[audit] MiMo failed ({latency}ms): {reason}; "
-              f"falling back to DeepSeek...", file=sys.stderr)
+        print(f"[audit] DeepSeek failed ({latency}ms): {reason}; "
+              f"falling back to MiMo...", file=sys.stderr)
         try:
-            eng = get_engine("deepseek", prefer_dpapi=False)
+            eng = get_engine("mimo", prefer_dpapi=False)
             fb_started = time.monotonic()
-            resp = eng.dispatch(prompt, "deepseek-v4-flash", {"max_tokens": max_tokens})
+            resp = eng.dispatch(prompt, "mimo-v2.5-pro", {"max_tokens": max_tokens})
             latency += int((time.monotonic() - fb_started) * 1000)
-            auditor_used = "deepseek (fallback)"
+            auditor_used = "mimo (fallback)"
         except RuntimeError as exc:
             return AuditRun(confidence=0.0, verdict="?", text="",
-                            latency_ms=latency, auditor_used="mimo",
-                            success=False, error=f"deepseek init failed: {exc}")
+                            latency_ms=latency, auditor_used="deepseek",
+                            success=False, error=f"mimo init failed: {exc}")
+        # Defensive: if MiMo also trips its content filter on the
+        # fallback path, surface that explicitly.
+        _mimo_rejected = (
+            bool(resp.text)
+            and ("rejected" in resp.text.lower()
+                 and "high risk" in resp.text.lower())
+        )
+        if _mimo_rejected:
+            return AuditRun(confidence=0.0, verdict="?", text=resp.text,
+                            latency_ms=latency, auditor_used=auditor_used,
+                            success=False,
+                            error="both engines failed: MiMo content "
+                                  "filter rejected prompt")
 
     if not resp.success or not (resp.text or "").strip():
         return AuditRun(confidence=0.0, verdict="?", text="",
@@ -610,6 +664,15 @@ def main() -> int:
                         "on the MEAN confidence (W9-AUDIT-NONDETERMINISM-AVG). "
                         "N=1 keeps legacy single-run behavior.  N>=3 "
                         "recommended for noise-sensitive verdicts.")
+    parser.add_argument("--reaudit", action="store_true",
+                        help="W10-AUDIT-FOLLOWUP-COMMIT-POLICY: when a "
+                        "previous audit STOPed and a followup commit "
+                        "addressed the gaps, --reaudit picks the most "
+                        "recent commit whose subject mentions this "
+                        "task_id (looking back up to 50 commits) and "
+                        "audits THAT commit instead of --commit.  Use "
+                        "after landing a followup so the audit verdict "
+                        "tracks the latest state.")
     args = parser.parse_args()
 
     if sum(bool(x) for x in [
@@ -639,8 +702,17 @@ def main() -> int:
         print(f"task {args.task_id} not found in plan", file=sys.stderr)
         return 2
 
-    # Resolve commit anchor: --commit-range / --since override --commit
-    if args.commit_range:
+    # Resolve commit anchor: --reaudit / --commit-range / --since override --commit
+    if args.reaudit:
+        latest = find_latest_commit_for_task(args.task_id)
+        if not latest:
+            print(f"--reaudit could not find a commit mentioning "
+                  f"{args.task_id} in the last 50 commits", file=sys.stderr)
+            return 2
+        print(f"[audit] --reaudit resolved to {latest[:12]} for "
+              f"{args.task_id}", file=sys.stderr)
+        shas = [latest]
+    elif args.commit_range:
         shas = resolve_commit_range(args.commit_range)
         if not shas:
             print(f"--commit-range {args.commit_range} resolved to no "
