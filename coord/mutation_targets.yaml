@@ -1,0 +1,127 @@
+# W9-MUTATION-MANIFEST: declared mutation coverage per module.
+#
+# Each entry pins a module under src/harness/ to its last mutation
+# sweep SHA + expected kill rate.  Loaded by:
+#   - scripts/run_mutation_canary.py (ROTATION default reads from here)
+#   - scripts/run_mutation_sweep.py (MODULES list reads from here)
+#   - tests/test_mutation_manifest.py (CI gate)
+#   - harness mutation status (operator-facing staleness report)
+#
+# Adding a NEW module to src/harness/ without a row here triggers a
+# warning at preflight; staying stale (no sweep on the row's SHA
+# for >30 days) auto-flags a backlog row.
+
+schema_version: 1
+sweep_template:
+  # Mutation library used by both run_mutation_sweep.py and
+  # run_mutation_canary.py.  Centralizing here means a new mutation
+  # pattern propagates everywhere without an edit.
+  - label: bool_return_flip
+    search: "return True"
+    replace: "return False"
+  - label: eq_to_neq
+    search: " == "
+    replace: " != "
+  - label: gt_to_ge
+    search: " > 0"
+    replace: " >= 0"
+  - label: is_not_none_to_is_none
+    search: "is not None"
+    replace: "is None"
+  - label: plus1_to_minus1
+    search: " + 1"
+    replace: " - 1"
+
+# Each module: last sweep SHA, last sweep date, expected kill rate,
+# coverage tier (hot = high-priority, warm = canary-rotated,
+# cold = best-effort).  Tier informs preflight staleness thresholds.
+modules:
+  # ---- HOT (W6-A3 sweep coverage, top-5 dispatch path) ----
+  - path: src/harness/engines/dispatcher.py
+    tier: hot
+    last_sweep_sha: 9ed0e37
+    last_sweep_date: "2026-05-22"
+    expected_kill_rate: 3.0   # avg tests-failed per applied mutation
+    notes: "W6-A3 + W7-MUTATION-CONCRETE. Telemetry sites now use _swallow_telemetry helper (W9-SILENT-EXCEPTION-AUDIT)."
+
+  - path: src/harness/engines/concrete.py
+    tier: hot
+    last_sweep_sha: 9ed0e37
+    last_sweep_date: "2026-05-22"
+    expected_kill_rate: 3.33
+    notes: "W6-A3 + W7-MUTATION-CONCRETE gate cleared (3.33 ≥ 3)."
+
+  - path: src/harness/coord/worker.py
+    tier: hot
+    last_sweep_sha: 9ed0e37
+    last_sweep_date: "2026-05-22"
+    expected_kill_rate: 3.0
+    notes: "W6-A3."
+
+  - path: src/harness/coord/integrator.py
+    tier: hot
+    last_sweep_sha: 9ed0e37
+    last_sweep_date: "2026-05-22"
+    expected_kill_rate: 3.0
+    notes: "W6-A3."
+
+  - path: src/harness/orchestrator.py
+    tier: hot
+    last_sweep_sha: 9ed0e37
+    last_sweep_date: "2026-05-22"
+    expected_kill_rate: 3.0
+    notes: "W6-A3."
+
+  # ---- WARM (W9-MUTATION-CANARY rotation; 3-mutant spot-check per session) ----
+  - path: src/harness/proxy/circuit.py
+    tier: warm
+    last_sweep_sha: e81cbdb
+    last_sweep_date: "2026-05-24"
+    expected_kill_rate: 1.0  # canary uses pytest -x, so 1 kill = success
+    notes: "W9-MUTATION-CANARY first run: 2/2 mutations killed; gt_to_ge skipped (pattern absent)."
+
+  - path: src/harness/observer/cycle.py
+    tier: warm
+    last_sweep_sha: null  # not yet covered
+    last_sweep_date: null
+    expected_kill_rate: 1.0
+    notes: "Next in canary rotation."
+
+  - path: src/harness/loops/runner.py
+    tier: warm
+    last_sweep_sha: null
+    last_sweep_date: null
+    expected_kill_rate: 1.0
+    notes: "After observer/cycle in canary rotation."
+
+  - path: src/harness/dashboard/app.py
+    tier: warm
+    last_sweep_sha: null
+    last_sweep_date: null
+    expected_kill_rate: 1.0
+    notes: "After loops/runner in canary rotation."
+
+  # ---- COLD (best-effort, no current sweep; flag if SHA changes too much) ----
+  - path: src/harness/preflight.py
+    tier: cold
+    last_sweep_sha: null
+    last_sweep_date: null
+    notes: "Heavily changed in W8 + W9 (PREFLIGHT-FIX, PREFLIGHT-FIX-NOSTASH, CLI-TIMEOUT-BUDGET). Tests cover behavior but no mutation sweep run yet."
+
+  - path: src/harness/state/files.py
+    tier: cold
+    last_sweep_sha: null
+    last_sweep_date: null
+    notes: "Refactored in W9-STATE-ATOMIC-WRITES; consolidated atomic helper."
+
+  - path: src/harness/state/redaction.py
+    tier: cold
+    last_sweep_sha: null
+    last_sweep_date: null
+    notes: "New in W9-REDACTION-INTEGRITY-TEST. Pattern set covered by 31 integrity tests."
+
+  - path: src/harness/state/locks.py
+    tier: cold
+    last_sweep_sha: null
+    last_sweep_date: null
+    notes: "New in W9-STATE-FILE-LOCK. 11 tests cover acquire/release/timeout/threading paths."
