@@ -187,6 +187,14 @@ def dispatch(prompt: str,
         except (OSError, ValueError):
             pass
 
+    # W11-PYTHON-SDK-API-IMPL E2E-test follow-up: auto-bootstrap the
+    # adapter file if missing.  Caught by the first real SDK call —
+    # dispatcher requires adapters/<project>/harness-adapter.yaml but
+    # an agent freshly cloning the repo + calling harness.dispatch()
+    # had no such file.  Now we lazily materialize it from the basic
+    # template.  Safe: never overwrites an existing adapter.
+    _ensure_default_adapter(project)
+
     # Cache opt-out: dispatcher reads HARNESS_DISPATCH_CACHE_BYPASS
     cache_env_snapshot = _os.environ.get("HARNESS_DISPATCH_CACHE_BYPASS")
     if no_cache:
@@ -214,6 +222,49 @@ def dispatch(prompt: str,
     # SDK type with the lazy fetch + context-frugal defaults.
     sdk_result = _to_sdk_result(result, return_mode=return_mode)
     return sdk_result
+
+
+def _ensure_default_adapter(project: str) -> None:
+    """Materialize ``adapters/<project>/harness-adapter.yaml`` from the
+    basic template when missing.
+
+    Why: ``dispatch_packet`` loads a per-project adapter YAML.  An
+    agent cloning the harness repo and calling ``harness.dispatch()``
+    out of the box had no such file for project='default' and saw
+    ``adapter_load_failed`` from the very first call.  This auto-
+    bootstrap turns "first call works" into the load-bearing UX
+    promise — caught by the W11-PYTHON-SDK-API-IMPL E2E test
+    (2026-05-24).
+
+    Never overwrites an existing adapter; safe to call repeatedly.
+    """
+    from pathlib import Path as _Path
+    from harness._constants import _REPO_ROOT
+
+    adapter_dir = _REPO_ROOT / "adapters" / project
+    adapter_path = adapter_dir / "harness-adapter.yaml"
+    if adapter_path.exists():
+        return  # already in place; nothing to do
+
+    template = _REPO_ROOT / "adapters" / "templates" / "basic.yaml"
+    if not template.exists():
+        # No template to copy from; let the dispatcher surface its
+        # own adapter_load_failed error rather than masking with a
+        # surprising side-effect.
+        return
+
+    try:
+        adapter_dir.mkdir(parents=True, exist_ok=True)
+        # Replace the template's `name: demo` with the actual project
+        # name so downstream tooling (status tracker, observer) reports
+        # the right adapter identity.
+        text = template.read_text(encoding="utf-8")
+        text = text.replace("name: demo", f"name: {project}", 1)
+        adapter_path.write_text(text, encoding="utf-8")
+    except OSError:
+        # Best-effort: if we can't write, let the dispatcher fail
+        # with its normal error path.
+        pass
 
 
 def _to_sdk_result(dispatcher_result, return_mode: ReturnMode) -> DispatchResult:

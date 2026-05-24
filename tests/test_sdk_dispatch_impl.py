@@ -181,3 +181,75 @@ def test_dispatch_can_be_called_multiple_times(mock_dispatch_packet):
         r = harness.dispatch("hi")
         assert r.success is True
     assert len(mock_dispatch_packet["calls"]) == 5
+
+
+# -- E2E regression: auto-bootstrap default adapter (caught 2026-05-24) -
+
+
+def test_dispatch_auto_bootstraps_default_adapter_when_missing(
+    mock_dispatch_packet, tmp_path, monkeypatch,
+):
+    """First real SDK call against a fresh clone failed with
+    'adapter_load_failed: adapters/default/harness-adapter.yaml' because
+    no default adapter shipped.  SDK now auto-materializes it from the
+    basic template on first use.
+
+    Regression: the file at adapters/default/harness-adapter.yaml MUST
+    exist after dispatch() runs.  We point _REPO_ROOT at a fresh tmp_path
+    seeded with only the templates/ dir, then call dispatch and assert
+    the file was created.
+    """
+    import shutil
+    from harness import _constants as _c
+    from harness import _sdk
+
+    # Seed a fake repo root with just the templates dir
+    real_root = _c._REPO_ROOT
+    fake_root = tmp_path / "fake_repo"
+    (fake_root / "adapters" / "templates").mkdir(parents=True)
+    shutil.copy(
+        real_root / "adapters" / "templates" / "basic.yaml",
+        fake_root / "adapters" / "templates" / "basic.yaml",
+    )
+    monkeypatch.setattr(_c, "_REPO_ROOT", fake_root)
+    monkeypatch.setattr(_sdk, "__file__", str(fake_root / "_sdk.py"))
+
+    adapter_path = fake_root / "adapters" / "default" / "harness-adapter.yaml"
+    assert not adapter_path.exists(), "precondition: adapter must not exist"
+
+    harness.dispatch("hi")
+
+    assert adapter_path.exists(), (
+        f"dispatch() must auto-bootstrap {adapter_path} when missing"
+    )
+    text = adapter_path.read_text(encoding="utf-8")
+    # The template's `name: demo` was replaced with the project name
+    assert "name: default" in text
+    assert "name: demo" not in text
+
+
+def test_dispatch_does_not_overwrite_existing_adapter(
+    mock_dispatch_packet, tmp_path, monkeypatch,
+):
+    """Auto-bootstrap MUST NOT clobber an operator-customized adapter."""
+    from harness import _constants as _c
+    real_root = _c._REPO_ROOT
+    fake_root = tmp_path / "fake_repo"
+    (fake_root / "adapters" / "default").mkdir(parents=True)
+    custom_text = "name: default\n# operator-customized — do not overwrite\n"
+    (fake_root / "adapters" / "default" / "harness-adapter.yaml").write_text(
+        custom_text, encoding="utf-8",
+    )
+    (fake_root / "adapters" / "templates").mkdir(parents=True)
+    import shutil
+    shutil.copy(
+        real_root / "adapters" / "templates" / "basic.yaml",
+        fake_root / "adapters" / "templates" / "basic.yaml",
+    )
+    monkeypatch.setattr(_c, "_REPO_ROOT", fake_root)
+
+    harness.dispatch("hi")
+
+    after = (fake_root / "adapters" / "default" / "harness-adapter.yaml"
+              ).read_text(encoding="utf-8")
+    assert after == custom_text, "auto-bootstrap clobbered an existing adapter"
