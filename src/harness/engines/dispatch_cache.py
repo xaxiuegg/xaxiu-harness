@@ -144,6 +144,31 @@ def lookup(cache_key: str,
         return None
 
 
+def store_for_retrieve(dispatch_id: str,
+                       payload: dict[str, Any] | Any,
+                       *,
+                       project_root: Path | str | None = None) -> Path:
+    """W11-CONTEXT-FRUGAL-RETURN-LAZY: write a dispatch payload keyed
+    by dispatch_id for `harness.retrieve()` and `DispatchResult.full()`.
+
+    Different lookup axis from the content+adapter-hash store:
+      - cache_key (content+adapter): "same packet returns cached"
+      - dispatch_id (UUID): "fetch THIS specific dispatch's full text"
+
+    Same on-disk format + atomic write contract.
+    """
+    return store(dispatch_id, payload, project_root=project_root)
+
+
+def lookup_by_id(dispatch_id: str,
+                 *,
+                 project_root: Path | str | None = None,
+                 ttl_sec: int | None = None) -> dict[str, Any] | None:
+    """W11-CONTEXT-FRUGAL-RETURN-LAZY / W11-RETRIEVE-API: dispatch-id
+    lookup path.  Returns the same payload dict as :func:`lookup`."""
+    return lookup(dispatch_id, project_root=project_root, ttl_sec=ttl_sec)
+
+
 def store(cache_key: str,
           payload: dict[str, Any] | Any,
           *,

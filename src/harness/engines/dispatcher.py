@@ -831,6 +831,31 @@ def dispatch_packet(
             _full_by_default = _dispatch_full_by_default()
             _populated_text = _full_text if _full_by_default else ""
             _truncated = not _full_by_default
+            # W11-CONTEXT-FRUGAL-RETURN-LAZY 2026-05-25: write the full
+            # payload to the dispatch cache keyed by dispatch_id so
+            # `harness.retrieve(dispatch_id)` + `DispatchResult.full()`
+            # can lazy-fetch without re-dispatching.  Best-effort: a
+            # cache write failure is swallowed (cache is perf, not
+            # correctness) and content_ref stays None so the SDK
+            # surfaces a clean "no retrieval ref available" state.
+            _content_ref: str | None = None
+            try:
+                from harness.engines import dispatch_cache as _dc
+                _cache_payload = {
+                    "dispatch_id": dispatch_id,
+                    "engine_used": current_engine,
+                    "fallback_chain": list(tried),
+                    "full_text": _full_text,  # always stored full
+                    "summary": _summary,
+                    "tokens_in": int(response.tokens_in or 0),
+                    "tokens_out": int(response.tokens_out or 0),
+                    "cost_usd": response.cost_usd,
+                    "stored_at": _now_iso(),
+                }
+                _dc.store_for_retrieve(dispatch_id, _cache_payload)
+                _content_ref = dispatch_id
+            except Exception as _exc:
+                _swallow_telemetry("dispatch_cache_write", _exc)
             return DispatchResult(
                 success=True,
                 engine_used=current_engine,
@@ -845,7 +870,7 @@ def dispatch_packet(
                 summary=_summary,
                 truncated=_truncated,
                 error_excerpt=None,
-                content_ref=None,  # W11-DISPATCH-CACHE will populate
+                content_ref=_content_ref,
             )
 
         # --- 9c. Failure path ------------------------------------------------
