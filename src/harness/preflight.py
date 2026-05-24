@@ -705,18 +705,48 @@ def fix_dead_engines(*, dry_run: bool = False) -> FixOutcome:
             message="Couldn't load state module to mark engines quarantined.",
             error=str(exc),
         )
+    # W9-STATE-FILE-LOCK 2026-05-24: take an advisory lock on
+    # engine_health.json for the duration of the read-modify-write
+    # cycle.  Without this, a manual `preflight --fix` racing a
+    # scheduled one (or any concurrent quarantine path) can lose
+    # writes via the textbook lost-update race.
     quarantined: list[str] = []
-    for engine_name in sorted(dead.keys()):
+    try:
+        from harness.state.locks import advisory_lock, LockTimeoutError
+    except ImportError:
+        advisory_lock = None  # type: ignore
+        LockTimeoutError = Exception  # type: ignore
+
+    def _do_quarantine() -> None:
+        for engine_name in sorted(dead.keys()):
+            try:
+                state_files.update_engine_health(
+                    engine_name,
+                    {"status": "quarantined",
+                     "last_quarantine": datetime.now(timezone.utc).isoformat()},
+                )
+                quarantined.append(engine_name)
+            except Exception:
+                # best-effort; report what we got
+                continue
+
+    if advisory_lock is None:
+        _do_quarantine()
+    else:
         try:
-            state_files.update_engine_health(
-                engine_name,
-                {"status": "quarantined",
-                 "last_quarantine": datetime.now(timezone.utc).isoformat()},
+            with advisory_lock(state_files.ENGINE_HEALTH_PATH, timeout_sec=5.0):
+                _do_quarantine()
+        except LockTimeoutError as exc:
+            return FixOutcome(
+                name="dead_engines", applied=False, skipped=False,
+                message=(
+                    f"Another `preflight --fix` (or `engines heal`) is "
+                    f"already running and holding the engine-health "
+                    f"lock.  Try again in a few seconds, or check for "
+                    f"a stuck process."
+                ),
+                error=str(exc),
             )
-            quarantined.append(engine_name)
-        except Exception:
-            # best-effort; report what we got
-            continue
     if not quarantined:
         return FixOutcome(
             name="dead_engines", applied=False, skipped=False,

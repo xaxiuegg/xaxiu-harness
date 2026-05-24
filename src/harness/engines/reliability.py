@@ -138,10 +138,11 @@ def publish(
         "notes": digest.notes,
         "ranking": [asdict(r) for r in digest.ranking],
     }
-    out_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    # W9-STATE-ATOMIC-WRITES 2026-05-24: was a raw write_text +
+    # json.dumps which could leave the file half-written on crash.
+    # Now routes through the canonical atomic helper.
+    from harness.state.files import atomic_write_json
+    atomic_write_json(out_path, payload, set_mode_0600=False)
     return out_path
 
 

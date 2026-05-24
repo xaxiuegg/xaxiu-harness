@@ -60,18 +60,16 @@ def _observer_state_path(observer_dir: Path | None = None) -> Path:
 
 
 def _atomic_write(path: Path, data: dict[str, object]) -> None:
-    """Atomic JSON write with fsync and restricted permissions."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-        fh.flush()
-        os.fsync(fh.fileno())
-    tmp.replace(path)
-    # Best-effort 0600 on Windows (no-op except through ACLs).
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    """Delegate to harness.state.files.atomic_write_json.
+
+    W9-STATE-ATOMIC-WRITES 2026-05-24: was a clone of the canonical
+    helper.  Now delegates so all state writes share the same
+    tempfile + fsync + replace logic.  set_mode_0600=True is the
+    default — observer state is sensitive (DPAPI cycle metadata).
+    """
+    from harness.state.files import atomic_write_json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(path, data)
 
 
 def read_state(observer_dir: Path | None = None) -> ObserverState:

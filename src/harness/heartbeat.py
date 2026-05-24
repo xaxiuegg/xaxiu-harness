@@ -108,18 +108,16 @@ def pulse(
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
+    """Delegate to harness.state.files.atomic_write_json.
+
+    W9-STATE-ATOMIC-WRITES 2026-05-24: was a clone of the canonical
+    helper.  Now delegates to keep the temp+rename+fsync logic in one
+    place.  Heartbeat uses 0644 not 0600 (not sensitive); we pass
+    set_mode_0600=False and chmod ourselves after.
+    """
+    from harness.state.files import atomic_write_json
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".heartbeat_", suffix=".json")
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, sort_keys=True)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    atomic_write_json(path, data, set_mode_0600=False)
     try:
         os.chmod(path, 0o644)
     except OSError:

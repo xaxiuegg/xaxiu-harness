@@ -128,17 +128,91 @@ def _set_mode_0600(path: Path) -> None:
     os.chmod(path, 0o600)
 
 
-def _atomic_write_json(path: Path, data: Any) -> None:
-    """Serialize *data* to JSON and atomically replace *path*."""
-    _ensure_state_dir()
-    fd, tmp_name = tempfile.mkstemp(dir=STATE_DIR, suffix=".tmp")
+def atomic_write_json(path: Path, data: Any,
+                      *, set_mode_0600: bool = True) -> None:
+    """Serialize *data* to JSON and atomically replace *path*.
+
+    W9-STATE-ATOMIC-WRITES 2026-05-24: promoted from
+    ``_atomic_write_json`` to a public helper so other modules (e.g.
+    heartbeat, observer/state) delegate here instead of cloning the
+    tempfile + fsync + os.replace dance.
+
+    Serialization errors (e.g. non-JSON-able payload) raise
+    :class:`StateFileCorruptError` so callers see a typed exception
+    rather than a generic TypeError swallowed up the stack.  The
+    original file at *path* is never touched on failure; the temp
+    file is unlinked.
+
+    If *path*'s parent is :data:`STATE_DIR` (the default for state
+    files), the temp file goes in STATE_DIR.  For paths outside the
+    state dir (e.g. tests, ad-hoc callers), the temp file is created
+    next to *path* so ``os.replace`` stays on the same filesystem.
+
+    *set_mode_0600* sets 0600 perms after the rename — appropriate
+    for sensitive state files; tests/temp writes can pass False.
+    """
+    parent = path.parent
+    try:
+        # Prefer STATE_DIR when path lives there; otherwise use path.parent
+        # so the atomic-rename stays on the same filesystem.
+        tmp_dir = (STATE_DIR if parent == STATE_DIR else parent)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
+    except OSError:
+        # Couldn't create temp file — surface as state-corrupt so callers
+        # see a typed exception they can choose to handle.
+        raise StateFileCorruptError(path)
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
+            try:
+                json.dump(data, fh, indent=2)
+            except (TypeError, ValueError) as exc:
+                # Serialization failure: payload not JSON-able.  Surface
+                # as StateFileCorruptError chained from the original
+                # exc so callers know which file failed without losing
+                # diagnostic detail.
+                raise StateFileCorruptError(path) from exc
             fh.flush()
             os.fsync(fd)
-    except Exception:
+    except BaseException:
+        # BaseException (not just Exception) so KeyboardInterrupt /
+        # SystemExit also trigger temp-file cleanup — the kill-during-
+        # write integration contract.
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        tmp_path.unlink(missing_ok=True)
+        raise
+    os.replace(tmp_path, path)
+    if set_mode_0600:
+        _set_mode_0600(path)
+
+
+def atomic_write_yaml(path: Path, data: dict[str, Any]) -> None:
+    """Serialize *data* to YAML and atomically replace *path*.
+
+    Parallel to :func:`atomic_write_json` with the same error contract.
+    """
+    parent = path.parent
+    try:
+        tmp_dir = (STATE_DIR if parent == STATE_DIR else parent)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
+    except OSError:
+        raise StateFileCorruptError(path)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            try:
+                yaml.safe_dump(data, fh, default_flow_style=False,
+                               sort_keys=False)
+            except yaml.YAMLError as exc:
+                raise StateFileCorruptError(path) from exc
+            fh.flush()
+            os.fsync(fd)
+    except BaseException:
         try:
             os.close(fd)
         except OSError:
@@ -149,25 +223,11 @@ def _atomic_write_json(path: Path, data: Any) -> None:
     _set_mode_0600(path)
 
 
-def _atomic_write_yaml(path: Path, data: dict[str, Any]) -> None:
-    """Serialize *data* to YAML and atomically replace *path*."""
-    _ensure_state_dir()
-    fd, tmp_name = tempfile.mkstemp(dir=STATE_DIR, suffix=".tmp")
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
-            fh.flush()
-            os.fsync(fd)
-    except Exception:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        tmp_path.unlink(missing_ok=True)
-        raise
-    os.replace(tmp_path, path)
-    _set_mode_0600(path)
+# Legacy private aliases — preserved for in-module callers that
+# already use the underscored name.  External callers should use
+# the public ``atomic_write_json`` / ``atomic_write_yaml``.
+_atomic_write_json = atomic_write_json
+_atomic_write_yaml = atomic_write_yaml
 
 
 # ---------------------------------------------------------------------------
