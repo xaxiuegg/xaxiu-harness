@@ -31,6 +31,21 @@ sweep_template:
   - label: plus1_to_minus1
     search: " + 1"
     replace: " - 1"
+  # W11-MUTATION-PATTERN-EXPANSION 2026-05-25: async/await patterns added
+  # so observer/cycle.py + other async-heavy modules get meaningful canary
+  # coverage (observer/cycle had 0/3 applicable patterns in W10-FRESH-CANARY-MODULES).
+  - label: await_call_strip
+    search: "await "
+    replace: ""
+  - label: async_to_sync_def
+    search: "async def "
+    replace: "def "
+  - label: return_empty_list_to_none
+    search: "return []"
+    replace: "return None"
+  - label: isinstance_negate
+    search: "isinstance("
+    replace: "not isinstance("
 
 # Each module: last sweep SHA, last sweep date, expected kill rate,
 # coverage tier (hot = high-priority, warm = canary-rotated,

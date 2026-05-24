@@ -37,6 +37,8 @@ class TestStatusEnum:
             "shipped", "in_progress", "queued", "todo", "blocked",
             "deferred", "partial", "proposed", "parked", "spec-done",
             "design-done", "planned",
+            # W11 planning workflow lifecycle states (2026-05-25)
+            "split", "merged",
         }
         actual = {s.value for s in Status}
         assert actual == expected

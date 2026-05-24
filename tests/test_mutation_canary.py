@@ -240,6 +240,75 @@ def test_canary_run_with_missing_module(monkeypatch, tmp_path):
     assert all(r.skipped_reason == "module file not found" for r in run.results)
 
 
+# -- W11-MUTATION-PATTERN-EXPANSION: _pick_applicable_patterns ----------
+
+
+def test_pick_applicable_picks_first_n_matching():
+    """Source with only async idioms: applicable list contains the async
+    patterns, not the int-flip patterns at MUTATIONS head."""
+    src = "async def foo():\n    return await bar()\n"
+    picked = canary._pick_applicable_patterns(src, mutation_count=2)
+    labels = [p[0] for p in picked]
+    # Should include async patterns (they match) not int-flip patterns
+    assert "async_to_sync_def" in labels or "await_call_strip" in labels
+
+
+def test_pick_applicable_with_no_matches_falls_back_to_first_n():
+    """Source with zero matchable idioms returns first N for neutral
+    skip reporting (the canary will report all as skipped but still
+    runs the pipeline)."""
+    src = "# empty stub\nfoo = 'bar'\n"
+    picked = canary._pick_applicable_patterns(src, mutation_count=3)
+    # Falls back to MUTATIONS[:3]
+    assert len(picked) == 3
+    assert picked[0] == canary.MUTATIONS[0]
+
+
+def test_pick_applicable_respects_mutation_count_cap():
+    """Even if many patterns match, returns at most mutation_count."""
+    # Source with bool flip, eq, gt, is-not-none, plus-1 (matches 5)
+    src = (
+        "def f():\n"
+        "    if x is not None and x > 0:\n"
+        "        return True\n"
+        "    return x + 1 == y\n"
+    )
+    picked = canary._pick_applicable_patterns(src, mutation_count=3)
+    assert len(picked) == 3
+
+
+def test_pick_applicable_picks_isinstance_pattern():
+    """Modules using isinstance() get the new W11 isinstance_negate pattern."""
+    src = "if isinstance(x, list):\n    return []\n"
+    picked = canary._pick_applicable_patterns(src, mutation_count=5)
+    labels = [p[0] for p in picked]
+    # Both new W11 patterns should match this source
+    assert "isinstance_negate" in labels
+    assert "return_empty_list_to_none" in labels
+
+
+def test_pick_applicable_observer_cycle_pattern_match():
+    """Regression: observer/cycle.py-like source (parse-and-return)
+    should produce >= 1 applicable pattern (W11-MUTATION-PATTERN-EXPANSION
+    acceptance criterion: was 0/3 in W10-FRESH-CANARY-MODULES)."""
+    src = (
+        "def parse(text):\n"
+        "    try:\n"
+        "        parsed = json.loads(text)\n"
+        "        if isinstance(parsed, list):\n"
+        "            return [item for item in parsed if isinstance(item, dict)]\n"
+        "    except json.JSONDecodeError:\n"
+        "        pass\n"
+        "    return []\n"
+    )
+    picked = canary._pick_applicable_patterns(src, mutation_count=3)
+    # Should pick isinstance_negate + return_empty_list_to_none (both match)
+    labels = [p[0] for p in picked]
+    assert len(picked) >= 1
+    matching_labels = {"isinstance_negate", "return_empty_list_to_none"}
+    assert any(label in matching_labels for label in labels)
+
+
 def test_canary_run_restores_module_on_pytest_exception(tmp_path, monkeypatch):
     """If the pytest sub-run raises mid-flight, the module MUST be restored.
 

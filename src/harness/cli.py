@@ -126,7 +126,7 @@ def dispatch(
     sys.exit(1)
 
 
-@cli.command(name="spec-register")
+@cli.command(name="spec-register", hidden=True)
 @click.argument("spec_path", type=click.Path(exists=True, path_type=Path))
 def spec_register_cmd(spec_path: Path) -> None:
     """Register a spec's SHA256 + author into the provenance log."""
@@ -139,7 +139,7 @@ def spec_register_cmd(spec_path: Path) -> None:
     click.echo(f"  at:        {entry.registered_at}")
 
 
-@cli.command(name="spec-verify")
+@cli.command(name="spec-verify", hidden=True)
 @click.argument("spec_path", type=click.Path(exists=True, path_type=Path))
 def spec_verify_cmd(spec_path: Path) -> None:
     """Verify a spec's on-disk SHA matches its provenance registration."""
@@ -599,7 +599,7 @@ def _samples_dir() -> Path:
     return pkg_candidate
 
 
-@cli.command(name="spec-init")
+@cli.command(name="spec-init", hidden=True)
 @click.argument("name", required=False)
 @click.option("--strict-paths", default=None,
               help="Comma-separated list of relative paths to bind under "
@@ -2022,7 +2022,7 @@ def memory_search_cmd(query: str) -> None:
     sys.exit(0)
 
 
-@cli.command(name="lint-spec")
+@cli.command(name="lint-spec", hidden=True)
 @click.argument("spec_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("--spec", "spec_opt", type=click.Path(exists=True, path_type=Path), default=None,
               help="Spec markdown path (alternative to positional argument).")
@@ -2525,6 +2525,42 @@ def daily_cmd(full: bool, since_hours: int) -> None:
     sys.exit(worst)
 
 
+@cli.group(name="advanced")
+def advanced_group() -> None:
+    """W11-HIDE-ADVANCED-VERBS: list + invoke engineering-tier verbs.
+
+    The default `harness --help` hides ~13 operator-engineering
+    verbs (spec-*, lint-spec, panic-dump, swarm-verify,
+    engines-cooldowns, engines-reliability, burst, lock, replay,
+    proxy, coord) to keep the surface focused on daily-use commands.
+
+    Use `harness advanced list` to see the hidden verbs, or invoke
+    them directly via their original verb name (e.g. `harness coord
+    plan`) — hiding only affects help-text discovery, not callability.
+    """
+
+
+@advanced_group.command(name="list")
+def advanced_list() -> None:
+    """List the engineering-tier verbs hidden from default --help."""
+    # Walk cli.commands looking for hidden=True
+    hidden_cmds: list[tuple[str, str]] = []
+    for name, cmd in sorted(cli.commands.items()):
+        if getattr(cmd, "hidden", False):
+            help_text = (cmd.help or cmd.short_help or "").strip()
+            help_text = help_text.split("\n")[0][:70]
+            hidden_cmds.append((name, help_text))
+    if not hidden_cmds:
+        click.echo("(no hidden verbs registered)")
+        return
+    click.echo("Engineering-tier verbs (hidden from default --help):\n")
+    width = max(len(n) for n, _ in hidden_cmds)
+    for name, help_text in hidden_cmds:
+        click.echo(f"  {name:<{width}}  {help_text}")
+    click.echo(f"\nInvoke via `harness <verb>` — hidden only affects "
+               f"help discovery, not callability.")
+
+
 @cli.group(name="profile")
 def profile_group() -> None:
     """W10-PROFILE-AWARE-DEFAULTS: persisted operator profile.
@@ -2567,7 +2603,7 @@ def profile_show() -> None:
     click.echo(f"     path: {target}")
 
 
-@cli.command(name="panic-dump")
+@cli.command(name="panic-dump", hidden=True)
 @click.option("--target-dir", default=None, type=click.Path(path_type=Path),
               help="Output dir (defaults to cwd).")
 def panic_dump_cmd(target_dir: Path | None) -> None:
@@ -2578,7 +2614,7 @@ def panic_dump_cmd(target_dir: Path | None) -> None:
     click.echo(f"size: {p.stat().st_size} bytes")
 
 
-@cli.command(name="swarm-verify")
+@cli.command(name="swarm-verify", hidden=True)
 @click.option("--expect-edits-in", "expect_paths", multiple=True, required=True,
               help="Path(s) expected to be mutated by the last swarm.")
 @click.option("--run-id", default=None,
@@ -2683,7 +2719,7 @@ def engines(subcmd: str | None, list_: bool, health: bool) -> None:
     sys.exit(0)
 
 
-@cli.command(name="engines-reliability")
+@cli.command(name="engines-reliability", hidden=True)
 @click.option("--publish", is_flag=True,
               help="Write coord/engine_reliability.json from latest campaigns.")
 def engines_reliability(publish: bool) -> None:
@@ -2911,7 +2947,7 @@ def engines_heal_cmd(dry_run: bool, engine: str | None) -> None:
     sys.exit(0)
 
 
-@cli.command(name="engines-cooldowns")
+@cli.command(name="engines-cooldowns", hidden=True)
 def engines_cooldowns() -> None:
     """Show active engine cooldowns."""
     from harness.loops.state import read_state
@@ -2946,7 +2982,7 @@ def priority(engine: str, level: str) -> None:
     sys.exit(0)
 
 
-@cli.command()
+@cli.command(hidden=True)
 @click.argument("engine")
 @click.argument("duration_min", type=int)
 def burst(engine: str, duration_min: int) -> None:
@@ -2965,7 +3001,7 @@ def burst(engine: str, duration_min: int) -> None:
     sys.exit(0)
 
 
-@cli.command()
+@cli.command(hidden=True)
 @click.argument("engine")
 @click.option("--release", is_flag=True, help="Release the lock.")
 def lock(engine: str, release: bool) -> None:
@@ -3461,7 +3497,7 @@ def loop_status_cmd(state_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@cli.command(name="replay")
+@cli.command(name="replay", hidden=True)
 @click.argument("task_id")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
 @click.option("--jsonl-path", type=click.Path(path_type=Path), default=None)
@@ -3686,7 +3722,7 @@ def budget_export_daily(date: str | None, target_dir: Path | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-@cli.group(name="proxy")
+@cli.group(name="proxy", hidden=True)
 def proxy_group() -> None:
     """Stateful 4-key API proxy with circuit breaker."""
 
@@ -3838,7 +3874,7 @@ def session_ok_to_stop(json_output: bool) -> None:
 # coord (v2/D)
 # ---------------------------------------------------------------------------
 
-@cli.group(name="coord")
+@cli.group(name="coord", hidden=True)
 def coord_group() -> None:
     """Coordinator commands: plan, run, integrate, status."""
 

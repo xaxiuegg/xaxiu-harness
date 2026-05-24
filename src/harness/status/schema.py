@@ -20,6 +20,16 @@ class Status(StrEnum):
     SPEC_DONE = "spec-done"
     DESIGN_DONE = "design-done"
     PLANNED = "planned"
+    # W11 planning workflow lifecycle states (added 2026-05-25):
+    # A row is "split" when it was decomposed into multiple child rows
+    # (typically labeled `<ID>-CHILDA` and `<ID>-CHILDB`).  The parent row
+    # stays in STATUS.csv as a marker / pointer to its children.
+    SPLIT = "split"
+    # A row is "merged" when it was folded into another row's scope
+    # (e.g. W11-CLAUDE-MD-TEMPLATE merged into W11-AGENT-INIT-VERB to
+    # avoid two competing templates).  The merged row stays as a
+    # historical marker.
+    MERGED = "merged"
 
 
 class StatusRow(BaseModel):

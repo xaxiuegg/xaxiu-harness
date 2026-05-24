@@ -64,7 +64,21 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ("gt_to_ge",               " > 0",          " >= 0"),
     ("is_not_none_to_is_none", "is not None",   "is None"),
     ("plus1_to_minus1",        " + 1",          " - 1"),
+    # W11-MUTATION-PATTERN-EXPANSION 2026-05-25: async-aware + common-
+    # idiom patterns so modules without int/bool flips still get meaningful
+    # canary coverage.  observer/cycle.py was 0/3 in W10-FRESH-CANARY-
+    # MODULES because none of the original 5 patterns matched its idioms;
+    # the patterns below catch the parse-and-return idioms it (and many
+    # other modules) use.
+    ("await_call_strip",       "await ",        ""),
+    ("async_to_sync_def",      "async def ",    "def "),
+    ("return_empty_list_to_none", "return []",  "return None"),
+    ("isinstance_negate",      "isinstance(",   "not isinstance("),
 ]
+
+# Canary picks the FIRST CANARY_MUTATION_COUNT patterns from this list per
+# run.  To prioritize async patterns on async modules, override via
+# --pattern on the CLI (future polish).
 
 # How many mutations to apply per canary run (vs sweep's 5).
 CANARY_MUTATION_COUNT = 3
@@ -200,6 +214,31 @@ def _run_pytest_x() -> tuple[int, int, float]:
     return (passed, failed, duration)
 
 
+def _pick_applicable_patterns(source: str,
+                              mutation_count: int) -> list[tuple[str, str, str]]:
+    """W11-MUTATION-PATTERN-EXPANSION 2026-05-25: pick the first N
+    patterns whose search-string is actually present in *source*.
+
+    Pre-W11 the canary picked MUTATIONS[:N] which often returned
+    0/3 applicable on modules that didn't use those idioms (e.g.
+    observer/cycle.py uses async/await but not the int-flip patterns
+    at the head of MUTATIONS).
+
+    Returns up to *mutation_count* applicable patterns; falls back to
+    first N if no pattern matches (preserving prior behavior for
+    "neutral pass" reporting on modules with no mutable idioms).
+    """
+    applicable = [
+        (label, search, replace)
+        for label, search, replace in MUTATIONS
+        if search in source
+    ]
+    if applicable:
+        return applicable[:mutation_count]
+    # No matches: fall back to first N (canary will report all skipped)
+    return list(MUTATIONS[:mutation_count])
+
+
 def run_canary(module_rel: str, mutation_count: int = CANARY_MUTATION_COUNT) -> CanaryRun:
     """Apply *mutation_count* mutations to module and return CanaryRun."""
     module_path = REPO_ROOT / module_rel
@@ -219,9 +258,16 @@ def run_canary(module_rel: str, mutation_count: int = CANARY_MUTATION_COUNT) -> 
             ))
         return run
 
+    # W11-MUTATION-PATTERN-EXPANSION: pre-scan source for applicable
+    # patterns so async-heavy modules pick await_call_strip /
+    # async_to_sync_def instead of always reporting 0/3 on int-flip
+    # patterns.
+    source = module_path.read_text(encoding="utf-8", errors="replace")
+    patterns_to_run = _pick_applicable_patterns(source, mutation_count)
+
     print(f"[canary] module: {module_rel}", file=sys.stderr)
     sweep_start = time.monotonic()
-    for label, search, replace in MUTATIONS[:mutation_count]:
+    for label, search, replace in patterns_to_run:
         applied, original = apply_mutation(module_path, search, replace)
         if not applied:
             print(f"  [{label}] pattern not present — skipping",
