@@ -17,23 +17,19 @@ from pathlib import Path
 from typing import Iterable
 
 
-# Patterns that look like leaked API keys / tokens.  Conservative.
-_SECRET_RES: list[tuple[str, "re.Pattern[str]"]] = [
-    ("api_key_value", re.compile(r"(sk-[A-Za-z0-9_\-]{20,})")),
-    ("bearer_token", re.compile(r"(Bearer\s+[A-Za-z0-9._\-]{20,})", re.IGNORECASE)),
-    ("env_value_KEY", re.compile(r"((?:KIMI|DEEPSEEK|ANTHROPIC|GEMINI|MOONSHOT|OPENAI)_API_KEY\s*[:=]\s*['\"]?)([^\s'\"]+)")),
-]
+# W9-REDACTION-INTEGRITY-TEST 2026-05-24: delegate to the shared
+# state.redaction module so every output surface scrubs against
+# the same ground-truth pattern set.  Local _SECRET_RES retained
+# for any callers that introspect it (none in tree today).
+from harness.state.redaction import redact as _shared_redact
+
+_SECRET_RES: list[tuple[str, "re.Pattern[str]"]] = []  # kept for compat
 
 
 def _scrub_text(text: str) -> str:
     """Redact common secret patterns in *text*."""
-    for _name, pat in _SECRET_RES:
-        # The env-value pattern has 2 groups; replace just the value
-        if pat.groups == 2:
-            text = pat.sub(lambda m: m.group(1) + "<REDACTED>", text)
-        else:
-            text = pat.sub("<REDACTED>", text)
-    return text
+    out = _shared_redact(text)
+    return out if out is not None else ""
 
 
 def _safe_read(path: Path, max_bytes: int = 100 * 1024) -> bytes:

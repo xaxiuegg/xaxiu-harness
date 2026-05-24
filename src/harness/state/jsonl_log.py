@@ -51,31 +51,19 @@ _ALLOWED_KEYS: Final = frozenset(
 # Redaction
 # ---------------------------------------------------------------------------
 
-_REDACTION_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),
-    re.compile(r"Bearer\s+\S+"),
-    re.compile(r"(?i)api[_-]?key\s*[\"':=]+\s*[\"']?[A-Za-z0-9_-]{16,}"),
-    re.compile(r"ms-[A-Za-z0-9]{20,}"),
-    re.compile(r"deepseek-[A-Za-z0-9]{20,}"),
+# W9-REDACTION-INTEGRITY-TEST 2026-05-24: the redaction patterns
+# live in state.redaction now so every output surface (jsonl_log,
+# panic-dump, future retro/today/dashboard) shares one ground-truth
+# pattern set.  Keep the legacy module-local name as an alias for
+# any in-module reference (no external callers).
+from harness.state.redaction import (
+    redact as _redact,
+    _PATTERNS_SUB as _REDACTION_PATTERNS,
 )
 
 
 class LogSchemaError(ValueError):
     """Raised when a log record violates the closed schema."""
-
-
-def _redact(text: str | None) -> str | None:
-    """Remove secret-like patterns from *text*, returning the cleaned string.
-
-    Returns ``None`` unchanged so optional fields stay optional.
-    """
-    if text is None:
-        return None
-    if not isinstance(text, str):
-        text = str(text)
-    for pattern in _REDACTION_PATTERNS:
-        text = pattern.sub("[REDACTED]", text)
-    return text
 
 
 # ---------------------------------------------------------------------------
