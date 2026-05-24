@@ -8,18 +8,26 @@ surface to operator.  Pass (≥ 0.7) → proceed to next task.
 This addresses the "ship-without-review" pattern surfaced by the
 5-MiMo session review at coord/reviews/external/20260523T140257Z_*.md.
 
+W9-AUDIT-NONDETERMINISM-AVG 2026-05-24: ``--avg-of-N`` flag runs the
+audit N times in parallel and gates on the MEAN confidence rather
+than a single run.  Master audit found 3 W8 rows flipped PASS↔STOP
+across sweeps with no code change; the single-run gate is partly
+noise.  N=3 cancels most of that.
+
 Usage:
     python scripts/audit_task_with_mimo.py <task-id> [--commit <sha>]
+    python scripts/audit_task_with_mimo.py <task-id> --avg-of-N 3
 
 Reads acceptance criteria from spec/wave-6-plan.md by task-id
 (e.g. "A1", "B2").  If --commit omitted, uses HEAD.
 
 Writes:
-    coord/reviews/audits/<stamp>_<task-id>_audit.md
+    coord/reviews/audits/<stamp>_<task-id>_audit.md             (single)
+    coord/reviews/audits/<stamp>_<task-id>_audit_avgN.md        (--avg-of-N>1)
 
 Exit codes:
-    0  audit passed (confidence ≥ 0.7)
-    1  audit failed (confidence < 0.7); operator review required
+    0  audit passed (mean confidence ≥ 0.7)
+    1  audit failed (mean confidence < 0.7); operator review required
     2  setup error (task-id not found / engine init failed)
 """
 
@@ -28,9 +36,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import statistics
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,6 +67,7 @@ _PLAN_BY_TASK_PREFIX = {
     "C2": "spec/wave-6-plan.md",
     "W7-": "spec/wave-7-plan.md",
     "W8-": "spec/wave-8-plan.md",
+    "W9-": "spec/wave-9-plan.md",
 }
 
 
@@ -251,58 +263,104 @@ def git_commit_info(sha: str = "HEAD") -> dict:
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("task_id", help="Wn task ID (e.g. A1, A2, W7-MUTATION-WORKER)")
-    parser.add_argument("--commit", default="HEAD",
-                        help="Commit SHA to audit (default HEAD).")
-    parser.add_argument("--plan", default=None,
-                        type=str,
-                        help="Override the plan file.  Default: auto-pick "
-                        "by task_id prefix (W7- → spec/wave-7-plan.md, "
-                        "else spec/wave-6-plan.md).")
-    args = parser.parse_args()
+# -- W9-AUDIT-NONDETERMINISM-AVG helpers -----------------------------------
 
-    # W7-AUDIT-POLICY: auto-resolve the plan path from task_id prefix
-    # unless --plan overrides.
-    plan_path = _resolve_plan_path(args.task_id, args.plan)
-    if not plan_path.exists():
-        print(f"plan not found: {plan_path}", file=sys.stderr)
-        return 2
 
-    plan_text = plan_path.read_text(encoding="utf-8")
-    acceptance = extract_acceptance(plan_text, args.task_id)
-    if not acceptance:
-        print(f"task {args.task_id} not found in plan", file=sys.stderr)
-        return 2
+@dataclass
+class AuditRun:
+    """One run of the audit.  Multiple runs aggregate into AuditSummary."""
+    confidence: float
+    verdict: str
+    text: str
+    parsed: dict = field(default_factory=dict)
+    latency_ms: int = 0
+    auditor_used: str = "mimo"
+    success: bool = True
+    error: str | None = None
 
-    info = git_commit_info(args.commit)
-    prompt = AUDIT_PROMPT.format(
-        task_id=args.task_id,
-        acceptance=acceptance,
-        sha=info["sha"][:12],
-        author=info["author"],
-        date=info["date"],
-        message=info["message"],
-        diffstat=info["diffstat"][:2000],
-        diff_excerpt=info["diff_excerpt"],
-        file_contents=info.get("file_contents", "(none)"),
+
+@dataclass
+class AuditSummary:
+    """Aggregate of N audit runs.  Pure data; no I/O."""
+    runs: list[AuditRun]
+    mean_confidence: float
+    stdev_confidence: float  # 0.0 if N < 2
+    min_confidence: float
+    max_confidence: float
+    verdicts: list[str]
+    pass_count: int
+    total_runs: int
+    successful_runs: int
+
+    @property
+    def passed(self) -> bool:
+        """Gate: mean ≥ CONFIDENCE_GATE AND at least one successful run."""
+        return self.successful_runs > 0 and self.mean_confidence >= CONFIDENCE_GATE
+
+
+def aggregate_runs(runs: list[AuditRun]) -> AuditSummary:
+    """Pure aggregation of N runs into a summary.  Testable in isolation."""
+    successful = [r for r in runs if r.success]
+    confidences = [r.confidence for r in successful]
+    if not confidences:
+        return AuditSummary(
+            runs=runs,
+            mean_confidence=0.0,
+            stdev_confidence=0.0,
+            min_confidence=0.0,
+            max_confidence=0.0,
+            verdicts=[r.verdict for r in runs],
+            pass_count=0,
+            total_runs=len(runs),
+            successful_runs=0,
+        )
+    mean = statistics.mean(confidences)
+    stdev = statistics.stdev(confidences) if len(confidences) >= 2 else 0.0
+    return AuditSummary(
+        runs=runs,
+        mean_confidence=mean,
+        stdev_confidence=stdev,
+        min_confidence=min(confidences),
+        max_confidence=max(confidences),
+        verdicts=[r.verdict for r in successful],
+        pass_count=sum(1 for c in confidences if c >= CONFIDENCE_GATE),
+        total_runs=len(runs),
+        successful_runs=len(successful),
     )
 
-    print(f"[audit] task={args.task_id} sha={info['sha'][:12]} "
-          f"prompt={len(prompt)} chars", flush=True)
 
-    # Primary: MiMo (operator-specified auditor).
-    # Fallback: DeepSeek (W5-MM streaming, reliable, pay-per-token but
-    # audits are infrequent + small).  Mirrors worker.py fallback chain.
+def parse_audit_response(text: str) -> tuple[float, str, dict]:
+    """Extract confidence + verdict + parsed-JSON from the engine's text.
+
+    Returns (0.0, "?", {}) if no parseable JSON found.  Pure function.
+    """
+    text = (text or "").strip()
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return 0.0, "?", {}
+    try:
+        parsed = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return 0.0, "?", {}
+    confidence = float(parsed.get("confidence", 0.0))
+    verdict = parsed.get("verdict", "?")
+    return confidence, verdict, parsed
+
+
+def _dispatch_with_fallback(prompt: str, max_tokens: int = 8_000) -> AuditRun:
+    """Run one MiMo audit, falling back to DeepSeek on failure.
+
+    Returns AuditRun (success=False sets confidence=0.0 and error= reason).
+    """
     auditor_used = "mimo"
+    started = time.monotonic()
     try:
         eng = get_engine("mimo", prefer_dpapi=False)
     except RuntimeError as exc:
-        print(f"engine init failed: {exc}", file=sys.stderr)
-        return 2
-    started = time.monotonic()
-    resp = eng.dispatch(prompt, "mimo-v2.5-pro", {"max_tokens": 8_000})
+        return AuditRun(confidence=0.0, verdict="?", text="",
+                        latency_ms=0, auditor_used="mimo",
+                        success=False, error=f"mimo init failed: {exc}")
+    resp = eng.dispatch(prompt, "mimo-v2.5-pro", {"max_tokens": max_tokens})
     latency = int((time.monotonic() - started) * 1000)
 
     # W6-A2 audit-script hardening 2026-05-23: MiMo's content filter
@@ -335,40 +393,40 @@ def main() -> int:
         try:
             eng = get_engine("deepseek", prefer_dpapi=False)
             fb_started = time.monotonic()
-            resp = eng.dispatch(prompt, "deepseek-v4-flash", {"max_tokens": 8_000})
+            resp = eng.dispatch(prompt, "deepseek-v4-flash", {"max_tokens": max_tokens})
             latency += int((time.monotonic() - fb_started) * 1000)
             auditor_used = "deepseek (fallback)"
         except RuntimeError as exc:
-            print(f"DeepSeek init failed: {exc}", file=sys.stderr)
-            return 2
+            return AuditRun(confidence=0.0, verdict="?", text="",
+                            latency_ms=latency, auditor_used="mimo",
+                            success=False, error=f"deepseek init failed: {exc}")
 
     if not resp.success or not (resp.text or "").strip():
-        print(f"[audit] BOTH engines failed ({latency}ms): {resp.error}",
-              file=sys.stderr)
-        return 2
+        return AuditRun(confidence=0.0, verdict="?", text="",
+                        latency_ms=latency, auditor_used=auditor_used,
+                        success=False,
+                        error=f"both engines failed: {resp.error}")
 
-    print(f"[audit] auditor: {auditor_used} ({latency}ms total)", flush=True)
     text = resp.text.strip()
-    # Extract JSON
-    m = re.search(r"\{[\s\S]*\}", text)
-    parsed: dict = {}
-    if m:
-        try:
-            parsed = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            parsed = {}
+    confidence, verdict, parsed = parse_audit_response(text)
+    return AuditRun(
+        confidence=confidence, verdict=verdict, text=text,
+        parsed=parsed, latency_ms=latency, auditor_used=auditor_used,
+        success=True,
+    )
 
-    confidence = float(parsed.get("confidence", 0.0)) if parsed else 0.0
-    verdict = parsed.get("verdict", "?")
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out_path = OUT_DIR / f"{stamp}_{args.task_id}_audit.md"
-    body = (
-        f"<!-- engine=mimo model=mimo-v2.5-pro task={args.task_id} "
+def _format_single_report(task_id: str, info: dict, run: AuditRun) -> str:
+    """Format the report body for a single (N=1) audit."""
+    confidence = run.confidence
+    verdict = run.verdict
+    text = run.text
+    latency = run.latency_ms
+    return (
+        f"<!-- engine=mimo model=mimo-v2.5-pro task={task_id} "
         f"sha={info['sha'][:12]} latency_ms={latency} "
         f"confidence={confidence} verdict={verdict} -->\n\n"
-        f"# Wave 6 MiMo audit — task {args.task_id}\n\n"
+        f"# Wave 6 MiMo audit — task {task_id}\n\n"
         f"- Commit: `{info['sha'][:12]}` by {info['author']} on {info['date']}\n"
         f"- Message: {info['message'].splitlines()[0] if info['message'] else '(empty)'}\n"
         f"- Confidence: **{confidence:.2f}**\n"
@@ -376,14 +434,171 @@ def main() -> int:
         f"- Latency: {latency}ms\n\n"
         f"## Raw MiMo audit response\n\n```\n{text}\n```\n"
     )
+
+
+def _format_avg_report(task_id: str, info: dict, summary: AuditSummary) -> str:
+    """Format the report body for an N>1 averaged audit."""
+    runs = summary.runs
+    pass_str = "PASS" if summary.passed else "STOP"
+    header = (
+        f"<!-- engine=mimo model=mimo-v2.5-pro task={task_id} "
+        f"sha={info['sha'][:12]} avg_of_n={summary.total_runs} "
+        f"mean_confidence={summary.mean_confidence:.2f} "
+        f"stdev_confidence={summary.stdev_confidence:.2f} "
+        f"min={summary.min_confidence:.2f} max={summary.max_confidence:.2f} "
+        f"pass_count={summary.pass_count}/{summary.total_runs} "
+        f"successful_runs={summary.successful_runs}/{summary.total_runs} "
+        f"verdict={pass_str} -->\n\n"
+        f"# MiMo audit (avg of {summary.total_runs}) — task {task_id}\n\n"
+        f"- Commit: `{info['sha'][:12]}` by {info['author']} on {info['date']}\n"
+        f"- Message: {info['message'].splitlines()[0] if info['message'] else '(empty)'}\n"
+        f"- Runs requested: {summary.total_runs}\n"
+        f"- Runs successful: {summary.successful_runs}\n"
+        f"- **Mean confidence: {summary.mean_confidence:.2f}** "
+        f"(stdev {summary.stdev_confidence:.2f}, "
+        f"min {summary.min_confidence:.2f}, max {summary.max_confidence:.2f})\n"
+        f"- Per-run pass count (≥ {CONFIDENCE_GATE:.2f}): "
+        f"{summary.pass_count}/{summary.total_runs}\n"
+        f"- **Final verdict (mean-gated): {pass_str}**\n\n"
+    )
+    per_run_lines = []
+    for idx, run in enumerate(runs, 1):
+        if run.success:
+            per_run_lines.append(
+                f"### Run {idx} — confidence {run.confidence:.2f} "
+                f"({run.verdict}) — auditor: {run.auditor_used} "
+                f"({run.latency_ms}ms)\n\n```\n{run.text}\n```\n"
+            )
+        else:
+            per_run_lines.append(
+                f"### Run {idx} — FAILED — auditor: {run.auditor_used}\n\n"
+                f"Error: {run.error}\n"
+            )
+    return header + "## Per-run details\n\n" + "\n".join(per_run_lines)
+
+
+def _resolve_outpath(task_id: str, avg_of_n: int) -> Path:
+    """Compose the output report path for this audit."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    suffix = "_audit" if avg_of_n <= 1 else f"_audit_avg{avg_of_n}"
+    return OUT_DIR / f"{stamp}_{task_id}{suffix}.md"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("task_id", help="Wn task ID (e.g. A1, A2, W7-MUTATION-WORKER)")
+    parser.add_argument("--commit", default="HEAD",
+                        help="Commit SHA to audit (default HEAD).")
+    parser.add_argument("--plan", default=None,
+                        type=str,
+                        help="Override the plan file.  Default: auto-pick "
+                        "by task_id prefix (W7- → spec/wave-7-plan.md, "
+                        "else spec/wave-6-plan.md).")
+    parser.add_argument("--avg-of-N", dest="avg_of_n", type=int, default=1,
+                        help="Run the audit N times in parallel and gate "
+                        "on the MEAN confidence (W9-AUDIT-NONDETERMINISM-AVG). "
+                        "N=1 keeps legacy single-run behavior.  N>=3 "
+                        "recommended for noise-sensitive verdicts.")
+    args = parser.parse_args()
+
+    if args.avg_of_n < 1:
+        print(f"--avg-of-N must be >= 1 (got {args.avg_of_n})", file=sys.stderr)
+        return 2
+
+    # W7-AUDIT-POLICY: auto-resolve the plan path from task_id prefix
+    # unless --plan overrides.
+    plan_path = _resolve_plan_path(args.task_id, args.plan)
+    if not plan_path.exists():
+        print(f"plan not found: {plan_path}", file=sys.stderr)
+        return 2
+
+    plan_text = plan_path.read_text(encoding="utf-8")
+    acceptance = extract_acceptance(plan_text, args.task_id)
+    if not acceptance:
+        print(f"task {args.task_id} not found in plan", file=sys.stderr)
+        return 2
+
+    info = git_commit_info(args.commit)
+    prompt = AUDIT_PROMPT.format(
+        task_id=args.task_id,
+        acceptance=acceptance,
+        sha=info["sha"][:12],
+        author=info["author"],
+        date=info["date"],
+        message=info["message"],
+        diffstat=info["diffstat"][:2000],
+        diff_excerpt=info["diff_excerpt"],
+        file_contents=info.get("file_contents", "(none)"),
+    )
+
+    print(f"[audit] task={args.task_id} sha={info['sha'][:12]} "
+          f"prompt={len(prompt)} chars avg_of_n={args.avg_of_n}", flush=True)
+
+    # ---- run N audits (parallel if N>1) --------------------------------
+    started = time.monotonic()
+    if args.avg_of_n == 1:
+        runs = [_dispatch_with_fallback(prompt)]
+    else:
+        # Cap concurrency at min(N, 5) to stay polite with MiMo rate
+        # limits; 3-5 is the operator-recommended range.
+        max_workers = min(args.avg_of_n, 5)
+        runs = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [
+                pool.submit(_dispatch_with_fallback, prompt)
+                for _ in range(args.avg_of_n)
+            ]
+            for f in as_completed(futures):
+                runs.append(f.result())
+    total_latency = int((time.monotonic() - started) * 1000)
+
+    summary = aggregate_runs(runs)
+
+    # ---- write report --------------------------------------------------
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = _resolve_outpath(args.task_id, args.avg_of_n)
+    if args.avg_of_n == 1:
+        body = _format_single_report(args.task_id, info, runs[0])
+    else:
+        body = _format_avg_report(args.task_id, info, summary)
     out_path.write_text(body, encoding="utf-8")
 
-    passed = confidence >= CONFIDENCE_GATE
-    print(f"\n[audit] {args.task_id}: confidence={confidence:.2f}  "
-          f"verdict={verdict}  → {'PASS' if passed else 'STOP'}")
+    # ---- log summary + exit code --------------------------------------
+    if args.avg_of_n == 1:
+        run = runs[0]
+        if not run.success:
+            print(f"[audit] failed ({total_latency}ms): {run.error}",
+                  file=sys.stderr)
+            return 2
+        print(f"[audit] auditor: {run.auditor_used} ({run.latency_ms}ms)",
+              flush=True)
+        print(f"\n[audit] {args.task_id}: confidence={run.confidence:.2f}  "
+              f"verdict={run.verdict}  → "
+              f"{'PASS' if run.confidence >= CONFIDENCE_GATE else 'STOP'}")
+        print(f"[audit] report: {out_path}")
+        if run.confidence < CONFIDENCE_GATE:
+            print(f"\n*** STOP — confidence {run.confidence:.2f} < gate "
+                  f"{CONFIDENCE_GATE}.")
+            print(f"*** Operator review required before next task.")
+            return 1
+        return 0
+
+    # N > 1 — averaged path
+    if summary.successful_runs == 0:
+        print(f"[audit] ALL {summary.total_runs} runs failed "
+              f"({total_latency}ms total)", file=sys.stderr)
+        return 2
+    pass_str = "PASS" if summary.passed else "STOP"
+    print(f"\n[audit] {args.task_id} avg-of-{summary.total_runs}: "
+          f"mean={summary.mean_confidence:.2f} "
+          f"stdev={summary.stdev_confidence:.2f} "
+          f"min={summary.min_confidence:.2f} max={summary.max_confidence:.2f} "
+          f"pass={summary.pass_count}/{summary.total_runs} "
+          f"→ {pass_str}")
     print(f"[audit] report: {out_path}")
-    if not passed:
-        print(f"\n*** STOP — confidence {confidence:.2f} < gate {CONFIDENCE_GATE}.")
+    if not summary.passed:
+        print(f"\n*** STOP — mean confidence {summary.mean_confidence:.2f} "
+              f"< gate {CONFIDENCE_GATE}.")
         print(f"*** Operator review required before next task.")
         return 1
     return 0
