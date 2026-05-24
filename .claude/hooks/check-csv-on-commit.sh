@@ -21,9 +21,13 @@ if ! echo "$INPUT" | grep -q 'git commit'; then
 fi
 
 cd "D:/xaxiu-harness-standalone" 2>/dev/null || exit 0
-LAST=$(git log -1 --name-only --pretty='' 2>/dev/null)
+# W9-ONCOMMIT-HOOK-CRLF 2026-05-24: strip CR before grep.  Windows git
+# emits CRLF line endings in `git log --name-only` output; the `$`
+# anchor in `^coord/STATUS\.csv$` doesn't match before \r, so the
+# hook fired falsely on every commit that DID touch STATUS.csv.
+LAST=$(git log -1 --name-only --pretty='' 2>/dev/null | tr -d '\r')
 
-if echo "$LAST" | grep -q "^coord/STATUS.csv$"; then
+if echo "$LAST" | grep -q "^coord/STATUS\.csv$"; then
   exit 0
 fi
 
