@@ -18,15 +18,19 @@ That's it.
 ```powershell
 cd D:\xaxiu-harness-standalone
 harness preflight
-harness morning-brief
+harness today
 ```
+
+(After `harness today`, optionally run `harness morning-brief` for the
+longer-form overnight handoff doc — most days `harness today` is enough.)
 
 ### What each does
 
 | Command | What you see | If it complains |
 |---|---|---|
+| `cd D:\xaxiu-harness-standalone` | Moves the terminal into the harness directory.  Every `harness` command runs from here. | If the folder doesn't exist, the harness isn't installed yet — see `docs/INSTALL.md`. |
 | `harness preflight` | Green checks (`[OK]`) for the engines, observer, loops, git, pytest cache, dead engines | Run `harness preflight --fix` (see below) |
-| `harness morning-brief` | Overnight activity summary, what shipped, what's in the queue | If empty: nothing happened overnight — that's fine |
+| `harness today` | Plain-language summary: what shipped, recent audits, blockers, suggested next actions | If empty: nothing happened in the last 24h — that's fine |
 
 If `harness preflight` shows all `[OK]` (or only `[!]` warnings),
 you're good for the day.

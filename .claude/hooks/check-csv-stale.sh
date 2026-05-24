@@ -75,12 +75,17 @@ fi
 # Find any .md / .py / .ps1 / .sh edited in last 60 minutes AND newer than CSV.
 # Excludes .git, .swarm audit output, pycache, runs/ workspace output, and
 # packet response files which are autonomous dispatch artifacts (not canonical
-# task state).  W8-STOP-HOOK: also exclude the mutation-sweep target modules
-# (worker.py / concrete.py / orchestrator.py) — the mutation script writes
-# these to apply + restore for each iteration, churning mtime without
-# representing real task state.  Spec/auto/, coord/reviews/, .pytest_cache/
-# are also dispatch / review artifacts not directly task-state.
-RECENT=$(find "D:/xaxiu-harness-standalone" -maxdepth 5 -type f \
+# task state).  Spec/auto/, coord/reviews/, .pytest_cache/ are also dispatch
+# / review artifacts not directly task-state.
+#
+# W8-AUDIT follow-through 2026-05-24: previously this also -not -path'd the
+# mutation-sweep target modules (worker.py / concrete.py / orchestrator.py /
+# integrator.py), but the audit caught that as a regression in hook coverage —
+# legitimate edits to those files SHOULD fire the hook.  Replaced with the
+# per-file git content-hash filter below: if a "recent" file's content matches
+# HEAD, it's mtime-only drift (typical of mutation sweep restore-after-apply
+# cycles) — skip it.  Real edits will not match HEAD, so they still fire.
+CANDIDATES=$(find "D:/xaxiu-harness-standalone" -maxdepth 5 -type f \
   \( -name '*.md' -o -name '*.py' -o -name '*.ps1' -o -name '*.sh' \) \
   -not -path '*/.git/*' \
   -not -path '*/.swarm/*' \
@@ -95,11 +100,24 @@ RECENT=$(find "D:/xaxiu-harness-standalone" -maxdepth 5 -type f \
   -not -name '*-response.md' \
   -not -name '*-deepseek-*.md' \
   -not -name '*-kimi-*.md' \
-  -not -path '*/src/harness/coord/worker.py' \
-  -not -path '*/src/harness/engines/concrete.py' \
-  -not -path '*/src/harness/coord/orchestrator.py' \
-  -not -path '*/src/harness/coord/integrator.py' \
-  -newer "$CSV" -mmin -60 2>/dev/null | head -3)
+  -newer "$CSV" -mmin -60 2>/dev/null)
+
+# Filter out files whose CONTENT matches HEAD (mtime drift only).  Falls back
+# to the unfiltered list when git isn't available.
+RECENT=""
+if command -v git >/dev/null 2>&1; then
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    rel="${f#D:/xaxiu-harness-standalone/}"
+    if git diff --quiet HEAD -- "$rel" 2>/dev/null; then
+      continue
+    fi
+    RECENT="${RECENT}${f}"$'\n'
+  done <<< "$CANDIDATES"
+  RECENT=$(printf '%s' "$RECENT" | head -3)
+else
+  RECENT=$(echo "$CANDIDATES" | head -3)
+fi
 
 if [ -z "$RECENT" ]; then
   exit 0
