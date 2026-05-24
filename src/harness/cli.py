@@ -2525,6 +2525,92 @@ def daily_cmd(full: bool, since_hours: int) -> None:
     sys.exit(worst)
 
 
+@cli.group(name="agent")
+def agent_group() -> None:
+    """W11-AGENT-INIT-VERB: bootstrap a fresh project for agentic use.
+
+    Designed for agentic coding agents (Claude Code, Cursor, Aider,
+    ChatGPT with code interpreter) cloning the harness into a fresh
+    project.  Replaces ~20-40 hours of multi-engine routing + audit +
+    cost-ledger scaffolding per new project.
+
+    Subcommands:
+      init  - one-shot bootstrap: writes .env, adapter.py, CLAUDE.md,
+              project-scoped STATUS.csv, .harness/ state dir
+    """
+
+
+@agent_group.command(name="init")
+@click.option("--target", required=True, type=click.Path(path_type=Path),
+              help="Directory to bootstrap (created if missing).")
+@click.option("--project-type", "project_type",
+              type=click.Choice(["python", "node", "generic"]),
+              default="python",
+              help="Project type — selects starter template variant.")
+@click.option("--adapter-name", "adapter_name", default=None,
+              help="Adapter class name; derived from target basename if "
+                   "not given (e.g. my-project -> MyProjectAdapter).")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print what would be written without touching disk.")
+@click.option("--allow-self", is_flag=True, default=False,
+              help="Allow --target to resolve to the harness's own "
+                   "repo (refused by default; data-loss safety).")
+def agent_init(target: Path, project_type: str,
+               adapter_name: str | None, dry_run: bool,
+               allow_self: bool) -> None:
+    """Bootstrap a fresh project for agentic harness use.
+
+    Writes a small file tree (.env, adapter.py, CLAUDE.md, .harness/)
+    that lets an agentic coding agent immediately dispatch work
+    through the harness without spending hours on scaffolding.
+
+    Idempotent: re-running preserves existing .env / adapter.py /
+    CLAUDE.md (CLAUDE.md gets a marker-gated append).  STATUS.csv
+    collision exits 3 (data file; manual merge required).
+
+    Examples:
+
+      \b
+      # Bootstrap a fresh Python project at ./my-scraper:
+      harness agent init --target ./my-scraper
+
+      \b
+      # Bootstrap with a Node template + custom adapter class name:
+      harness agent init --target ./my-bot --project-type node \\
+                         --adapter-name BotRouter
+
+      \b
+      # See what would happen without writing anything:
+      harness agent init --target ./my-scraper --dry-run
+    """
+    from harness.agent import (
+        init_project, render_next_steps,
+        SelfTargetRefused, StatusCollisionError,
+    )
+    try:
+        result = init_project(
+            target=target,
+            project_type=project_type,
+            adapter_name=adapter_name,
+            dry_run=dry_run,
+            allow_self=allow_self,
+        )
+    except SelfTargetRefused as exc:
+        click.echo(f"[X] {exc}", err=True)
+        sys.exit(2)
+    except StatusCollisionError as exc:
+        click.echo(f"[X] {exc}", err=True)
+        sys.exit(3)
+    except ValueError as exc:
+        click.echo(f"[X] {exc}", err=True)
+        sys.exit(4)
+    except OSError as exc:
+        click.echo(f"[X] filesystem error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(render_next_steps(result))
+    sys.exit(0)
+
+
 @cli.group(name="advanced")
 def advanced_group() -> None:
     """W11-HIDE-ADVANCED-VERBS: list + invoke engineering-tier verbs.
