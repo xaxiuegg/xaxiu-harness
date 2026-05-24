@@ -251,3 +251,47 @@ def test_preflight_fail_output_includes_l5_banner(tmp_path, monkeypatch):
     if result.exit_code == 4:
         assert "L5" in result.output
         assert "ESCALATION" in result.output.upper()
+
+
+# -- harness today surfaces L5 events (audit fix M06/M07/K01) -----------
+
+
+def test_harness_today_includes_l5_section():
+    """Per spec acceptance criterion 3: harness today MUST include
+    an L5 escalations section in the last-24h window."""
+    from click.testing import CliRunner
+    from harness.cli import cli
+    runner = CliRunner()
+    result = runner.invoke(cli, ["today", "--since-hours", "24"])
+    # CLI may not run cleanly without dependencies but the section
+    # header MUST appear in the output structure
+    assert "L5" in result.output
+    assert "escalations" in result.output.lower() or "escalation" in result.output.lower()
+
+
+def test_harness_today_shows_no_l5_when_none():
+    """Empty L5 state surfaces a 'None' line, not nothing."""
+    from click.testing import CliRunner
+    from harness.cli import cli
+    runner = CliRunner()
+    result = runner.invoke(cli, ["today", "--since-hours", "24"])
+    # Either the literal "None" line OR an actual escalation present
+    assert "None" in result.output or "OPERATOR ESCALATION" in result.output
+
+
+# -- concurrent prune lock (audit fix M02/M10) --------------------------
+
+
+def test_record_restart_outcome_with_lock_does_not_deadlock(tmp_path):
+    """The advisory lock wrap must not deadlock single-thread callers."""
+    from harness.observer import state as observer_state
+    s = observer_state.ObserverState(armed=True, cadence_minutes=60)
+    observer_state.write_state(s, observer_dir=tmp_path)
+    # Five back-to-back calls; if lock leaks the FD or fails to release
+    # we'd hang here.
+    n = l5.record_restart_outcome(False, observer_dir=tmp_path)
+    n = l5.record_restart_outcome(False, observer_dir=tmp_path)
+    n = l5.record_restart_outcome(True, observer_dir=tmp_path)
+    n = l5.record_restart_outcome(False, observer_dir=tmp_path)
+    n = l5.record_restart_outcome(False, observer_dir=tmp_path)
+    assert n == 2

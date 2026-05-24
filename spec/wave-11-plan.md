@@ -171,6 +171,17 @@
 - `harness today` ALWAYS includes L5 events in last 24h (not buried in `--since-hours` window)
 - Tests: each L5 subclass produces the canonical output format
 
+#### W11-COST-VISIBILITY-WIDGET — 'this session cost $X' surface
+
+**Acceptance**:
+- `cost_widget_dict()` returns {spent_usd, budget_usd, remaining_usd, pct_of_budget_used, offload_ratio, dispatches, subscription_dispatches, paid_dispatches, window_label, status}
+- `format_cost_widget()` returns one-line operator-readable text under 400 chars
+- Subscription (tp-) and paid (sk-) engines visibly distinguished — no "$0 paid = no work" confusion
+- `harness cost-today` CLI verb with --format and --since-hours
+- Status thresholds: ok <80% / warn 80-100% / exhausted ≥100% of budget
+- ASCII-only output (Windows console cp1252 compatibility)
+- Tests: zero state, mixed engines, warn threshold, exhausted threshold, payload size <1KB
+
 ### Wave 11-D — Release gate
 
 #### W11-PYTHON-SDK-API-IMPL — replace stubs with real impl

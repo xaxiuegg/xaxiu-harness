@@ -2459,6 +2459,46 @@ def today_cmd(since_hours: int) -> None:
     else:
         click.echo("  (no audits ran in this window)")
 
+    # Section 1.7: W11-L5-OUTPUT-CONTRACT — ALWAYS surface L5 events
+    # in the last 24h (per spec criterion 3).  Sources of L5:
+    #   - observer/flags/CRITICAL_FLAG_PENDING.md (any pending CRITICAL flag)
+    #   - observer state consecutive_restart_failures ≥ 3 (watchdog escalation)
+    click.echo("\n## L5 escalations (last 24h)\n")
+    l5_events: list[str] = []
+    crit_flag_path = repo / "coord" / "observer" / "flags" / (
+        "CRITICAL_FLAG_PENDING.md"
+    )
+    if crit_flag_path.exists():
+        try:
+            mtime = datetime.fromtimestamp(
+                crit_flag_path.stat().st_mtime, tz=timezone.utc,
+            )
+            if mtime >= cutoff:
+                l5_events.append(
+                    f"  CRITICAL observer flag pending — "
+                    f"run `harness observer flags` for detail"
+                )
+        except OSError:
+            pass
+    try:
+        from harness.observer import state as _ostate
+        from harness import l5_escalation as _l5
+        st = _ostate.read_state()
+        if _l5.should_escalate_to_l5(st.consecutive_restart_failures):
+            l5_events.append(
+                f"  Observer restart escalation: "
+                f"{st.consecutive_restart_failures} consecutive failures "
+                f"— run `harness observer restart` (will print full L5 banner)"
+            )
+    except Exception:
+        pass
+    if l5_events:
+        click.echo("  *** OPERATOR ESCALATION ***")
+        for ev in l5_events:
+            click.echo(ev)
+    else:
+        click.echo("  None — no L5 escalations in the last 24h.")
+
     # Section 2: current blockers
     click.echo("\n## Current blockers\n")
     blockers: list[str] = []

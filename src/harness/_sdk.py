@@ -57,16 +57,26 @@ class DispatchResult:
 
         Burns context proportional to response size — the agent calls
         this only when the `.summary` indicates more detail is needed.
-        Idempotent (cached after first call).
+        Idempotent (cached on the instance after first call).
 
-        Implemented in W11-PYTHON-SDK-API-IMPL (Wave 11-D).
+        W11-PYTHON-SDK-API-IMPL 2026-05-24: routes through
+        ``harness.retrieve(dispatch_id, scope='full')`` which reads
+        from the dispatch cache that ``W11-CONTEXT-FRUGAL-RETURN-LAZY``
+        populates on every successful dispatch.
         """
-        raise NotImplementedError(
-            "DispatchResult.full() is pending W11-PYTHON-SDK-API-IMPL "
-            "(Wave 11-D).  Until then, use the legacy "
-            "harness.engines.dispatcher.dispatch_packet() which returns "
-            "full text by default."
-        )
+        # Fast path: text was already loaded (return_mode='full' callers)
+        if self.text is not None:
+            return self.text
+        if not self.dispatch_id:
+            raise ResultNotFoundError(
+                "DispatchResult.full(): no dispatch_id — cannot lazy-fetch."
+            )
+        # Lazy import to keep the dataclass module import cheap.
+        from harness import retrieve as _retrieve
+        body = _retrieve(self.dispatch_id, scope="full")
+        # Cache on instance — frozen=False dataclass so direct assign works
+        object.__setattr__(self, "text", body)
+        return body
 
 
 class HarnessSDKError(Exception):
@@ -116,10 +126,141 @@ def dispatch(prompt: str,
     Raises:
         HarnessSDKError on engine pool exhaustion or invalid input.
     """
-    raise NotImplementedError(
-        "harness.dispatch() is pending W11-PYTHON-SDK-API-IMPL "
-        "(Wave 11-D).  Until then, use the CLI verb `harness dispatch` "
-        "or import harness.engines.dispatcher.dispatch_packet() directly."
+    # W11-PYTHON-SDK-API-IMPL 2026-05-24: real impl wired to
+    # dispatcher.dispatch_packet().  The SDK provides three forms of
+    # context preservation on top of the dispatcher:
+    #   1. prompt-as-text (write to tempfile so the agent doesn't
+    #      have to manually create packets)
+    #   2. engine-as-list (first is forced; dispatcher handles fallback)
+    #   3. return_mode = summary/full/ref to control text vs context cost
+    import os as _os
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    # Resolve engine
+    force_engine: str | None
+    if isinstance(engine, list) and engine:
+        force_engine = engine[0]
+    elif isinstance(engine, str):
+        force_engine = engine
+    else:
+        force_engine = None
+
+    # Resolve return_mode (with_full_text shortcut overrides)
+    if with_full_text:
+        return_mode = "full"
+    if return_mode not in ("summary", "full", "ref"):
+        raise HarnessSDKError(
+            f"invalid return_mode {return_mode!r}; "
+            f"allowed: 'summary', 'full', 'ref'"
+        )
+
+    # Resolve packet_path: if prompt is an existing file path, use it
+    # directly; otherwise write to a tempfile.  Tempfile retention:
+    # we deliberately do NOT delete on close so the cache + dispatcher
+    # can read it asynchronously.  The OS will reap from /tmp.
+    packet_path: str
+    cleanup_path: _Path | None = None
+    try:
+        candidate = _Path(prompt)
+        if candidate.is_file():
+            packet_path = str(candidate)
+        else:
+            raise ValueError("not a path; fall through to tempfile branch")
+    except (OSError, ValueError):
+        tmpdir = _tempfile.mkdtemp(prefix="harness_sdk_dispatch_")
+        cleanup_path = _Path(tmpdir) / "packet.md"
+        cleanup_path.write_text(prompt, encoding="utf-8")
+        packet_path = str(cleanup_path)
+
+    # Project resolution: prefer .harness/config.json's project_name,
+    # else "default".  Project name must match PROJECT_NAME_REGEX.
+    project = "default"
+    config_path = _Path.cwd() / ".harness" / "config.json"
+    if config_path.exists():
+        try:
+            import json as _json
+            cfg = _json.loads(config_path.read_text(encoding="utf-8"))
+            cand = cfg.get("project_name") or cfg.get("project")
+            if cand and isinstance(cand, str):
+                project = cand
+        except (OSError, ValueError):
+            pass
+
+    # Cache opt-out: dispatcher reads HARNESS_DISPATCH_CACHE_BYPASS
+    cache_env_snapshot = _os.environ.get("HARNESS_DISPATCH_CACHE_BYPASS")
+    if no_cache:
+        _os.environ["HARNESS_DISPATCH_CACHE_BYPASS"] = "1"
+
+    try:
+        # Re-import dispatch_packet at call time so test monkeypatches
+        # of "harness.engines.dispatcher.dispatch_packet" take effect.
+        from harness.engines import dispatcher as _dispatcher
+        result = _dispatcher.dispatch_packet(
+            project=project,
+            packet_path=packet_path,
+            force_engine=force_engine,
+        )
+    finally:
+        if no_cache:
+            if cache_env_snapshot is None:
+                _os.environ.pop("HARNESS_DISPATCH_CACHE_BYPASS", None)
+            else:
+                _os.environ["HARNESS_DISPATCH_CACHE_BYPASS"] = cache_env_snapshot
+
+    # Convert the dispatcher's DispatchResult (which has a different
+    # field set: `error` instead of `error_excerpt`, no `.full()` method)
+    # to the SDK's DispatchResult contract.  The agent receives the
+    # SDK type with the lazy fetch + context-frugal defaults.
+    sdk_result = _to_sdk_result(result, return_mode=return_mode)
+    return sdk_result
+
+
+def _to_sdk_result(dispatcher_result, return_mode: ReturnMode) -> DispatchResult:
+    """Map the dispatcher's DispatchResult onto the SDK's contract.
+
+    The two dataclasses differ in field names (``error`` vs
+    ``error_excerpt``) and the SDK type has a ``.full()`` method the
+    dispatcher's does not.  This boundary conversion lets the agent
+    interact with the cleaner SDK shape without leaking dispatcher
+    internals.
+    """
+    # Extract error_excerpt: prefer the dispatcher's error_excerpt
+    # (if present per W11-CONTEXT-FRUGAL-RETURN-SCHEMA), else fall back
+    # to the older `error` field.
+    err_excerpt = getattr(dispatcher_result, "error_excerpt", None)
+    if not err_excerpt:
+        err_val = getattr(dispatcher_result, "error", "") or ""
+        err_excerpt = err_val if err_val else None
+
+    text_val: str | None = getattr(dispatcher_result, "text", None)
+    summary_val = getattr(dispatcher_result, "summary", "") or ""
+    truncated = getattr(dispatcher_result, "truncated", True)
+    content_ref = getattr(dispatcher_result, "content_ref", None)
+
+    if return_mode == "summary":
+        # Strip text; agent can retrieve() later via dispatch_id.
+        text_val = None
+        truncated = True
+    elif return_mode == "ref":
+        text_val = None
+        summary_val = ""
+        truncated = True
+    # else "full": keep dispatcher's text + summary
+
+    return DispatchResult(
+        success=getattr(dispatcher_result, "success", False),
+        engine_used=getattr(dispatcher_result, "engine_used", ""),
+        dispatch_id=getattr(dispatcher_result, "dispatch_id", ""),
+        summary=summary_val,
+        truncated=truncated,
+        error_excerpt=err_excerpt,
+        content_ref=content_ref,
+        text=text_val,
+        tokens_in=getattr(dispatcher_result, "tokens_in", 0),
+        tokens_out=getattr(dispatcher_result, "tokens_out", 0),
+        cost_usd=getattr(dispatcher_result, "cost_usd", 0.0),
+        fallback_chain=list(getattr(dispatcher_result, "fallback_chain", [])),
     )
 
 

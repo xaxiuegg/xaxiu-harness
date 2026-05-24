@@ -70,28 +70,40 @@ def record_run(results: Iterable[PreflightCheck],
     if not rows:
         return 0
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    # W11 audit fix (K01/K07/K10): prune in-place before appending.
-    if prune_older_than_days is not None and ledger_path.exists():
-        try:
-            prune_old_entries(ledger_path,
-                              max_age_days=prune_older_than_days)
-        except OSError:
-            # Pruning failure is non-fatal; we still want the new rows
-            # to land.  The ledger may not exist after a failed prune,
-            # which is fine (open(..., "a") will recreate).
-            pass
-    with ledger_path.open("a", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row) + "\n")
+    # W11 L5 audit fix (M02/M10): wrap the prune+append cycle in an
+    # advisory file lock so two concurrent preflight runs (cron jitter,
+    # agent loop overlap) cannot interleave-overwrite each other's
+    # rows.  The lock is per-ledger; lock-acquisition timeout falls
+    # back to no-lock append (better to risk a rare race than crash
+    # preflight) but logs a warning.
+    from harness.state.locks import advisory_lock, LockTimeoutError
+    try:
+        with advisory_lock(ledger_path, timeout_sec=2.0):
+            if prune_older_than_days is not None and ledger_path.exists():
+                try:
+                    _prune_in_place(ledger_path,
+                                     max_age_days=prune_older_than_days)
+                except OSError:
+                    pass
+            with ledger_path.open("a", encoding="utf-8") as fh:
+                for row in rows:
+                    fh.write(json.dumps(row) + "\n")
+    except LockTimeoutError:
+        # Degenerate fallback: append without lock to avoid total
+        # data loss.  Race window is small (sub-100ms).  Better to
+        # have a possibly-interleaved write than to drop the data.
+        with ledger_path.open("a", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
     return len(rows)
 
 
-def prune_old_entries(ledger_path: Path,
-                       max_age_days: int = 7) -> int:
-    """Drop entries older than ``max_age_days`` from the ledger.
+def _prune_in_place(ledger_path: Path, max_age_days: int = 7) -> int:
+    """Internal: prune_old_entries body without re-acquiring the lock.
 
-    Returns the number of rows removed.  Atomic via temp-file rename
-    so a kill mid-prune leaves the original intact.
+    record_run already holds the lock when it calls us, so calling
+    prune_old_entries() (which takes the lock) would deadlock on
+    Windows where flock semantics are not re-entrant.
     """
     if not ledger_path.exists():
         return 0
@@ -105,7 +117,7 @@ def prune_old_entries(ledger_path: Path,
             row = json.loads(line)
             ts_raw = row.get("timestamp")
             if not isinstance(ts_raw, str):
-                kept.append(line)  # malformed → keep (don't lose data)
+                kept.append(line)
                 continue
             ts = _parse_ts(ts_raw)
             if ts is None or ts >= cutoff:
@@ -113,7 +125,7 @@ def prune_old_entries(ledger_path: Path,
             else:
                 removed += 1
         except json.JSONDecodeError:
-            kept.append(line)  # keep malformed; aggregator skips it
+            kept.append(line)
     if removed == 0:
         return 0
     tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
@@ -121,6 +133,25 @@ def prune_old_entries(ledger_path: Path,
                     encoding="utf-8")
     tmp.replace(ledger_path)
     return removed
+
+
+def prune_old_entries(ledger_path: Path,
+                       max_age_days: int = 7) -> int:
+    """Drop entries older than ``max_age_days`` from the ledger.
+
+    Returns the number of rows removed.  Atomic via temp-file rename
+    so a kill mid-prune leaves the original intact.  W11 L5 audit fix
+    (M02/M10): also takes the same advisory lock as record_run so
+    two concurrent prunes cannot lose each other's entries.
+    """
+    from harness.state.locks import advisory_lock, LockTimeoutError
+    try:
+        with advisory_lock(ledger_path, timeout_sec=2.0):
+            return _prune_in_place(ledger_path, max_age_days=max_age_days)
+    except LockTimeoutError:
+        # Lock contention → skip this prune cycle (the next record_run
+        # will retry).  Returning 0 is honest: we removed 0 rows.
+        return 0
 
 
 # -- summary ------------------------------------------------------------

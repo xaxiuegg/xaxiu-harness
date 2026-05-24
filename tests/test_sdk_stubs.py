@@ -139,24 +139,46 @@ def test_dispatch_result_default_is_context_frugal():
     assert r.summary == ""
 
 
-def test_dispatch_result_full_method_exists_and_raises_stub():
-    """The .full() lazy-fetch method is the stub awaiting Wave 11-D."""
+def test_dispatch_result_full_method_implemented(tmp_path):
+    """W11-PYTHON-SDK-API-IMPL 2026-05-24: .full() now implemented.
+    Replaces the prior stub-raises-NotImplementedError test."""
+    r = harness.DispatchResult(
+        success=True, engine_used="kimi", dispatch_id="abc-never-cached",
+    )
+    # With no cached dispatch, .full() should raise ResultNotFoundError
+    # (not NotImplementedError).
+    with pytest.raises(harness.ResultNotFoundError):
+        r.full()
+
+
+def test_dispatch_result_full_method_returns_text_when_already_loaded():
+    """Fast path: when text is already populated, .full() returns it."""
     r = harness.DispatchResult(
         success=True, engine_used="kimi", dispatch_id="abc",
+        text="already loaded body",
     )
-    with pytest.raises(NotImplementedError, match="W11-PYTHON-SDK-API-IMPL"):
-        r.full()
+    assert r.full() == "already loaded body"
 
 
 # -- Stubs raise NotImplementedError pointing at the impl row ----------
 
 
-def test_dispatch_stub_raises_notimplemented_with_pointer():
-    with pytest.raises(NotImplementedError) as exc_info:
-        harness.dispatch("test prompt")
-    # Stub message must point at the row that will implement it
-    assert "W11-PYTHON-SDK-API-IMPL" in str(exc_info.value) or \
-           "Wave 11-D" in str(exc_info.value)
+def test_dispatch_implemented_returns_result_without_raising(monkeypatch):
+    """W11-PYTHON-SDK-API-IMPL 2026-05-24: dispatch() now IMPLEMENTED.
+    Replaces the prior stub-raises-NotImplementedError test."""
+    # Patch the dispatcher so we don't hit live engines
+    from harness.engines.dispatcher import DispatchResult as _DR
+    monkeypatch.setattr(
+        "harness.engines.dispatcher.dispatch_packet",
+        lambda **k: _DR(
+            success=True, engine_used="mock", fallback_chain=["mock"],
+            text="ok", dispatch_id="x", summary="ok", truncated=False,
+            error="",
+        ),
+    )
+    r = harness.dispatch("test prompt")
+    assert isinstance(r, harness.DispatchResult)
+    assert r.success is True
 
 
 def test_retrieve_implemented_raises_result_not_found_on_missing_id(tmp_path):

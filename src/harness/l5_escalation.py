@@ -118,15 +118,35 @@ def record_restart_outcome(ok: bool,
 
     Caller pairs this with should_escalate_to_l5(returned_count) to
     decide whether to render an L5 banner.
+
+    W11 L5 audit fix (M02): wraps the read-modify-write cycle in
+    the advisory lock so two concurrent restarts (cron jitter, agent
+    overlap) cannot both read counter=2, both write counter=3, and
+    lose one increment.
     """
     from harness.observer import state as observer_state
-    state = observer_state.read_state(observer_dir=observer_dir)
-    if ok:
-        new_count = 0
-    else:
-        new_count = state.consecutive_restart_failures + 1
-    updated = state.model_copy(update={
-        "consecutive_restart_failures": new_count,
-    })
-    observer_state.write_state(updated, observer_dir=observer_dir)
-    return new_count
+    from harness.state.locks import advisory_lock, LockTimeoutError
+
+    state_path = observer_state._observer_state_path(
+        observer_dir=observer_dir,
+    )
+    try:
+        with advisory_lock(state_path, timeout_sec=2.0):
+            state = observer_state.read_state(observer_dir=observer_dir)
+            new_count = 0 if ok else state.consecutive_restart_failures + 1
+            updated = state.model_copy(update={
+                "consecutive_restart_failures": new_count,
+            })
+            observer_state.write_state(updated, observer_dir=observer_dir)
+            return new_count
+    except LockTimeoutError:
+        # Best-effort: still update without the lock.  The race
+        # window is small; better to update + risk a missed increment
+        # than to drop the signal entirely.
+        state = observer_state.read_state(observer_dir=observer_dir)
+        new_count = 0 if ok else state.consecutive_restart_failures + 1
+        updated = state.model_copy(update={
+            "consecutive_restart_failures": new_count,
+        })
+        observer_state.write_state(updated, observer_dir=observer_dir)
+        return new_count
