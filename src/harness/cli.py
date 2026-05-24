@@ -2198,6 +2198,16 @@ def preflight_cmd(fmt: str, skip_engines: bool,
         ]
         elapsed_ms = int((time.monotonic() - started) * 1000)
 
+    # W11-PER-CHECK-LATENCY-OBSERVABILITY: persist per-check timings
+    # to the rolling ledger so `harness preflight-latency` can answer
+    # "is preflight slow today?" without grepping logs.  Best-effort
+    # — a failed ledger write must NOT block the preflight return.
+    try:
+        from harness.preflight_latency import record_run as _record_lat
+        _record_lat(results)
+    except Exception:
+        pass
+
     if fmt == "json":
         click.echo(json.dumps({
             "elapsed_ms": elapsed_ms,
@@ -2242,6 +2252,33 @@ def preflight_cmd(fmt: str, skip_engines: bool,
         click.echo(f"  {_explanation}")
 
     sys.exit(overall_exit_code(results))
+
+
+@cli.command(name="preflight-latency")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty",
+              help="Output format.")
+@click.option("--since-hours", type=float, default=None,
+              help="Limit to entries within the last N hours "
+              "(default: all-time).")
+@click.option("--check-name", default=None,
+              help="Limit to a single check (e.g. 'engine:kimi').")
+def preflight_latency_cmd(fmt: str, since_hours: float | None,
+                           check_name: str | None) -> None:
+    """W11-PER-CHECK-LATENCY-OBSERVABILITY: rolling p50/p95/p99 of
+    preflight check durations.
+
+    Each `harness preflight` run appends per-check timings to the
+    ledger.  This verb aggregates them so the operator can answer
+    "which preflight check is slow today?" at a glance, sorted by
+    p95 desc (slowest first).
+    """
+    from harness.preflight_latency import latency_summary, latency_table
+    if fmt == "json":
+        s = latency_summary(since_hours=since_hours, check_name=check_name)
+        click.echo(json.dumps(s, indent=2))
+    else:
+        click.echo(latency_table(since_hours=since_hours))
 
 
 @cli.command(name="today")
