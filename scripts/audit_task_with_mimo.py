@@ -40,6 +40,32 @@ from harness.engines.concrete import get_engine  # noqa: E402
 
 
 PLAN_PATH = Path("spec/wave-6-plan.md")
+# W7-AUDIT-POLICY 2026-05-23: operator extended the audit gate to all
+# Wn waves.  When the task_id begins with W7-, prefer the wave-7 plan;
+# generalised pattern picks the right plan by ID prefix.
+_PLAN_BY_TASK_PREFIX = {
+    "W6-": "spec/wave-6-plan.md",
+    "A1": "spec/wave-6-plan.md",   # W6 historic single-letter ids
+    "A1-": "spec/wave-6-plan.md",
+    "A2": "spec/wave-6-plan.md",
+    "A3": "spec/wave-6-plan.md",
+    "B1": "spec/wave-6-plan.md",
+    "B2": "spec/wave-6-plan.md",
+    "B3": "spec/wave-6-plan.md",
+    "C1": "spec/wave-6-plan.md",
+    "C2": "spec/wave-6-plan.md",
+    "W7-": "spec/wave-7-plan.md",
+}
+
+
+def _resolve_plan_path(task_id: str, override: str | None) -> Path:
+    """Pick the right plan file for *task_id* unless --plan overrides."""
+    if override:
+        return Path(override)
+    for prefix, plan in _PLAN_BY_TASK_PREFIX.items():
+        if task_id == prefix.rstrip("-") or task_id.startswith(prefix):
+            return Path(plan)
+    return PLAN_PATH  # default fallback
 OUT_DIR = Path("coord/reviews/audits")
 CONFIDENCE_GATE = 0.7
 
@@ -198,19 +224,24 @@ def git_commit_info(sha: str = "HEAD") -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("task_id", help="Wave 6 task ID (A1, A2, B1, etc.)")
+    parser.add_argument("task_id", help="Wn task ID (e.g. A1, A2, W7-MUTATION-WORKER)")
     parser.add_argument("--commit", default="HEAD",
                         help="Commit SHA to audit (default HEAD).")
-    parser.add_argument("--plan", default=str(PLAN_PATH),
-                        type=Path,
-                        help="Wave 6 plan file (default spec/wave-6-plan.md).")
+    parser.add_argument("--plan", default=None,
+                        type=str,
+                        help="Override the plan file.  Default: auto-pick "
+                        "by task_id prefix (W7- → spec/wave-7-plan.md, "
+                        "else spec/wave-6-plan.md).")
     args = parser.parse_args()
 
-    if not args.plan.exists():
-        print(f"plan not found: {args.plan}", file=sys.stderr)
+    # W7-AUDIT-POLICY: auto-resolve the plan path from task_id prefix
+    # unless --plan overrides.
+    plan_path = _resolve_plan_path(args.task_id, args.plan)
+    if not plan_path.exists():
+        print(f"plan not found: {plan_path}", file=sys.stderr)
         return 2
 
-    plan_text = args.plan.read_text(encoding="utf-8")
+    plan_text = plan_path.read_text(encoding="utf-8")
     acceptance = extract_acceptance(plan_text, args.task_id)
     if not acceptance:
         print(f"task {args.task_id} not found in plan", file=sys.stderr)
