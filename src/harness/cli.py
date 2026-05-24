@@ -1917,6 +1917,184 @@ def preflight_cmd(fmt: str, skip_engines: bool,
     sys.exit(overall_exit_code(results))
 
 
+@cli.command(name="today")
+@click.option("--since-hours", type=int, default=24,
+              help="How far back to look for activity (default 24).")
+def today_cmd(since_hours: int) -> None:
+    """W8-STATUS-HUMAN: plain-language daily pulse for the operator.
+
+    Shows three sections in plain English:
+      1. Overnight summary — what shipped, what audited
+      2. Current blockers — preflight + observer flags + dead engines
+      3. Next 1-3 actions — what the operator should do today
+
+    Designed for the non-technical operator (per
+    [[user_non_technical_role]] memory): no UUIDs, no commit hashes,
+    no Python tracebacks unless explicitly part of an error message.
+    """
+    from datetime import datetime, timezone, timedelta
+    from pathlib import Path
+
+    repo = Path.cwd()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    click.echo(f"=" * 60)
+    click.echo(f"  Today — what happened in the last {since_hours} hours")
+    click.echo(f"=" * 60)
+
+    # Section 1: overnight summary
+    click.echo("\n## What shipped\n")
+    shipped_today: list[str] = []
+    try:
+        csv_path = repo / "coord" / "STATUS.csv"
+        if csv_path.exists():
+            import csv as _csv
+            with csv_path.open("r", encoding="utf-8", newline="") as fh:
+                reader = _csv.DictReader(fh)
+                for row in reader:
+                    if row.get("Status") != "shipped":
+                        continue
+                    updated = row.get("Updated", "")
+                    # Crude date parse — Updated is "2026-05-23" format
+                    try:
+                        when = datetime.fromisoformat(
+                            updated + "T00:00:00+00:00"
+                        )
+                    except ValueError:
+                        continue
+                    if when >= cutoff:
+                        title = row.get("Title", "(no title)")
+                        shipped_today.append(f"  {row.get('ID', '?')} — {title}")
+    except Exception:
+        shipped_today = []
+    if shipped_today:
+        for line in shipped_today[:12]:
+            click.echo(line)
+        if len(shipped_today) > 12:
+            click.echo(f"  ... and {len(shipped_today) - 12} more")
+    else:
+        click.echo("  (nothing shipped in this window)")
+
+    # Section 1.5: audit results in this window
+    click.echo("\n## Audit results (recent reviews)\n")
+    audit_dir = repo / "coord" / "reviews" / "audits"
+    audit_count = {"pass": 0, "stop": 0}
+    recent_audits: list[tuple[str, str, float]] = []
+    if audit_dir.exists():
+        for audit_file in sorted(audit_dir.glob("*_audit.md"),
+                                 key=lambda p: p.stat().st_mtime,
+                                 reverse=True):
+            try:
+                mtime = datetime.fromtimestamp(
+                    audit_file.stat().st_mtime, tz=timezone.utc,
+                )
+            except OSError:
+                continue
+            if mtime < cutoff:
+                continue
+            try:
+                head = audit_file.read_text(encoding="utf-8")[:500]
+            except OSError:
+                continue
+            import re as _re
+            conf_m = _re.search(r"confidence=([0-9.]+)", head)
+            task_m = _re.search(r"task=([^\s]+)", head)
+            if conf_m and task_m:
+                conf = float(conf_m.group(1))
+                if conf >= 0.7:
+                    audit_count["pass"] += 1
+                else:
+                    audit_count["stop"] += 1
+                recent_audits.append(
+                    (task_m.group(1), audit_file.name, conf)
+                )
+    if recent_audits:
+        click.echo(f"  {audit_count['pass']} PASS, "
+                   f"{audit_count['stop']} STOP, "
+                   f"total {len(recent_audits)} in this window")
+        for task, _, conf in recent_audits[:6]:
+            verdict = "PASS" if conf >= 0.7 else "STOP"
+            click.echo(f"    {verdict:<4} {conf:.2f}  {task}")
+        if len(recent_audits) > 6:
+            click.echo(f"    ... and {len(recent_audits) - 6} more")
+    else:
+        click.echo("  (no audits ran in this window)")
+
+    # Section 2: current blockers
+    click.echo("\n## Current blockers\n")
+    blockers: list[str] = []
+    try:
+        from harness.preflight import run_all, overall_exit_code
+        # Skip engines — would burn API spend on every `harness today`
+        from harness import preflight as _pf
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        pairs = [(n, fn) for n, fn in _pf._all_check_callables()
+                 if not n.startswith("engine:")]
+        pre_results = []
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(fn): name for name, fn in pairs}
+            for f in as_completed(futures):
+                try:
+                    pre_results.append(f.result())
+                except Exception:
+                    pass
+        for r in pre_results:
+            if r.severity == "fail":
+                blockers.append(f"  [X] {r.name}: {r.message}")
+            elif r.severity == "warn":
+                blockers.append(f"  [!] {r.name}: {r.message}")
+    except Exception as exc:
+        blockers.append(f"  (couldn't run preflight: {exc})")
+    # Observer flags
+    flags_dir = repo / "coord" / "observer" / "flags"
+    if flags_dir.exists():
+        high_flags = list(flags_dir.glob("*high*.md"))
+        if high_flags:
+            blockers.append(
+                f"  [!] {len(high_flags)} HIGH observer flag(s) — "
+                "run `harness observer flags`"
+            )
+    if blockers:
+        for b in blockers[:8]:
+            click.echo(b)
+        if len(blockers) > 8:
+            click.echo(f"  ... and {len(blockers) - 8} more")
+    else:
+        click.echo("  None — preflight is green.")
+
+    # Section 3: next 1-3 actions
+    click.echo("\n## Suggested next actions\n")
+    suggestions: list[str] = []
+    has_fail = any("[X]" in b for b in blockers)
+    has_warn = any("[!]" in b for b in blockers)
+    if has_fail:
+        suggestions.append("  1. Run `harness preflight --fix --dry-run` "
+                           "to preview the auto-fix, then drop --dry-run.")
+    if has_warn and not has_fail:
+        suggestions.append("  1. `harness preflight --fix` for the "
+                           "warnings (or ignore — warnings don't block).")
+    if not has_fail and not has_warn:
+        if audit_count.get("stop", 0) > 0:
+            suggestions.append(
+                "  1. Review the STOP audits in "
+                "`coord/reviews/audits/` — they need operator decision."
+            )
+        else:
+            suggestions.append(
+                "  1. Loop is green.  Skim `harness morning-brief` for the "
+                "narrative, then go do non-harness work."
+            )
+    suggestions.append("  2. `harness dashboard-serve` if you want a "
+                       "visual.  Closes when you Ctrl-C.")
+    suggestions.append("  3. If anything looks wrong, run "
+                       "`harness panic-dump` and ping engineering.")
+    for s in suggestions:
+        click.echo(s)
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"  For the full daily playbook: docs/OPERATOR_RUNBOOK.md")
+    click.echo(f"{'=' * 60}\n")
+
+
 @cli.command(name="panic-dump")
 @click.option("--target-dir", default=None, type=click.Path(path_type=Path),
               help="Output dir (defaults to cwd).")
@@ -2054,6 +2232,190 @@ def engines_reliability(publish: bool) -> None:
         click.echo(f"{r.engine:10} {(r.model or ''):22} "
                    f"{r.ok:>4} {r.fail:>4} "
                    f"{r.parseable_rate:>5.1%} {r.avg_latency_ms:>10}")
+    sys.exit(0)
+
+
+@cli.command(name="engines-heal")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Preview what would happen without applying.")
+@click.option("--engine", default=None,
+              help="Heal only this engine (default: all dead engines).")
+def engines_heal_cmd(dry_run: bool, engine: str | None) -> None:
+    """W8-ENGINES-HEAL: one-command recovery for dead / quarantined engines.
+
+    Walks the dead-engine alarm state (W6-C2) plus the engine health
+    file and:
+      1. Quarantines engines currently above the failure threshold.
+      2. Attempts to reload API keys from DPAPI for each quarantined
+         engine — if the key is back, mark it ``recovering`` so the
+         dispatcher gives it one more attempt.
+      3. Surfaces a plain-language report.
+
+    Designed for the non-technical operator (per
+    [[user_non_technical_role]] + readiness panel feedback 4/10 vote).
+    No Python tracebacks, no JSONL paths — operator-friendly only.
+
+    To reset an engine manually later, run ``harness engines reset
+    <name>`` (or ``priority <name> NORMAL`` if you'd rather route to
+    it).
+    """
+    from harness.engine_alarm import dead_engines as _dead
+    from harness.state.files import read_engine_health, update_engine_health
+    from harness.secrets import dpapi
+    from harness._constants import API_KEY_ENV_VARS
+
+    click.echo("=" * 60)
+    click.echo("  harness engines-heal — automated engine recovery")
+    click.echo("=" * 60)
+    if dry_run:
+        click.echo("\nDRY RUN — no changes will be applied.\n")
+
+    # 1) Find dead engines (from the alarm) + currently-quarantined
+    # ones (from engine_health).
+    try:
+        dead_streaks = _dead()
+    except Exception as exc:
+        click.echo(f"  [X] Couldn't read engine alarm state: {exc}", err=True)
+        sys.exit(2)
+    try:
+        health = read_engine_health()
+    except Exception as exc:
+        click.echo(f"  [X] Couldn't read engine health: {exc}", err=True)
+        sys.exit(2)
+    quarantined_now = {
+        name for name, entry in (health or {}).items()
+        if isinstance(entry, dict) and entry.get("status") == "quarantined"
+    }
+    affected = set(dead_streaks.keys()) | quarantined_now
+    if engine:
+        affected = {e for e in affected if e == engine}
+        if not affected:
+            click.echo(
+                f"  [OK] Engine '{engine}' is not in the dead or "
+                f"quarantined set — nothing to heal."
+            )
+            sys.exit(0)
+    if not affected:
+        click.echo("\n  [OK] All engines are healthy — nothing to heal.")
+        click.echo("\n  Tip: `harness engines-reliability` shows the full")
+        click.echo("       ranking if you want a deeper look.\n")
+        sys.exit(0)
+
+    click.echo(f"\n  Found {len(affected)} engine(s) needing attention:\n")
+    actions: list[tuple[str, str, str]] = []  # (engine, action, message)
+    for e in sorted(affected):
+        streak = dead_streaks.get(e, 0)
+        was_quarantined = e in quarantined_now
+        # 2) Probe DPAPI for the engine's API key
+        env_var = API_KEY_ENV_VARS.get(e, "").upper()
+        key_present = False
+        if env_var:
+            try:
+                key_present = dpapi.has_secret(env_var)
+            except Exception:
+                key_present = False
+        if streak > 0 and not was_quarantined:
+            # Newly dead — quarantine
+            if dry_run:
+                actions.append((
+                    e, "would-quarantine",
+                    f"Hit {streak} consecutive failures.  "
+                    f"Would quarantine.  Key in DPAPI: "
+                    f"{'YES' if key_present else 'no'}.",
+                ))
+            else:
+                try:
+                    update_engine_health(e, {
+                        "status": "quarantined",
+                        "last_quarantine": datetime.now(timezone.utc).isoformat(),
+                    })
+                    actions.append((
+                        e, "quarantined",
+                        f"Quarantined after {streak} consecutive "
+                        f"failures.  Key in DPAPI: "
+                        f"{'YES' if key_present else 'no'}.",
+                    ))
+                except Exception as exc:
+                    actions.append((
+                        e, "error",
+                        f"Tried to quarantine but couldn't update "
+                        f"engine health: {exc}",
+                    ))
+        elif was_quarantined and key_present:
+            # Already quarantined + key is present in DPAPI → mark
+            # recovering so the dispatcher tries it once.
+            if dry_run:
+                actions.append((
+                    e, "would-recover",
+                    f"Already quarantined.  Key in DPAPI is present.  "
+                    f"Would mark as 'recovering' for one retry.",
+                ))
+            else:
+                try:
+                    update_engine_health(e, {
+                        "status": "recovering",
+                        "last_heal_attempt": datetime.now(timezone.utc).isoformat(),
+                    })
+                    actions.append((
+                        e, "recovering",
+                        f"Marked as 'recovering' — dispatcher will "
+                        f"give it one more attempt.  If it succeeds, "
+                        f"it auto-promotes back to 'ok'.",
+                    ))
+                except Exception as exc:
+                    actions.append((
+                        e, "error",
+                        f"Tried to mark recovering but failed: {exc}",
+                    ))
+        elif was_quarantined and not key_present:
+            actions.append((
+                e, "blocked",
+                "Quarantined and no API key found in DPAPI.  Engine "
+                "needs a fresh key — run `harness install` to seed it, "
+                "OR set the env var and re-run engines-heal.",
+            ))
+        else:
+            actions.append((
+                e, "watch",
+                f"Currently above failure threshold ({streak} streak) "
+                "but not yet quarantined.  Will be picked up on next "
+                "dispatch.  Re-run engines-heal in a few minutes if "
+                "this persists.",
+            ))
+
+    glyph = {
+        "quarantined": "[FIXED]",
+        "would-quarantine": "[!]",
+        "recovering": "[FIXED]",
+        "would-recover": "[!]",
+        "blocked": "[X]",
+        "watch": "[!]",
+        "error": "[X]",
+    }
+    for e, action, msg in actions:
+        g = glyph.get(action, "[?]")
+        click.echo(f"  {g} {e:<12} {action:<18} {msg}")
+        if action in {"quarantined", "recovering"}:
+            click.echo(
+                f"          undo: harness engines reset {e}  "
+                "(or  priority {e} NORMAL)"
+            )
+    click.echo("=" * 60)
+    if dry_run:
+        click.echo("\n  Preview only — nothing changed.")
+        click.echo("  Re-run without --dry-run to apply.\n")
+    else:
+        applied = sum(1 for _, a, _ in actions
+                      if a in {"quarantined", "recovering"})
+        blocked = sum(1 for _, a, _ in actions if a == "blocked")
+        click.echo(f"\n  Healed {applied}; blocked {blocked}; "
+                   f"to-watch {len(actions) - applied - blocked}.")
+        if blocked:
+            click.echo("\n  Blocked engines need a fresh API key.  "
+                       "Ask your engineering teammate or run "
+                       "`harness install` to seed.\n")
+        else:
+            click.echo("")
     sys.exit(0)
 
 

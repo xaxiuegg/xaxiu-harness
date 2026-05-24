@@ -2,6 +2,8 @@
 
 > One command center that sends work packets to Kimi K2.6, MiMo Pro v2.5, DeepSeek v4-flash, or Anthropic; tracks every task in a shared spreadsheet; and keeps running even while you sleep.
 
+**Non-technical operator? → [docs/OPERATOR_RUNBOOK.md](docs/OPERATOR_RUNBOOK.md)** is the single-page daily playbook.  Three commands every morning, plain-language recovery for the common failures, no Python knowledge required.
+
 ---
 
 ## What is this?
