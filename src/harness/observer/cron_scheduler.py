@@ -14,11 +14,10 @@ entries without touching the operator's other cron jobs.
 
 from __future__ import annotations
 
-import re
+import shlex
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 from harness._constants import _REPO_ROOT
 
@@ -48,21 +47,37 @@ def _has_crontab() -> bool:
     return shutil.which("crontab") is not None
 
 
+class _CrontabReadError(RuntimeError):
+    """W11-CROSS-PLATFORM-OBSERVER audit fix (K04): differentiates a
+    transient read failure (timeout / FileNotFoundError) from a
+    legitimately-empty crontab.  Callers that mutate the crontab MUST
+    refuse to proceed on this exception — otherwise they would erase
+    the operator's existing entries."""
+
+
 def _read_crontab() -> str:
-    """Return current crontab content; empty string if no crontab set
-    or the binary is missing."""
+    """Return current crontab content; empty string when there is no
+    crontab for the user; raises _CrontabReadError when the read fails
+    (timeout, missing binary) so register/unregister can refuse to
+    destroy operator entries."""
     if not _has_crontab():
-        return ""
+        raise _CrontabReadError("crontab binary missing")
     try:
         proc = subprocess.run(
             ["crontab", "-l"],
             capture_output=True, text=True, timeout=5,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
-    # `crontab -l` returns 1 with "no crontab for <user>" when empty
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise _CrontabReadError(f"crontab read failed: {exc}") from exc
+    # `crontab -l` returns 1 with "no crontab for <user>" when empty —
+    # that's NOT a failure; we just have no entries yet.
     if proc.returncode != 0:
-        return ""
+        if "no crontab" in (proc.stderr or "").lower():
+            return ""
+        # Any other non-zero exit is an unknown error — refuse to mutate.
+        raise _CrontabReadError(
+            f"crontab -l returned {proc.returncode}: {proc.stderr.strip()}"
+        )
     return proc.stdout
 
 
@@ -139,8 +154,13 @@ def register_cron_tasks(cadence_minutes: int = 60,
             f"of 60; using hourly schedule)"
         )
 
+    # W11-CROSS-PLATFORM-OBSERVER audit fix (K09): shlex.quote every
+    # interpolated path so a repo or venv path containing shell metachars
+    # cannot inject commands into the cron line.
+    project_q = shlex.quote(str(project))
+    py_q = shlex.quote(py)
     cycle_cmd = (
-        f'cd {project} && {py} -m harness observer cycle-now '
+        f"cd {project_q} && {py_q} -m harness observer cycle-now "
         f">>/tmp/harness-observer-cycle.log 2>&1"
     )
 
@@ -155,19 +175,28 @@ def register_cron_tasks(cadence_minutes: int = 60,
         return False, f"invalid daily_time {daily_time!r}; expected HH:MM"
 
     retro_cmd = (
-        f'cd {project} && {py} -m harness observer daily-retro '
+        f"cd {project_q} && {py_q} -m harness observer daily-retro "
         f">>/tmp/harness-observer-retro.log 2>&1"
     )
 
-    # Build new crontab content: operator entries + harness entries
-    existing = _read_crontab()
+    # Build new crontab content: operator entries + harness entries.
+    # W11-CROSS-PLATFORM-OBSERVER audit fix (K04): refuse to mutate
+    # the crontab when we cannot read it — otherwise we would silently
+    # destroy the operator's existing entries.
+    try:
+        existing = _read_crontab()
+    except _CrontabReadError as exc:
+        return False, (
+            f"refusing to register: could not read existing crontab "
+            f"({exc}). Run `crontab -l` manually to diagnose."
+        )
     operator_lines = _filter_out_harness_entries(existing)
     new_lines = list(operator_lines)
     new_lines.extend(_make_cron_entry(CYCLE_TASK_NAME, cycle_schedule, cycle_cmd))
     new_lines.extend(_make_cron_entry(RETRO_TASK_NAME, retro_schedule, retro_cmd))
     if include_chat:
         chat_cmd = (
-            f'cd {project} && {py} -m harness observer audit-chat '
+            f"cd {project_q} && {py_q} -m harness observer audit-chat "
             f">>/tmp/harness-observer-chat.log 2>&1"
         )
         new_lines.extend(_make_cron_entry(
@@ -187,10 +216,21 @@ def register_cron_tasks(cadence_minutes: int = 60,
 
 def unregister_cron_tasks() -> tuple[bool, str]:
     """Remove all harness-owned cron entries.  Preserves operator's
-    other cron entries."""
+    other cron entries.
+
+    W11-CROSS-PLATFORM-OBSERVER audit fix (K04): refuses to mutate
+    when crontab read fails — better to leave possibly-stale harness
+    entries than wipe the operator's crontab.
+    """
     if not _has_crontab():
         return False, "crontab binary not found"
-    existing = _read_crontab()
+    try:
+        existing = _read_crontab()
+    except _CrontabReadError as exc:
+        return False, (
+            f"refusing to unregister: could not read existing crontab "
+            f"({exc})."
+        )
     if not existing.strip():
         return True, "no crontab present; nothing to unregister"
     operator_lines = _filter_out_harness_entries(existing)
@@ -218,16 +258,27 @@ def scheduler_status() -> dict:
             "count_armed": int,
         }
     """
-    if not _has_crontab():
-        return {"platform": "unavailable",
-                "tasks": {}, "count_armed": 0,
-                "reason": "crontab binary not found"}
-    content = _read_crontab()
-    tasks: dict[str, dict] = {
+    # W11-CROSS-PLATFORM-OBSERVER audit fix (K03): keep the tasks dict
+    # populated (with armed=False) even when the platform is
+    # unavailable, so callers iterating status["tasks"][name] don't
+    # KeyError just because they're on a host without crontab.
+    empty_tasks: dict[str, dict] = {
         CYCLE_TASK_NAME: {"armed": False, "schedule": None},
         RETRO_TASK_NAME: {"armed": False, "schedule": None},
         CHAT_AUDIT_TASK_NAME: {"armed": False, "schedule": None},
     }
+    if not _has_crontab():
+        return {"platform": "unavailable",
+                "tasks": empty_tasks, "count_armed": 0,
+                "reason": "crontab binary not found"}
+    try:
+        content = _read_crontab()
+    except _CrontabReadError as exc:
+        # Read failure → can't enumerate; report unavailable with cause.
+        return {"platform": "unavailable",
+                "tasks": empty_tasks, "count_armed": 0,
+                "reason": f"crontab read failed: {exc}"}
+    tasks: dict[str, dict] = dict(empty_tasks)
     lines = content.splitlines()
     for i, line in enumerate(lines):
         if line.startswith(MARKER_PREFIX):

@@ -3301,10 +3301,24 @@ def observer_install_scheduler(cadence_minutes: int, daily_time: str,
     """
     # --all implies --include-chat
     include_chat = include_chat or include_all
-    ok, msg = register_tasks(
-        cadence_minutes=cadence_minutes, daily_time=daily_time,
-        include_chat=include_chat,
+    # W11-CROSS-PLATFORM-OBSERVER: dispatch to cron on Linux/Mac,
+    # Task Scheduler on Windows.  Same call signature for both
+    # so the operator/agent doesn't need to know which platform
+    # they're on.
+    from harness.observer.cron_scheduler import (
+        is_unix_like,
+        register_cron_tasks,
     )
+    if is_unix_like():
+        ok, msg = register_cron_tasks(
+            cadence_minutes=cadence_minutes, daily_time=daily_time,
+            include_chat=include_chat,
+        )
+    else:
+        ok, msg = register_tasks(
+            cadence_minutes=cadence_minutes, daily_time=daily_time,
+            include_chat=include_chat,
+        )
     click.echo(f"observer/retro: {msg}")
     overall_ok = ok
 
@@ -3331,8 +3345,16 @@ def observer_install_scheduler(cadence_minutes: int, daily_time: str,
 
 @observer.command(name="uninstall-scheduler")
 def observer_uninstall_scheduler() -> None:
-    """Remove observer Windows Task Scheduler entries (chat + cycle + retro + db + cost when present)."""
-    ok, msg = unregister_tasks()
+    """Remove observer scheduler entries (cron on Linux/Mac, Task Scheduler
+    on Windows, plus chat + db + cost when present)."""
+    from harness.observer.cron_scheduler import (
+        is_unix_like,
+        unregister_cron_tasks,
+    )
+    if is_unix_like():
+        ok, msg = unregister_cron_tasks()
+    else:
+        ok, msg = unregister_tasks()
     click.echo(f"observer/retro: {msg}")
     overall_ok = ok
     # Best-effort removal of downstream tasks
@@ -3351,6 +3373,46 @@ def observer_uninstall_scheduler() -> None:
     except ImportError:
         pass
     sys.exit(0 if overall_ok else 1)
+
+
+@observer.command(name="watchdog-status")
+@click.option("--json", "as_json", is_flag=True,
+              help="Emit JSON instead of human-readable lines.")
+def observer_watchdog_status(as_json: bool) -> None:
+    """W11-OBSERVER-WATCHDOG-RECOVERY: check if observer task has gone stale.
+
+    Exit 0 healthy, 1 stale.  Use in scripts/cron for self-recovery.
+    """
+    from harness.observer.watchdog import watchdog_status
+    status = watchdog_status()
+    if as_json:
+        import json as _json
+        click.echo(_json.dumps(status, indent=2, default=str))
+    else:
+        click.echo(f"is_stale:        {status['is_stale']}")
+        click.echo(f"last_cycle_at:   {status['last_cycle_at'] or '(never)'}")
+        secs = status['stale_seconds']
+        click.echo(f"stale_seconds:   {secs if secs is not None else '(n/a)'}")
+        click.echo(f"cadence_minutes: {status['cadence_minutes']}")
+        click.echo(f"armed:           {status['armed']}")
+        click.echo(f"paused:          {status['paused']}")
+        if status['suggested_action']:
+            click.echo("")
+            click.echo(f"ACTION: {status['suggested_action']}")
+    sys.exit(1 if status['is_stale'] else 0)
+
+
+@observer.command(name="restart")
+def observer_restart() -> None:
+    """W11-OBSERVER-WATCHDOG-RECOVERY: unregister + re-register the observer.
+
+    Preserves existing cadence_minutes + daily_retro_time.  Auto-picks
+    cron (Linux/Mac) or Task Scheduler (Windows) based on platform.
+    """
+    from harness.observer.watchdog import restart_observer
+    ok, msg = restart_observer()
+    click.echo(msg)
+    sys.exit(0 if ok else 1)
 
 
 @observer.command(name="audit-chat")

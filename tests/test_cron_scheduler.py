@@ -283,3 +283,74 @@ def test_make_cron_entry_returns_marker_plus_line():
     assert len(entry) == 2
     assert entry[0] == f"{cs.MARKER_PREFIX}MyTask"
     assert entry[1] == "*/15 * * * * /usr/bin/foo"
+
+
+# -- W11-CROSS-PLATFORM-OBSERVER audit fixes ----------------------------
+
+
+def test_register_refuses_when_crontab_read_times_out(fake_crontab, monkeypatch):
+    """K04: crontab -l timeout MUST NOT cause us to wipe operator entries."""
+    def _raise_timeout(args, **kwargs):
+        import subprocess as _sp
+        if args[:2] == ["crontab", "-l"]:
+            raise _sp.TimeoutExpired(cmd=args, timeout=5)
+        # Track if we tried to write (we should NOT)
+        fake_crontab["calls"].append(list(args))
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(cs.subprocess, "run", _raise_timeout)
+    fake_crontab["content"] = "0 2 * * * /home/op/important.sh\n"
+    ok, msg = cs.register_cron_tasks()
+    assert ok is False
+    assert "refus" in msg.lower() or "could not read" in msg.lower()
+    # Critically: no write occurred → operator's crontab intact
+    assert not any(c[:2] == ["crontab", "-"] for c in fake_crontab["calls"])
+
+
+def test_unregister_refuses_when_crontab_read_fails(fake_crontab, monkeypatch):
+    """K04 mirror: same protection for unregister."""
+    def _raise_timeout(args, **kwargs):
+        import subprocess as _sp
+        if args[:2] == ["crontab", "-l"]:
+            raise _sp.TimeoutExpired(cmd=args, timeout=5)
+        fake_crontab["calls"].append(list(args))
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(cs.subprocess, "run", _raise_timeout)
+    ok, msg = cs.unregister_cron_tasks()
+    assert ok is False
+    assert "refus" in msg.lower()
+
+
+def test_register_shell_quotes_paths_with_metachars(fake_crontab, monkeypatch):
+    """K09: a repo path containing shell metachars must be SAFELY quoted —
+    i.e. shlex.quote wraps it in single quotes so the shell treats every
+    character as literal.  Inside POSIX single quotes nothing is expanded,
+    so `$(...)`, backticks, semicolons etc. are inert."""
+    import shlex as _shlex
+    from pathlib import Path
+    evil = Path("/tmp/$(rm -rf$IFS/);echo")
+    monkeypatch.setattr(cs, "_REPO_ROOT", evil)
+    monkeypatch.setattr(cs, "_python_bin", lambda: "/usr/bin/python")
+    cs.register_cron_tasks()
+    content = fake_crontab["content"]
+    # The single-quoted token must appear exactly as shlex would emit it
+    expected_quoted = _shlex.quote(str(evil))
+    assert expected_quoted in content
+    # And the dangerous chars must ONLY appear inside that quoted token —
+    # never raw.  Strip every occurrence of the quoted token and check.
+    stripped = content.replace(expected_quoted, "")
+    assert "$(" not in stripped
+    assert ";echo" not in stripped
+
+
+def test_scheduler_status_returns_populated_tasks_when_unavailable(monkeypatch):
+    """K03: status['tasks'] must enumerate task names even when crontab
+    is missing — agents iterating it should not KeyError."""
+    monkeypatch.setattr(cs, "_has_crontab", lambda: False)
+    status = cs.scheduler_status()
+    assert status["platform"] == "unavailable"
+    # Tasks dict populated with armed=False; agents can safely look up by name
+    assert cs.CYCLE_TASK_NAME in status["tasks"]
+    assert status["tasks"][cs.CYCLE_TASK_NAME]["armed"] is False
+    assert status["count_armed"] == 0
