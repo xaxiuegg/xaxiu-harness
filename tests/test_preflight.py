@@ -270,23 +270,26 @@ def test_fix_git_clean_untracked_only_is_skipped() -> None:
 
 
 def test_fix_git_clean_dry_run_does_not_stash() -> None:
-    """--dry-run shows what would happen without running git stash."""
+    """W9-PREFLIGHT-FIX-NOSTASH: with --allow-stash + --dry-run the
+    operator sees a [STASHED preview] line and no real git stash runs."""
     from harness.preflight import fix_git_clean
     with patch("harness.preflight.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             stdout=" M src/foo.py\n M src/bar.py\n", returncode=0,
         )
-        out = fix_git_clean(dry_run=True)
+        out = fix_git_clean(dry_run=True, allow_stash=True)
     assert out.applied is False
     assert out.skipped is False
-    assert "Would stash 2" in out.message
+    assert "[STASHED preview]" in out.message
+    assert "2" in out.message  # count surfaced
     assert "stash pop" in out.message
     # Only 1 subprocess call: the porcelain check (no stash push)
     assert mock_run.call_count == 1
 
 
 def test_fix_git_clean_applies_stash_when_modified_present() -> None:
-    """Real fix: modified files get stashed with a labeled message."""
+    """W9-PREFLIGHT-FIX-NOSTASH: with --allow-stash, real stash runs +
+    success message starts with the loud [STASHED] marker."""
     from harness.preflight import fix_git_clean
     calls: list[list[str]] = []
 
@@ -300,14 +303,37 @@ def test_fix_git_clean_applies_stash_when_modified_present() -> None:
         return MagicMock(returncode=0)
 
     with patch("harness.preflight.subprocess.run", side_effect=_run_spy):
-        out = fix_git_clean(dry_run=False)
+        out = fix_git_clean(dry_run=False, allow_stash=True)
     assert out.applied is True
     assert out.skipped is False
-    assert "Stashed your modified files" in out.message
+    assert "[STASHED]" in out.message
     assert "stash pop" in out.reversal
     # Verify both status + stash were invoked
     assert any("status" in c for c in calls)
     assert any("stash" in c for c in calls)
+
+
+def test_fix_git_clean_default_refuses_to_stash_without_allow_stash() -> None:
+    """W9-PREFLIGHT-FIX-NOSTASH (the safe default): dirty tree + no
+    --allow-stash returns a needs-attention outcome with no git stash."""
+    from harness.preflight import fix_git_clean
+    calls: list[list[str]] = []
+
+    def _run_spy(args, **kwargs):
+        calls.append(list(args))
+        if "status" in args:
+            return MagicMock(stdout=" M src/foo.py\n", returncode=0)
+        # Any stash invocation here would be a test failure
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("harness.preflight.subprocess.run", side_effect=_run_spy):
+        out = fix_git_clean(dry_run=False)  # allow_stash defaults False
+    assert out.applied is False
+    assert out.skipped is False
+    assert "--allow-stash" in out.message
+    assert "src/foo.py" in out.message
+    # Critical: stash NEVER invoked
+    assert all("stash" not in c for c in calls)
 
 
 def test_fix_pytest_cache_missing_is_skipped(
@@ -420,16 +446,19 @@ def test_fix_dead_engines_quarantines_and_reports_reversal(
 def test_run_fixes_invokes_all_three(monkeypatch) -> None:
     """run_fixes returns one FixOutcome per fix function in order."""
     from harness import preflight
+    # W9-PREFLIGHT-FIX-NOSTASH: fix_git_clean now takes allow_stash
+    # as well — accept arbitrary kwargs so the stub doesn't break on
+    # future signature additions either.
     monkeypatch.setattr(preflight, "fix_git_clean",
-                        lambda dry_run: preflight.FixOutcome(
+                        lambda **_: preflight.FixOutcome(
                             name="git_clean", applied=True, skipped=False,
                             message="g"))
     monkeypatch.setattr(preflight, "fix_pytest_cache",
-                        lambda dry_run: preflight.FixOutcome(
+                        lambda **_: preflight.FixOutcome(
                             name="pytest_cache", applied=True, skipped=False,
                             message="p"))
     monkeypatch.setattr(preflight, "fix_dead_engines",
-                        lambda dry_run: preflight.FixOutcome(
+                        lambda **_: preflight.FixOutcome(
                             name="dead_engines", applied=True, skipped=False,
                             message="d"))
     outcomes = preflight.run_fixes(dry_run=False)

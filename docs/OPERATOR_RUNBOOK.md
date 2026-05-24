@@ -51,9 +51,15 @@ harness preflight --fix
 This handles:
 
 1. **`[X] git_clean`** — you have modified files that haven't been
-   committed.  `--fix` runs `git stash`, which sets them aside.  You
-   can get them back later with `git stash pop` (the harness will
-   remind you).
+   committed.  By default `--fix` will **not** stash them silently
+   (W9-PREFLIGHT-FIX-NOSTASH — earlier silent stashes dropped
+   in-progress work).  Instead it names the modified files and asks
+   you to either:
+   - Resolve manually with `git commit` or `git stash push`, or
+   - Re-run as `harness preflight --fix --allow-stash` to opt in to
+     the legacy auto-stash.  When you opt in, the success line
+     starts with `[STASHED]` so the action is loud, and `git stash
+     pop` will bring your work back.
 2. **`[X] pytest_cache`** — leftover from someone's testing.  `--fix`
    clears it; pytest will rebuild on its next run.
 3. **`[!] dead_engines`** — one of the LLM engines stopped working

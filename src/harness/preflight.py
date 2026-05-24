@@ -453,13 +453,26 @@ class FixOutcome:
     reversal: str = ""     # How to undo the fix if the operator wants
 
 
-def fix_git_clean(*, dry_run: bool = False) -> FixOutcome:
-    """Auto-stash modified-tracked files so preflight's git_clean
-    check goes green.
+def fix_git_clean(*, dry_run: bool = False,
+                  allow_stash: bool = False) -> FixOutcome:
+    """Make preflight's git_clean check go green.
 
     Untracked files are left alone (operator may want to keep them
-    out of git on purpose).  Modified-tracked files are stashed
-    with a labeled message so the operator can pop them back later.
+    out of git on purpose).  Modified-tracked files are *NOT*
+    auto-stashed by default as of W9-PREFLIGHT-FIX-NOSTASH — silent
+    stash dropped in-progress work during W8 + 20/40 master-audit
+    reviewers flagged it as data loss.
+
+    Default behavior (allow_stash=False, the safe path):
+        - If working tree is dirty, return a needs-attention outcome
+          with a plain-language explanation pointing at `git stash`
+          / `git commit` for manual recovery.  No git mutation runs.
+
+    Opt-in legacy behavior (allow_stash=True):
+        - Stash modified-tracked files with a labeled message.  The
+          success outcome message starts with ``[STASHED]`` so the
+          operator sees it loud in the preflight log; the reversal
+          field carries the exact `git stash pop` command.
     """
     # Check whether there's anything to stash
     try:
@@ -473,14 +486,20 @@ def fix_git_clean(*, dry_run: bool = False) -> FixOutcome:
             message="Couldn't check git status — is git installed?",
             error=str(exc),
         )
-    porcelain = proc.stdout.strip()
-    if not porcelain:
+    # Don't .strip() the whole stdout — git porcelain leads each line
+    # with a 1-char index status + 1-char worktree status (often a
+    # space) + 1 space, then the filename.  Stripping at the string
+    # level would eat the leading space on line 1 and break the
+    # uniform "filename starts at column 3" assumption below.
+    porcelain_raw = proc.stdout
+    if not porcelain_raw.strip():
         return FixOutcome(
             name="git_clean", applied=False, skipped=True,
             message="Your working tree is already clean — nothing to fix.",
         )
+    porcelain_lines = [ln for ln in porcelain_raw.splitlines() if ln]
     has_modified = any(
-        not line.startswith("??") for line in porcelain.splitlines()
+        not line.startswith("??") for line in porcelain_lines
     )
     if not has_modified:
         return FixOutcome(
@@ -490,21 +509,51 @@ def fix_git_clean(*, dry_run: bool = False) -> FixOutcome:
                 "Untracked files don't block preflight — leaving them alone."
             ),
         )
+    modified_count = sum(
+        1 for line in porcelain_lines
+        if not line.startswith("??")
+    )
+
+    # W9-PREFLIGHT-FIX-NOSTASH 2026-05-24: refuse to stash unless the
+    # operator opted in via --allow-stash.  W8 hit silent data loss
+    # via an auto-stash that ran with no surface visibility; the
+    # master audit (20/40 reviewers) called this out as one of the
+    # top operator-facing surprises.  Default is now safe: name the
+    # files, point at manual recovery, do not mutate.
+    if not allow_stash:
+        # Build a short list of modified files for the message (cap 5
+        # so the line stays scannable; rest hinted at via the count).
+        modified_paths = [
+            line[3:] for line in porcelain_lines
+            if not line.startswith("??")
+        ][:5]
+        sample = ", ".join(modified_paths)
+        if modified_count > len(modified_paths):
+            sample += f", … (+{modified_count - len(modified_paths)} more)"
+        return FixOutcome(
+            name="git_clean", applied=False, skipped=False,
+            message=(
+                f"Found {modified_count} modified file(s): {sample}. "
+                f"Refusing to auto-stash by default (would silently "
+                f"drop in-progress work).  Resolve manually with "
+                f"`git stash push` or `git commit`, OR re-run with "
+                f"`harness preflight --fix --allow-stash` to opt in "
+                f"to the legacy auto-stash."
+            ),
+            reversal="git stash push  # or git commit",
+        )
+
     stash_msg = (
         f"harness preflight --fix auto-stash "
         f"{datetime.now(timezone.utc).isoformat()}"
     )
     if dry_run:
-        modified_count = sum(
-            1 for line in porcelain.splitlines()
-            if not line.startswith("??")
-        )
         return FixOutcome(
             name="git_clean", applied=False, skipped=False,
             message=(
-                f"Would stash {modified_count} modified file(s) with "
-                f"message '{stash_msg}'.  Re-run without --dry-run to "
-                f"apply.  You can recover the changes later with "
+                f"[STASHED preview] Would stash {modified_count} "
+                f"modified file(s) with message '{stash_msg}'.  Re-run "
+                f"without --dry-run to apply.  Recover later with "
                 f"`git stash pop`."
             ),
             reversal="git stash pop",
@@ -533,8 +582,8 @@ def fix_git_clean(*, dry_run: bool = False) -> FixOutcome:
     return FixOutcome(
         name="git_clean", applied=True, skipped=False,
         message=(
-            "Stashed your modified files.  Run `git stash pop` later "
-            "to bring them back.  Your working tree is clean now."
+            f"[STASHED] {modified_count} modified file(s) -> stash entry "
+            f"'{stash_msg}'.  Run `git stash pop` later to recover."
         ),
         reversal="git stash pop",
     )
@@ -686,15 +735,20 @@ def fix_dead_engines(*, dry_run: bool = False) -> FixOutcome:
     )
 
 
-def run_fixes(*, dry_run: bool = False) -> list[FixOutcome]:
+def run_fixes(*, dry_run: bool = False,
+              allow_stash: bool = False) -> list[FixOutcome]:
     """Run every auto-fix in series; return one FixOutcome per attempt.
 
     Order matters: git stash first (so subsequent fixes don't dirty
     the tree), then pytest cache (cheap), then dead engines (state
     file update — relies on the alarm module).
+
+    W9-PREFLIGHT-FIX-NOSTASH 2026-05-24: ``allow_stash`` opt-in
+    threads through to ``fix_git_clean``.  Default False (no
+    silent stash).  CLI flag: ``preflight --fix --allow-stash``.
     """
     return [
-        fix_git_clean(dry_run=dry_run),
+        fix_git_clean(dry_run=dry_run, allow_stash=allow_stash),
         fix_pytest_cache(dry_run=dry_run),
         fix_dead_engines(dry_run=dry_run),
     ]

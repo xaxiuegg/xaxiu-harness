@@ -1821,8 +1821,14 @@ def doctor_cmd(fmt: str) -> None:
 @click.option("--dry-run", is_flag=True, default=False,
               help="With --fix, preview what would change without "
               "applying.  No effect without --fix.")
+@click.option("--allow-stash", is_flag=True, default=False,
+              help="W9-PREFLIGHT-FIX-NOSTASH: opt in to the legacy "
+              "auto-stash behavior for the git_clean fix.  Without "
+              "this flag, --fix names the modified files and points "
+              "at manual recovery instead of silently stashing them.")
 def preflight_cmd(fmt: str, skip_engines: bool,
-                  fix_mode: bool, dry_run: bool) -> None:
+                  fix_mode: bool, dry_run: bool,
+                  allow_stash: bool) -> None:
     """Comprehensive autonomous-mode readiness gate.
 
     Runs ``harness doctor`` checks PLUS live engine probes, observer/
@@ -1871,7 +1877,7 @@ def preflight_cmd(fmt: str, skip_engines: bool,
         click.echo("=" * 60)
         if dry_run:
             click.echo("DRY RUN — showing what would happen, no changes applied.\n")
-        outcomes = run_fixes(dry_run=dry_run)
+        outcomes = run_fixes(dry_run=dry_run, allow_stash=allow_stash)
         for outcome in outcomes:
             if outcome.skipped:
                 glyph = "[OK]"
