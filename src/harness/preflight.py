@@ -136,6 +136,10 @@ def _check_observer_armed() -> PreflightCheck:
         )
     # The observer registers multiple tasks (Kimi cycle, DeepSeek retro,
     # chat audit).  Probe for any task starting with the prefix.
+    # W9-CLI-TIMEOUT-BUDGET 2026-05-24: tightened timeout 10 -> 5s +
+    # added explicit timeout-warn severity so the operator sees the
+    # degrade reason instead of a silent "no tasks registered".
+    timed_out = False
     try:
         proc = subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -143,12 +147,22 @@ def _check_observer_armed() -> PreflightCheck:
              f"$t = Get-ScheduledTask -TaskName '{TASK_NAME_PREFIX}*' "
              "-ErrorAction SilentlyContinue; "
              "if ($t) { ($t | Measure-Object).Count } else { 0 }"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=5,
         )
         count = int(proc.stdout.strip() or "0")
-    except (subprocess.TimeoutExpired, ValueError):
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        count = 0
+    except ValueError:
         count = 0
     duration = int((time.monotonic() - started) * 1000)
+    if timed_out:
+        return PreflightCheck(
+            name="observer", severity="warn",
+            message="observer probe timed out (5s); will retry next preflight",
+            duration_ms=duration,
+            fix="re-run preflight or run `harness observer scheduler-status`",
+        )
     if count == 0:
         return PreflightCheck(
             name="observer", severity="warn",

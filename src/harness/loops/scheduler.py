@@ -96,8 +96,14 @@ if ($Existing) {{
     return True, out or result.stderr.strip()
 
 
-def is_registered() -> bool:
-    """Return True iff ``XaxiuHarnessLoopTick`` is registered."""
+def is_registered(*, timeout_sec: float = 5.0) -> bool:
+    """Return True iff ``XaxiuHarnessLoopTick`` is registered.
+
+    W9-CLI-TIMEOUT-BUDGET 2026-05-24: bounded by ``timeout_sec``
+    (default 5s) and returns False on timeout instead of hanging
+    the caller.  The master-audit panel showed preflight + today
+    blowing past 30s when this check stalled under contention.
+    """
     ps = _pwsh()
     if ps is None:
         return False
@@ -105,9 +111,13 @@ def is_registered() -> bool:
         f"$t = Get-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction SilentlyContinue; "
         "if ($t) { 'YES' } else { 'NO' }"
     )
-    result = subprocess.run(
-        [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return "YES" in result.stdout
