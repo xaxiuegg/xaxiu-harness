@@ -315,3 +315,86 @@ def test_extract_anthropic_usage_returns_split_when_populated() -> None:
         "input_tokens": 30, "output_tokens": 40,
     }})
     assert out == (30, 40)
+
+
+# ===========================================================================
+# Kill `len(reasoning_chunks) > 0` mutation (line 450, KimiConcrete)
+# ===========================================================================
+# This is a new pattern added by W7-KIMI-REASONING-EMPTY.  The sweep's
+# gt_to_ge mutation hits this and is OBSERVABLE: under `>= 0`,
+# reasoning_only=True whenever content_chunks=[] (even with no
+# reasoning at all).  We catch by emitting a stream with usage_info
+# ONLY (parsed_anything=True via usage, content empty, reasoning empty).
+
+
+@pytest.fixture
+def kimi_engine_min(monkeypatch):
+    from harness.engines.concrete import KimiConcrete
+    monkeypatch.setattr(KimiConcrete, "__abstractmethods__", frozenset())
+
+    class _T(KimiConcrete):
+        name = "kimi"
+
+        def __init__(self, key: str) -> None:
+            self._api_key = key
+
+    return _T("kimi-key")
+
+
+def test_kimi_reasoning_only_false_when_only_usage_no_content_no_reasoning(
+    monkeypatch, kimi_engine_min
+) -> None:
+    """Mutation: `len(reasoning_chunks) > 0` → `>= 0` (always True).
+
+    Under the mutation, reasoning_only would flip to True whenever
+    content_chunks=[] — even when reasoning_chunks=[] too (a
+    usage-only response that has nothing to do with reasoning).
+    """
+    import httpx
+
+    def handler(request):
+        # SSE: usage block only, no content, no reasoning, no finish
+        sse = (
+            'data:{"choices":[{}],"usage":'
+            '{"prompt_tokens":10,"completion_tokens":0}}\n\n'
+            'data:[DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
+
+    monkeypatch.setattr(
+        httpx, "Client",
+        lambda **kw: _ORIGINAL_HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler))
+    )
+    resp = kimi_engine_min.dispatch("hi", "kimi-model", {})
+    assert resp.success is True  # usage_info makes parsed_anything True
+    assert resp.text == ""
+    assert resp.reasoning_only is False, (
+        "reasoning_only must be False when reasoning_chunks=[]; "
+        "under `>= 0` mutation it would become True for any "
+        "empty-content response — a false retry signal."
+    )
+
+
+def test_kimi_reasoning_only_false_when_only_finish_reason(
+    monkeypatch, kimi_engine_min
+) -> None:
+    """Sentinel for the same mutation: finish_reason alone (no
+    content, no reasoning) still must NOT set reasoning_only=True."""
+    import httpx
+
+    def handler(request):
+        sse = (
+            'data:{"choices":[{"finish_reason":"stop"}]}\n\n'
+            'data:[DONE]\n\n'
+        )
+        return httpx.Response(200, content=sse.encode("utf-8"))
+
+    monkeypatch.setattr(
+        httpx, "Client",
+        lambda **kw: _ORIGINAL_HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler))
+    )
+    resp = kimi_engine_min.dispatch("hi", "kimi-model", {})
+    assert resp.success is True
+    assert resp.reasoning_only is False
