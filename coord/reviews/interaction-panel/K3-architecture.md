@@ -1,0 +1,8 @@
+<!-- name=K3-architecture latency_ms=64496 error='' -->
+
+1. **W8-STATE-COMPRESSION** — collapse the JSONL and JSON artifact files into the existing SQLite schema, targeting the integrator’s write path (e.g., `harness/state/artifact_store.py` or equivalent). Reasoning: single_worker serializes execution, removing the last justification for fragmented file-based persistence; a unified ACID store gives the integrator atomic commits and the observer a single query surface, eliminating format drift and halving the stop-hook noise caused by scattered mtime updates.
+
+2. **Working:** The honest audit-STOP plus conditional backlog-lock pattern demonstrated in the W6→W7 panel transition. It prevents spec-shaping, enforces mutation kill-rate thresholds before features ship, and should remain the permanent quality gate.  
+**Not working:** Mtime-based sentinel hooks firing repeatedly during mutation sweeps because STATUS.csv drifts against touched files. Replace this with a content-addressed or batch-closed STATUS update so mutations do not trigger sentinel storms.
+
+3. The next waves should aim at three themes: **(a) unify state under one SQLite surface** so the dispatch+integrator+observer trinity shares a single source of truth; **(b) formalize a capability-aware dispatch registry** so the enforced single_worker is routed only to backends that support the required transport mode (SSE vs. batch) and reasoning budget; and **(c) promote the observer from passive sentinel to active operator surface** that can veto or recommend single_worker assignments based on real-time backend health and state-layer pressure.

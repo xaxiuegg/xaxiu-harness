@@ -1,0 +1,7 @@
+<!-- name=K2-test-quality-meta latency_ms=60850 error='' -->
+
+1. W8-MUTATION-CANARY / `proxy/dispatch.py`. Run a 3-mutant boundary spot-check (flip a timeout comparator, remove an empty-iterator guard, swap an and/or) against the existing test suite. A 0.0 kill rate confirms the same W6-A3 blind spot hides in the untouched modules; a >0 result lets you rotate the canary to `observer/hook.py`, `loops/scheduler.py`, and `dashboard/state.py` without ever paying for a full sweep. Behavioral coverage ≥3 is necessary but not sufficient—boundary mutants are the real survivors.
+
+2. WORKING: The honest audit-STOP paired with an external panel gate (W6 closeout → conditional backlog lock). It kills velocity bias and forces evidence-based unlocks; preserve exactly this mechanics. NOT WORKING: Defaulting to dense, full-module mutation sweeps when entering new territory. W6-A3 proved that is expensive and still left four modules unexamined. Replace with the rolling 1-file/3-mutant canary as the mandatory pre-sampler before any full sweep is budgeted.
+
+3. THEME: "Boundary-harden the untrusted perimeter." Aim the next 2–3 waves at moving from behavioral demonstration to boundary-condition kill verification in engine-adjacent modules (proxy, observer, loops, dashboard). Locate gaps via canary sampling, then surgically inject boundary-focused tests (timeouts, empty states, off-by-ones) and make the canary gate a standard pre-commit requirement.

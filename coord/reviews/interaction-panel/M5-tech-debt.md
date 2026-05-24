@@ -1,0 +1,9 @@
+<!-- name=M5-tech-debt latency_ms=17110 error='' -->
+
+1. **Single Next-Best Move**: Execute `W8-CONFIG-DRIFT-AUDIT`. The single most compounding debt is **configuration drift**—specifically, the disconnect between the pinned engine configurations in `config.py` (or equivalent) and the actual state of the engines referenced in `transport.py` and the updated `StreamingTransport` ABC. This drift is silent, multiplies with every new engine variant or parameter change, and will cause cascading failures in future validation waves. Fixing this before adding new features or observers is critical. A one-off audit row to snapshot, diff, and lock down the config against the known-good transport layer is the most debt-efficient move.
+
+2. **Working/Not-Working Patterns**:
+   *   **Working**: The **panel-synthesis + backlog-lock** approach (as seen with A3/MUTATION) is highly effective. It transforms a STOP into a structured, conditional continuation with clear gates. This should be the default response to ambiguous audit outcomes.
+   *   **Not Working**: The **stop-hook reactivity** around STATUS.csv is pure friction. It's a tax on focus. The pattern of constant acknowledgment and file-touching for mtime should be replaced by a more resilient observer (e.g., a debounce or a separate watcher process) or by relaxing the hook's sensitivity.
+
+3. **Next 2-3 Waves Theme**: **Solidify the Observability and Control Plane**. This means: 1) **Lock the configuration baseline** (as above), 2) **Promote the observer to a first-class, actionable surface** (not just alerts, but state queries and safe overrides), and 3) **Introduce a minimal, wave-local CI pipeline** (pre-commit hooks for lint/unit tests, and a wave-closeout script that runs the key validation suites and generates a immutable report). This theme pays down debt by making the system's state explicit and its operations repeatable.
