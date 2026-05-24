@@ -1363,15 +1363,159 @@ def adapter_list() -> None:
 
 @adapter.command(name="validate")
 @click.argument("project")
-def adapter_validate(project: str) -> None:
-    """Validate a project's harness-adapter.yaml."""
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="W11-ADAPTER-VALIDATE-JSON: emit machine-readable "
+                   "validation errors as JSON.  For agentic auto-correction "
+                   "loops; human callers use the default pretty output.")
+def adapter_validate(project: str, as_json: bool) -> None:
+    """Validate a project's harness-adapter.yaml.
+
+    W11-ADAPTER-VALIDATE-JSON 2026-05-25: ``--json`` mode emits a
+    structured payload that agents can parse + auto-correct from
+    without interpreting free-text human messages.  Schema:
+
+        {
+          "project": "<name>",
+          "status": "ok" | "error",
+          "errors": [
+            {
+              "field": "engines.kimi.timeout",
+              "line": null,
+              "severity": "error" | "warning",
+              "message": "<human-readable>",
+              "suggested_fix": "<actionable hint>"
+            },
+            ...
+          ]
+        }
+
+    Exit code: 0 = valid, 1 = errors present.
+    """
     try:
         load_project_adapter(project)
+        ok = True
+        errors: list[dict] = []
+        exc_for_pretty: Exception | None = None
     except Exception as exc:
-        click.echo(f"error: {exc}", err=True)
-        sys.exit(1)
-    click.echo(f"adapter for '{project}' is valid")
-    sys.exit(0)
+        ok = False
+        exc_for_pretty = exc
+        errors = _validate_exc_to_json_errors(exc)
+
+    if as_json:
+        payload = {
+            "project": project,
+            "status": "ok" if ok else "error",
+            "errors": errors,
+        }
+        click.echo(json.dumps(payload, indent=2, default=str))
+        sys.exit(0 if ok else 1)
+
+    # Pretty (legacy) output path
+    if ok:
+        click.echo(f"adapter for '{project}' is valid")
+        sys.exit(0)
+    click.echo(f"error: {exc_for_pretty}", err=True)
+    sys.exit(1)
+
+
+def _validate_exc_to_json_errors(exc: Exception) -> list[dict]:
+    """W11-ADAPTER-VALIDATE-JSON: convert validate exceptions to
+    structured error objects.  Handles Pydantic ValidationError,
+    yaml.YAMLError, and generic Exception with best-effort field
+    extraction."""
+    errors: list[dict] = []
+    # Pydantic ValidationError carries a structured .errors() list
+    try:
+        from pydantic import ValidationError as _PydanticVE
+    except ImportError:
+        _PydanticVE = None  # type: ignore
+    if _PydanticVE is not None and isinstance(exc, _PydanticVE):
+        for err in exc.errors():
+            field = ".".join(str(x) for x in err.get("loc", []))
+            err_type = err.get("type", "")
+            msg = err.get("msg", "")
+            input_val = err.get("input", None)
+            errors.append({
+                "field": field or "<root>",
+                "line": None,  # Pydantic doesn't track source line
+                "severity": "error",
+                "message": msg,
+                "suggested_fix": _suggest_fix_for_pydantic(
+                    field, err_type, input_val),
+            })
+        return errors
+    # yaml.YAMLError has .problem_mark with line/column
+    try:
+        import yaml as _yaml
+        if isinstance(exc, _yaml.YAMLError):
+            line = None
+            field = "<yaml-parse>"
+            mark = getattr(exc, "problem_mark", None)
+            if mark is not None:
+                line = mark.line + 1  # 1-based for humans
+            errors.append({
+                "field": field,
+                "line": line,
+                "severity": "error",
+                "message": str(exc),
+                "suggested_fix": (
+                    "Check YAML syntax at the indicated line — common "
+                    "causes: bad indentation, missing colon, unescaped "
+                    "special characters."
+                ),
+            })
+            return errors
+    except ImportError:
+        pass
+    # FileNotFoundError + ValueError + generic Exception
+    if isinstance(exc, FileNotFoundError):
+        errors.append({
+            "field": "<file>",
+            "line": None,
+            "severity": "error",
+            "message": f"adapter file not found: {exc}",
+            "suggested_fix": (
+                "Create adapters/<project>/harness-adapter.yaml.  Use "
+                "`harness adapter scaffold` or `harness adapter "
+                "from-description` to generate one."
+            ),
+        })
+        return errors
+    # Fallback: generic exception
+    errors.append({
+        "field": "<unknown>",
+        "line": None,
+        "severity": "error",
+        "message": str(exc),
+        "suggested_fix": (
+            "Examine the error message above; common causes: invalid "
+            "project name (must match ^[a-zA-Z0-9_-]{1,64}$), missing "
+            "engines block, malformed routing rule."
+        ),
+    })
+    return errors
+
+
+def _suggest_fix_for_pydantic(field: str, err_type: str,
+                              input_val: object) -> str:
+    """W11-ADAPTER-VALIDATE-JSON: actionable fix-hint per Pydantic
+    error type.  Falls back to a generic message."""
+    if "missing" in err_type:
+        return f"Add `{field}:` to the adapter YAML with a valid value."
+    if "type_error" in err_type or "type" in err_type:
+        actual_type = type(input_val).__name__ if input_val is not None else "null"
+        return (
+            f"Field `{field}` has wrong type (got {actual_type}); check "
+            f"the schema in spec/adapter-schema.md."
+        )
+    if "value_error" in err_type or "enum" in err_type:
+        return (
+            f"Field `{field}` has an unsupported value; consult "
+            f"spec/adapter-schema.md for allowed values."
+        )
+    if "regex" in err_type or "pattern" in err_type:
+        return f"Field `{field}` doesn't match the required pattern."
+    return f"Fix field `{field}` per spec/adapter-schema.md."
 
 
 @cli.command(name="dashboard-serve")
