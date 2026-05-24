@@ -25,6 +25,7 @@ def _append_progress(run_dir: Path, worker_id: str, event: dict) -> None:
         line = json.dumps({"ts": now_iso(), **event}, ensure_ascii=False)
         with open(progress_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass
 
@@ -173,6 +174,7 @@ def _heartbeat_touch(run_dir: Path, worker_id: str) -> None:
         import os, time
         now = time.time()
         os.utime(hb_path, (now, now))
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass
 

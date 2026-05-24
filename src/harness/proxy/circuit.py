@@ -150,6 +150,7 @@ def _write_flap_escalation(key_alias: str, now: datetime) -> None:
         }
         path = esc_dir / f"flap_{key_alias}_{ts}.json"
         path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass
 

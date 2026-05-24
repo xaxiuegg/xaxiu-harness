@@ -121,6 +121,7 @@ def audit(
     for line in tail:
         try:
             row = json.loads(line)
+        # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
         except Exception:
             continue
         if row.get("role") == "assistant" or row.get("type") == "assistant":

@@ -37,6 +37,25 @@ from harness.state import jsonl_log
 
 logger = logging.getLogger(__name__)
 
+
+# W9-SILENT-EXCEPTION-AUDIT 2026-05-24: every telemetry / log / cost-
+# ledger write in this module is wrapped to keep dispatch resilient
+# against logging-layer failures — a failed ledger insert MUST NOT
+# crash the active dispatch.  Previously each site swallowed
+# silently; this helper routes the failure through logger.debug so
+# diagnostic info is preserved while keeping the swallow.
+def _swallow_telemetry(label: str, exc: BaseException) -> None:
+    """Log + swallow a best-effort telemetry write failure.
+
+    Caller has already decided this exception MUST NOT propagate
+    (it's a logging/ledger/audit write, not a primary operation).
+    Log at DEBUG so the operator sees it under -v but the default
+    log volume stays clean.
+    """
+    logger.debug("dispatch telemetry swallowed [%s]: %s: %s",
+                 label, type(exc).__name__, exc)
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -227,8 +246,8 @@ def _audit_routing_change(
             old_value=old_value,
             new_value=new_value,
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        _swallow_telemetry("line249", _exc)
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +342,8 @@ def _remove_active_dispatch(dispatch_id: str) -> None:
         actives = state_files.read_active_dispatches()
         actives = [a for a in actives if a.dispatch_id != dispatch_id]
         state_files.write_active_dispatches(actives)
-    except Exception:
-        pass
+    except Exception as _exc:
+        _swallow_telemetry("line345", _exc)
 
 
 def _update_active_dispatch_fallback(
@@ -345,8 +364,8 @@ def _update_active_dispatch_fallback(
             else:
                 updated.append(a)
         state_files.write_active_dispatches(updated)
-    except Exception:
-        pass
+    except Exception as _exc:
+        _swallow_telemetry("line367", _exc)
 
 
 # ---------------------------------------------------------------------------
@@ -670,8 +689,8 @@ def dispatch_packet(
                 state_db.update_dispatch_status(
                     dispatch_id, "success", latency_ms=response.latency_ms
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("line692", _exc)
 
             _remove_active_dispatch(dispatch_id)
 
@@ -685,8 +704,8 @@ def dispatch_packet(
                     latency_ms=response.latency_ms,
                     fallback_to=None,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("line707", _exc)
 
             if wave_id is not None:
                 try:
@@ -696,8 +715,8 @@ def dispatch_packet(
                         wave_id=wave_id,
                         outcome="success",
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _swallow_telemetry("budget_record:success", _exc)
 
             # WIRE-BUDGET-VISIBILITY (2026-05-22): always record successful
             # dispatch to the budget ledger — including engine, model,
@@ -715,8 +734,8 @@ def dispatch_packet(
                     output_tokens=int(response.tokens_out or 0),
                     latency_ms=int(response.latency_ms or 0),
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("line737", _exc)
 
             return DispatchResult(
                 success=True,
@@ -740,8 +759,8 @@ def dispatch_packet(
                     current_engine,
                     {"status": "degraded", "last_fail": _now_iso()},
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("line762", _exc)
             # Keep local cache in sync for subsequent priority sorts.
             if h is not None:
                 h.status = "degraded"  # type: ignore[misc]
@@ -767,8 +786,8 @@ def dispatch_packet(
                         "all_fallbacks_exhausted",
                         latency_ms=response.latency_ms,
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _swallow_telemetry("line789", _exc)
 
                 _remove_active_dispatch(dispatch_id)
 
@@ -782,8 +801,8 @@ def dispatch_packet(
                         latency_ms=response.latency_ms,
                         fallback_to=None,
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _swallow_telemetry("line804", _exc)
 
                 if wave_id is not None:
                     try:
@@ -794,8 +813,8 @@ def dispatch_packet(
                             outcome="failure",
                             notes=f"locked_engine_failed: {response.error}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _swallow_telemetry("line816", _exc)
 
                 return DispatchResult(
                     success=False,
@@ -819,8 +838,8 @@ def dispatch_packet(
                     dispatch_id, "force_engine_failed_no_fallback",
                     latency_ms=response.latency_ms,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("update_dispatch_status:all_fallbacks", _exc)
             _remove_active_dispatch(dispatch_id)
             return DispatchResult(
                 success=False,
@@ -838,8 +857,8 @@ def dispatch_packet(
                     "all_fallbacks_exhausted",
                     latency_ms=response.latency_ms,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("line860", _exc)
 
             _remove_active_dispatch(dispatch_id)
 
@@ -853,8 +872,8 @@ def dispatch_packet(
                     latency_ms=response.latency_ms,
                     fallback_to=None,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _swallow_telemetry("line875", _exc)
 
             if wave_id is not None:
                 try:
@@ -865,8 +884,8 @@ def dispatch_packet(
                         outcome="failure",
                         notes=f"all_fallbacks_exhausted: {response.error}",
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _swallow_telemetry("line887", _exc)
 
             return DispatchResult(
                 success=False,
@@ -889,8 +908,8 @@ def dispatch_packet(
                 to_backend=next_engine,
                 reason=reason,
             )
-        except Exception:
-            pass
+        except Exception as _exc:
+            _swallow_telemetry("line911", _exc)
 
         try:
             jsonl_log.write_log_entry(
@@ -902,8 +921,8 @@ def dispatch_packet(
                 latency_ms=response.latency_ms,
                 fallback_to=next_engine,
             )
-        except Exception:
-            pass
+        except Exception as _exc:
+            _swallow_telemetry("line924", _exc)
 
         # W6-C2 2026-05-23: dead-engine alarm.  After each per-engine
         # failure, check whether ``current_engine`` has hit the 5-in-a-row
@@ -914,8 +933,8 @@ def dispatch_packet(
             is_dead, streak, transition = check_engine_alarm(current_engine)
             if transition:
                 fire_dead_engine_alarm(current_engine, streak)
-        except Exception:
-            pass
+        except Exception as _exc:
+            _swallow_telemetry("line936", _exc)
 
         _update_active_dispatch_fallback(dispatch_id, next_engine)
 

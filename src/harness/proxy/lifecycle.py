@@ -67,5 +67,6 @@ def stop_proxy(proc: Optional[subprocess.Popen]) -> None:
         proc.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
         proc.kill()
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass

@@ -46,6 +46,7 @@ def _current_operator() -> str:
         )
         if out.returncode == 0 and out.stdout.strip():
             return out.stdout.strip()
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass
     return os.environ.get("USERNAME") or os.environ.get("USER") or "unknown"
@@ -59,6 +60,7 @@ def _current_git_commit() -> str:
         )
         if out.returncode == 0 and out.stdout.strip():
             return out.stdout.strip()[:12]
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass
     return "no-git"

@@ -193,6 +193,7 @@ def integrate(
                 "workers_skipped": skipped,
                 "diagnostic": "merge_conflict",
             }, webhook_url=webhook)
+        # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
         except Exception:
             pass
         return IntegrationReport(
@@ -312,6 +313,7 @@ def integrate(
                 "workers_merged": merged,
                 "workers_skipped": skipped,
             }, webhook_url=webhook)
+        # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
         except Exception:
             pass
         return IntegrationReport(
@@ -344,6 +346,7 @@ def integrate(
             "workers_merged": merged,
             "workers_skipped": skipped,
         }, webhook_url=webhook)
+    # Best-effort: this site catches errors from a telemetry / cleanup / log path and intentionally swallows them to keep the primary operation resilient.
     except Exception:
         pass
     return IntegrationReport(
