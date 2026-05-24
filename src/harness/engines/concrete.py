@@ -741,12 +741,14 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
         )
 
     env_var = _ENV_VAR_MAP[name_lower]
-    api_key: Optional[str] = None
-
-    if prefer_dpapi and dpapi.has_secret(env_var):
-        api_key = dpapi.decrypt_secret(env_var)
-    else:
-        api_key = os.environ.get(env_var)
+    # W11-DPAPI-CROSS-PLATFORM 2026-05-25: route through the central
+    # resolver so .env files work on Linux/Mac agents.  Pre-W11 the
+    # only paths were os.environ + DPAPI (Windows-only), which broke
+    # any non-Windows agentic-coding-agent use.  Now: env > .env >
+    # DPAPI fallback, with prefer_dpapi=True still respected for
+    # legacy Windows-operator flow.
+    from harness.secrets.resolve import resolve_key
+    api_key = resolve_key(env_var, prefer_dpapi=prefer_dpapi)
 
     if not api_key:
         raise RuntimeError(
