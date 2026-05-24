@@ -1932,6 +1932,17 @@ def preflight_cmd(fmt: str, skip_engines: bool,
             f"  {ok_count} ok, {warn_count} warn, {fail_count} fail "
             f"in {elapsed_ms}ms"
         )
+        # W10-PREFLIGHT-EXIT-CODE-SEMANTICS 2026-05-25: print a plain-
+        # language verdict line so the non-technical operator
+        # immediately sees whether the bottom line is GO / GO-WITH-
+        # NOTES / STOP, instead of having to interpret a bare exit
+        # code (35/40 of the W9 master-audit reviewers called this
+        # out; the W9 readiness panel also cited it).
+        from harness.preflight import verdict_label as _verdict
+        _code = overall_exit_code(results)
+        _label, _explanation = _verdict(_code)
+        click.echo(f"\n  Verdict: {_label}  (exit code {_code})")
+        click.echo(f"  {_explanation}")
 
     sys.exit(overall_exit_code(results))
 

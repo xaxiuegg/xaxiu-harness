@@ -98,6 +98,22 @@ with `--format json` to capture per-check timings.
 
 ---
 
+## Reading the `preflight` verdict
+
+`harness preflight` prints a verdict line after the per-check
+listing.  The three possible verdicts:
+
+| Verdict | Exit code | What it means |
+|---|---|---|
+| **PASS** | 0 | All checks green; you can run autonomous mode. |
+| **PASS-WITH-WARNINGS** | 1 | At least one warn-level check fired.  Still ok to proceed; the warnings are actionable (look for `fix:` hints under each warning line). |
+| **FAIL** | 4 | A hard blocker — DPAPI unreadable, config invalid, etc.  Autonomous mode refuses to start; fix the failing check before continuing. |
+
+If you see exit 1 in a script or CI, do NOT treat it as a failure
+on its own — the verdict line tells you whether to proceed.
+
+---
+
 ## When something looks weird
 
 These three commands answer "what's the harness doing?":

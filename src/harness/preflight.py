@@ -431,12 +431,51 @@ def run_all(max_workers: int = 8) -> list[PreflightCheck]:
 
 
 def overall_exit_code(results: list[PreflightCheck]) -> int:
-    """Return CLI exit code based on worst severity across results."""
+    """Return CLI exit code based on worst severity across results.
+
+    Exit code semantics (W10-PREFLIGHT-EXIT-CODE-SEMANTICS, also
+    documented in :func:`verdict_label`):
+
+      0  All checks ok — autonomous mode green-lit
+      1  At least one warn — actionable; autonomous mode CAN override
+      4  At least one fail — autonomous mode BLOCKED
+
+    Operator-readiness: non-technical operators historically read
+    "exit 1" as FAIL when the harness intends "warning, still ok to
+    proceed".  The CLI now prints :func:`verdict_label` so the
+    operator sees the meaning explicitly, not just the number.
+    """
     if any(r.severity == "fail" for r in results):
         return 4
     if any(r.severity == "warn" for r in results):
         return 1
     return 0
+
+
+def verdict_label(exit_code: int) -> tuple[str, str]:
+    """Translate an exit code into (short_verdict, operator_explanation).
+
+    Designed to print under the per-check listing so the non-technical
+    operator immediately knows whether the bottom-line is GO / GO-WITH-
+    NOTES / STOP, rather than having to interpret a bare integer.
+
+    Mapping:
+        0 -> ("PASS",               "All checks green — autonomous mode is ready.")
+        1 -> ("PASS-WITH-WARNINGS", "Warnings noted — actionable; autonomous mode can still proceed.")
+        4 -> ("FAIL",               "Hard blocker — autonomous mode refuses to start.")
+        *  -> ("UNKNOWN",           "Unrecognized exit code; report this to engineering.")
+    """
+    if exit_code == 0:
+        return ("PASS",
+                "All checks green — autonomous mode is ready.")
+    if exit_code == 1:
+        return ("PASS-WITH-WARNINGS",
+                "Warnings noted — actionable; autonomous mode can still proceed.")
+    if exit_code == 4:
+        return ("FAIL",
+                "Hard blocker — autonomous mode refuses to start.")
+    return ("UNKNOWN",
+            f"Unrecognized exit code {exit_code}; report this to engineering.")
 
 
 # ---------------------------------------------------------------------------
