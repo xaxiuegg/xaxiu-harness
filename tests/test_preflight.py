@@ -237,6 +237,207 @@ def test_run_all_returns_sorted_results(monkeypatch) -> None:
     assert names == ["aaa", "mmm", "zzz"]
 
 
+# ---------------------------------------------------------------------------
+# W8-PREFLIGHT-FIX — auto-remediation
+# ---------------------------------------------------------------------------
+
+
+def test_fix_git_clean_no_modifications_is_skipped() -> None:
+    """When the working tree is already clean, fix_git_clean returns
+    a skipped outcome with plain-language confirmation — no git stash
+    is attempted."""
+    from harness.preflight import fix_git_clean
+    with patch("harness.preflight.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        out = fix_git_clean(dry_run=False)
+    assert out.skipped is True
+    assert out.applied is False
+    assert "already clean" in out.message.lower()
+    # The 1 call was the status check; no stash command issued
+    assert mock_run.call_count == 1
+
+
+def test_fix_git_clean_untracked_only_is_skipped() -> None:
+    """Untracked files don't block preflight; leave them alone."""
+    from harness.preflight import fix_git_clean
+    with patch("harness.preflight.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            stdout="?? src/new.py\n?? tests/new.py\n", returncode=0,
+        )
+        out = fix_git_clean(dry_run=False)
+    assert out.skipped is True
+    assert "untracked" in out.message.lower()
+
+
+def test_fix_git_clean_dry_run_does_not_stash() -> None:
+    """--dry-run shows what would happen without running git stash."""
+    from harness.preflight import fix_git_clean
+    with patch("harness.preflight.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            stdout=" M src/foo.py\n M src/bar.py\n", returncode=0,
+        )
+        out = fix_git_clean(dry_run=True)
+    assert out.applied is False
+    assert out.skipped is False
+    assert "Would stash 2" in out.message
+    assert "stash pop" in out.message
+    # Only 1 subprocess call: the porcelain check (no stash push)
+    assert mock_run.call_count == 1
+
+
+def test_fix_git_clean_applies_stash_when_modified_present() -> None:
+    """Real fix: modified files get stashed with a labeled message."""
+    from harness.preflight import fix_git_clean
+    calls: list[list[str]] = []
+
+    def _run_spy(args, **kwargs):
+        calls.append(list(args))
+        if "status" in args:
+            return MagicMock(stdout=" M src/foo.py\n", returncode=0)
+        if "stash" in args:
+            return MagicMock(stdout="Saved working directory", returncode=0,
+                             stderr="")
+        return MagicMock(returncode=0)
+
+    with patch("harness.preflight.subprocess.run", side_effect=_run_spy):
+        out = fix_git_clean(dry_run=False)
+    assert out.applied is True
+    assert out.skipped is False
+    assert "Stashed your modified files" in out.message
+    assert "stash pop" in out.reversal
+    # Verify both status + stash were invoked
+    assert any("status" in c for c in calls)
+    assert any("stash" in c for c in calls)
+
+
+def test_fix_pytest_cache_missing_is_skipped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """No cache file → nothing to clear, plain-language explanation."""
+    from harness import preflight
+    monkeypatch.setattr(preflight, "PYTEST_CACHE", tmp_path / "no-such-file")
+    out = preflight.fix_pytest_cache(dry_run=False)
+    assert out.skipped is True
+    assert "no pytest cache" in out.message.lower()
+
+
+def test_fix_pytest_cache_empty_is_skipped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Already-empty cache → skipped."""
+    from harness import preflight
+    fake = tmp_path / "lastfailed"
+    fake.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(preflight, "PYTEST_CACHE", fake)
+    out = preflight.fix_pytest_cache(dry_run=False)
+    assert out.skipped is True
+
+
+def test_fix_pytest_cache_clears_real_failures(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Populated cache → applied; file is now empty {}."""
+    from harness import preflight
+    fake = tmp_path / "lastfailed"
+    fake.write_text('{"tests/test_foo.py::test_bar": true}',
+                    encoding="utf-8")
+    monkeypatch.setattr(preflight, "PYTEST_CACHE", fake)
+    out = preflight.fix_pytest_cache(dry_run=False)
+    assert out.applied is True
+    assert fake.read_text(encoding="utf-8") == "{}"
+    assert "Cleared" in out.message
+
+
+def test_fix_pytest_cache_dry_run_does_not_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from harness import preflight
+    fake = tmp_path / "lastfailed"
+    fake.write_text('{"tests/test_foo.py::test_bar": true}',
+                    encoding="utf-8")
+    monkeypatch.setattr(preflight, "PYTEST_CACHE", fake)
+    out = preflight.fix_pytest_cache(dry_run=True)
+    assert out.applied is False
+    assert out.skipped is False
+    # File still has its original content
+    assert "test_bar" in fake.read_text(encoding="utf-8")
+
+
+def test_fix_dead_engines_all_healthy_is_skipped(monkeypatch) -> None:
+    """No dead engines → skipped with friendly confirmation."""
+    from harness import preflight
+    monkeypatch.setattr("harness.engine_alarm.dead_engines", lambda: {})
+    out = preflight.fix_dead_engines(dry_run=False)
+    assert out.skipped is True
+    assert "below the failure threshold" in out.message.lower()
+
+
+def test_fix_dead_engines_dry_run_lists_engines_without_quarantining(
+    monkeypatch
+) -> None:
+    from harness import preflight
+    monkeypatch.setattr(
+        "harness.engine_alarm.dead_engines",
+        lambda: {"kimi": 7, "mimo": 5},
+    )
+    # If we accidentally call update_engine_health in dry-run, that's a bug
+    update_calls: list = []
+    monkeypatch.setattr(
+        "harness.state.files.update_engine_health",
+        lambda *args, **kwargs: update_calls.append((args, kwargs)),
+    )
+    out = preflight.fix_dead_engines(dry_run=True)
+    assert out.applied is False
+    assert out.skipped is False
+    assert "kimi" in out.message
+    assert "mimo" in out.message
+    assert update_calls == []
+
+
+def test_fix_dead_engines_quarantines_and_reports_reversal(
+    monkeypatch
+) -> None:
+    from harness import preflight
+    monkeypatch.setattr(
+        "harness.engine_alarm.dead_engines",
+        lambda: {"kimi": 7},
+    )
+    update_calls: list = []
+    monkeypatch.setattr(
+        "harness.state.files.update_engine_health",
+        lambda name, fields: update_calls.append((name, fields)),
+    )
+    out = preflight.fix_dead_engines(dry_run=False)
+    assert out.applied is True
+    assert "Quarantined" in out.message
+    assert "harness engines reset" in out.reversal
+    # Verify the engine health update was called
+    assert len(update_calls) == 1
+    assert update_calls[0][0] == "kimi"
+    assert update_calls[0][1]["status"] == "quarantined"
+
+
+def test_run_fixes_invokes_all_three(monkeypatch) -> None:
+    """run_fixes returns one FixOutcome per fix function in order."""
+    from harness import preflight
+    monkeypatch.setattr(preflight, "fix_git_clean",
+                        lambda dry_run: preflight.FixOutcome(
+                            name="git_clean", applied=True, skipped=False,
+                            message="g"))
+    monkeypatch.setattr(preflight, "fix_pytest_cache",
+                        lambda dry_run: preflight.FixOutcome(
+                            name="pytest_cache", applied=True, skipped=False,
+                            message="p"))
+    monkeypatch.setattr(preflight, "fix_dead_engines",
+                        lambda dry_run: preflight.FixOutcome(
+                            name="dead_engines", applied=True, skipped=False,
+                            message="d"))
+    outcomes = preflight.run_fixes(dry_run=False)
+    assert [o.name for o in outcomes] == ["git_clean", "pytest_cache",
+                                          "dead_engines"]
+    assert all(o.applied for o in outcomes)
+
+
 def test_run_all_isolates_check_failures(monkeypatch) -> None:
     """A check that raises is reported as a fail-severity result, not
     propagated to the caller."""

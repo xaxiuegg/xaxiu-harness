@@ -1800,7 +1800,16 @@ def doctor_cmd(fmt: str) -> None:
               help="Output format.")
 @click.option("--skip-engines", is_flag=True, default=False,
               help="Skip live engine probes (offline mode).")
-def preflight_cmd(fmt: str, skip_engines: bool) -> None:
+@click.option("--fix", "fix_mode", is_flag=True, default=False,
+              help="W8-PREFLIGHT-FIX: auto-remediate the three common "
+              "failures (dirty git → stash, stale pytest cache → "
+              "clear, dead engines → quarantine).  Then re-run "
+              "preflight to confirm.")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="With --fix, preview what would change without "
+              "applying.  No effect without --fix.")
+def preflight_cmd(fmt: str, skip_engines: bool,
+                  fix_mode: bool, dry_run: bool) -> None:
     """Comprehensive autonomous-mode readiness gate.
 
     Runs ``harness doctor`` checks PLUS live engine probes, observer/
@@ -1839,6 +1848,46 @@ def preflight_cmd(fmt: str, skip_engines: bool) -> None:
     else:
         results = run_all()
     elapsed_ms = int((time.monotonic() - started) * 1000)
+
+    # W8-PREFLIGHT-FIX: --fix runs the auto-remediation pass, then
+    # re-runs preflight to confirm.  Output is plain-language for the
+    # non-technical operator (per readiness-panel feedback 8/10 vote).
+    if fix_mode:
+        from harness.preflight import run_fixes
+        click.echo("harness preflight --fix — auto-remediation")
+        click.echo("=" * 60)
+        if dry_run:
+            click.echo("DRY RUN — showing what would happen, no changes applied.\n")
+        outcomes = run_fixes(dry_run=dry_run)
+        for outcome in outcomes:
+            if outcome.skipped:
+                glyph = "[OK]"
+                label = "ok"
+            elif outcome.applied:
+                glyph = "[FIXED]"
+                label = "applied"
+            elif outcome.error:
+                glyph = "[X]"
+                label = "error"
+            else:
+                glyph = "[!]"
+                label = "preview" if dry_run else "needs attention"
+            click.echo(f"  {glyph} {outcome.name:<16} {outcome.message}")
+            if outcome.error:
+                click.echo(f"           error: {outcome.error}")
+            if outcome.reversal and outcome.applied:
+                click.echo(f"           undo: {outcome.reversal}")
+        click.echo("=" * 60)
+        if dry_run:
+            click.echo("Preview only — nothing changed.  Re-run without "
+                       "--dry-run to apply.")
+            sys.exit(0)
+        # Re-run preflight to confirm the fixes landed
+        click.echo("\nRe-running preflight to confirm...")
+        results = run_all() if not skip_engines else [
+            r for r in run_all() if not r.name.startswith("engine:")
+        ]
+        elapsed_ms = int((time.monotonic() - started) * 1000)
 
     if fmt == "json":
         click.echo(json.dumps({
