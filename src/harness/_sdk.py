@@ -126,28 +126,84 @@ def dispatch(prompt: str,
 def retrieve(dispatch_id: str,
              scope: RetrieveScope = "summary",
              *,
-             chunk_size_tokens: int = 2000) -> str | list[str]:
+             chunk_size_tokens: int = 2000,
+             project_root: str | None = None) -> str | list[str]:
     """Fetch a stored dispatch result on-demand.
+
+    W11-RETRIEVE-API 2026-05-25: reads from the dispatch cache that
+    W11-CONTEXT-FRUGAL-RETURN-LAZY populates on every successful
+    dispatch.  Cache lives at <project_root>/.harness/dispatched/
+    <dispatch_id>.json.
 
     Args:
         dispatch_id: The id from a prior DispatchResult.dispatch_id.
         scope: "summary" (≤300-char extract; cheap), "full" (entire
             text; burns context proportional to size), or "chunks"
             (list of chunk_size_tokens-token strings for paginated read).
-        chunk_size_tokens: Only used with scope="chunks".
+        chunk_size_tokens: Only used with scope="chunks".  Default
+            2000 tokens (~8000 chars assuming 4 chars/token).
+        project_root: Override the project root (defaults to cwd).
 
     Returns:
         - scope="summary" or "full" -> str
         - scope="chunks" -> list[str]
 
     Raises:
-        ResultNotFoundError: id not in dispatch store
-        ResultCorruptedError: stored result is malformed
+        ResultNotFoundError: dispatch_id not in cache
+        ResultCorruptedError: stored payload is malformed / missing expected fields
+        ValueError: invalid scope
     """
-    raise NotImplementedError(
-        "harness.retrieve() is pending W11-PYTHON-SDK-API-IMPL + "
-        "W11-RETRIEVE-API (Wave 11-D)."
-    )
+    if scope not in ("summary", "full", "chunks"):
+        raise ValueError(
+            f"unknown scope {scope!r}; allowed: 'summary', 'full', 'chunks'"
+        )
+    from pathlib import Path
+    from harness.engines import dispatch_cache as _dc
+    pr = Path(project_root) if project_root else None
+    payload = _dc.lookup_by_id(dispatch_id, project_root=pr,
+                                ttl_sec=0)  # ttl=0 = no expiry on retrieve
+    if payload is None:
+        raise ResultNotFoundError(
+            f"no cached dispatch for id={dispatch_id!r}; either it "
+            f"never ran, the cache was cleared, or you're looking in "
+            f"the wrong project_root (default cwd)."
+        )
+    if not isinstance(payload, dict):
+        raise ResultCorruptedError(
+            f"cached payload for {dispatch_id!r} is not a dict: "
+            f"{type(payload).__name__}"
+        )
+    # Sentinel distinguishes "key absent" (corruption) from
+    # "key present with empty value" (zero-length response).
+    _MISSING = object()
+    full_text = payload.get("full_text", _MISSING)
+    summary_text = payload.get("summary", _MISSING)
+    if scope == "summary":
+        if summary_text is _MISSING:
+            raise ResultCorruptedError(
+                f"cached payload for {dispatch_id!r} missing 'summary' field"
+            )
+        return summary_text
+    if scope == "full":
+        if full_text is _MISSING:
+            raise ResultCorruptedError(
+                f"cached payload for {dispatch_id!r} missing 'full_text' field"
+            )
+        return full_text
+    # scope == "chunks"
+    if full_text is _MISSING:
+        raise ResultCorruptedError(
+            f"cached payload for {dispatch_id!r} missing 'full_text' field"
+        )
+    # Approximate: 1 token ≈ 4 chars (English text).  Minimum 1 char so
+    # tests + tiny dispatches don't fall into a single-floor lump.
+    chunk_size_chars = max(1, chunk_size_tokens * 4)
+    chunks: list[str] = []
+    pos = 0
+    while pos < len(full_text):
+        chunks.append(full_text[pos:pos + chunk_size_chars])
+        pos += chunk_size_chars
+    return chunks
 
 
 def budget_status() -> dict:

@@ -159,11 +159,11 @@ def test_dispatch_stub_raises_notimplemented_with_pointer():
            "Wave 11-D" in str(exc_info.value)
 
 
-def test_retrieve_stub_raises_notimplemented_with_pointer():
-    with pytest.raises(NotImplementedError) as exc_info:
-        harness.retrieve("any-id")
-    assert "W11-RETRIEVE-API" in str(exc_info.value) or \
-           "W11-PYTHON-SDK-API-IMPL" in str(exc_info.value)
+def test_retrieve_implemented_raises_result_not_found_on_missing_id(tmp_path):
+    """W11-RETRIEVE-API 2026-05-25: retrieve() now IMPLEMENTED.
+    Replaces the prior stub-raises-NotImplementedError test."""
+    with pytest.raises(harness.ResultNotFoundError):
+        harness.retrieve("never-existed", project_root=str(tmp_path))
 
 
 def test_budget_status_stub_raises_notimplemented_with_pointer():
