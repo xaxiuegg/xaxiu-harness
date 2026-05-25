@@ -1,0 +1,44 @@
+Source pack: 97121 chars (24280 approx tokens)
+
+=== T9: panel-size prompt (97247 chars) SEQUENTIAL ===
+  OK in 50.5s
+  tokens in/out: 27778/2343
+  text len: 1742 chars
+  preview: '## Top 3 SHIP items\n\n1. **Ship `W13-INSTALL-VERIFY`** — Closes the biggest unverified risk in the entire plan: whether `pip install -e .` works end-to-end on a clean machine. The AGENT_QUICKSTART prom'
+
+=== T10: 3 concurrent dispatches of T9 prompt ===
+  [#1] OK  40.7s
+  [#2] OK  41.4s
+  [#3] OK  44.7s
+  total wall: 45s
+
+=== T11: panel-size prompt, max_tokens=8000, SEQUENTIAL ===
+  FAIL in 60.8s
+  exception: RemoteProtocolError
+  http_status: None
+  msg: Server disconnected without sending a response.
+
+=== T12-25KB: incremental size (max_tokens=2000) ===
+  OK in 57.0s
+  tokens in/out: 7343/701
+  text len: 1640 chars
+  preview: 'Based on the two documents, here is a 5-bullet summary:\n\n*   **Current Project Status**: The project (xaxiu-harness) is at a release candidate stage (`v1.0.0-rc.1`) with a proven SDK, a panel-approved'
+
+=== T12-50KB: incremental size (max_tokens=2000) ===
+  FAIL in 60.8s
+  exception: RemoteProtocolError
+  http_status: None
+  msg: Server disconnected without sending a response.
+
+=== T12-75KB: incremental size (max_tokens=2000) ===
+  FAIL in 60.8s
+  exception: RemoteProtocolError
+  http_status: None
+  msg: Server disconnected without sending a response.
+
+=== T12-100KB: incremental size (max_tokens=2000) ===
+  OK in 52.2s
+  tokens in/out: 27755/911
+  text len: 1842 chars
+  preview: "Based on the provided documents, here is a 5-bullet summary of the xaxiu-harness project's current state and strategic direction:\n\n- **Project Status:** The harness is at `v1.0.0-rc.1` with a proven P"
+
