@@ -306,10 +306,14 @@ def test_morning_brief_dry_run_emits_context_packet(
     """W5-RR: --dry-run prints the context packet that WOULD be dispatched,
     no engine call, exit 0."""
     monkeypatch.chdir(tmp_path)
-    # Seed minimal STATUS.csv so the context isn't empty
+    # Seed minimal STATUS.csv so the context isn't empty.  The impl filters
+    # STATUS.csv to today's or yesterday's UTC date (cli.py morning-brief),
+    # so we compute the seed date dynamically — a hardcoded date bit-rots
+    # the moment we cross past its yesterday window.
+    from datetime import datetime, timezone
     (tmp_path / "coord").mkdir()
     status_csv = tmp_path / "coord" / "STATUS.csv"
-    today = "2026-05-23"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     status_csv.write_text(
         f"ID,Category,Title,Status,Owner,Effort,Updated,Notes\n"
         f"W5-TEST,Production,Test row,shipped,Claude,~10 min,{today},Test notes\n",

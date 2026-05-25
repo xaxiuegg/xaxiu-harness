@@ -22,7 +22,7 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 ## Where we are right now (as of 2026-05-25)
 
 **Tag**: `v1.0.0-rc.1` (working toward `v1.0.0` final)
-**Tests**: 2314 passed, 1 pre-existing failure (`W13-MORNING-BRIEF-CONTEXT-BUG`)
+**Tests**: 2360 passed, 6 skipped (slow-marked install-verify), 0 failed
 **Budget**: well under $5/session cap
 
 ### Shipped this week (Week 1 of the panel plan)
@@ -33,7 +33,8 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 | Mon | W13-INSTALL-VERIFY (universal #1 panel pick) | shipped | `014390d` |
 | Tue | W13-AUDIT-JSONL + secret redaction (universal #2 panel pick) | shipped | `cbd6ae3` |
 | Wed-Thu | `harness.review()` SDK + `harness.capabilities()` SDK + Tier 1 Shifts A+F (auto-lens-set + safe-floor max_tokens) | shipped | `81411a4` |
-| Thu (bonus) | Doc-refresh + `tests/test_docs_mention_all_sdk_fns.py` (symmetric CI gate) + `harness plan show` verb | shipped | this commit |
+| Thu (bonus) | Doc-refresh + `tests/test_docs_mention_all_sdk_fns.py` (symmetric CI gate) + `harness plan show` verb | shipped | `4317fe8` |
+| Fri | `W13-MORNING-BRIEF-CONTEXT-BUG` test fix + broaden `.harness/` + stop-hook gitignore | shipped | this commit |
 
 ---
 
@@ -41,10 +42,9 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 ### Immediate (today / tomorrow)
 
-1. **Friday re-run panel** — fire the same 3-engine (Kimi + DeepSeek + MiMo) panel against the v1.0.0-rc.1 state.
+1. **Friday re-run panel** — fire the same 3-engine (Kimi + DeepSeek + MiMo) panel against the v1.0.0-rc.1 state, now with a fully green 2360/2360 suite.
    - If ≥80% APPROVE → tag `v1.0.0` final.
    - If <80% → fix specific blockers called out by the panel, then re-run.
-2. Clean up `W13-MORNING-BRIEF-CONTEXT-BUG` (pre-existing test failure, tracked in STATUS.csv, ~30min-1h).
 
 ### Week 2 — Operations Hardening (~6-8h)
 

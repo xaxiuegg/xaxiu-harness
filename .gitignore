@@ -11,8 +11,9 @@ dist/
 .ruff_cache/
 
 /state/
-.harness/proxy_state.json
-.harness/worktrees/
+# Per-machine harness runtime: proxy state, backups, dispatch cache, worktrees.
+# Everything under .harness/ is local — never committed.
+.harness/
 runs/
 *.db
 *.jsonl
@@ -59,3 +60,6 @@ coord/STATUS.csv.bak
 
 # Panic-dump test artifacts (left by `harness panic-dump --target-dir tmp_panic`)
 tmp_panic/
+
+# Claude Code stop-hook timestamp — per-machine, written by hook on session stop
+.claude/.stop-hook-last-fire
