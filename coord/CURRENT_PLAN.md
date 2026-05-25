@@ -27,13 +27,34 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 ## What's next
 
-### Immediate — Week 2 Operations Hardening (~6-8h)
+### Operator engine-budget commitment (2026-05-25 evening)
+
+After Kimi termination + strategic eval, operator committed to a $195/mo split:
+- **Claude Code (direct, not via harness): $100/mo** — Max base tier, daily interactive coding
+- **MiMo Token Plan Standard: $15/mo** — through harness, multi-engine panel + dispatch
+- **DeepSeek PAYG: $30/mo** — through harness, primary dispatch
+- **3rd engine: $50/mo** — through harness, diversification slot
+  - **Recommended pick: GLM-5.1 PAYG** ($0.60/$2.00 per M tokens, ~38M tokens/mo at $50, open-weight MIT, OpenAI+Anthropic API compat, 77.8% SWE-bench Verified)
+  - Alternative: Gemini Pro PAYG (~9M tokens/mo, Western-provider diversity hedge)
+
+This commitment **reverses the previous "pause + observe" recommendation** ([EVALUATION.md](reviews/post-kimi-strategic-eval/EVALUATION.md)) — the harness IS now load-bearing because it's the thing that coordinates the multi-engine pool. Resume W14 work.
+
+### Immediate — Engine-budget-enablement (~8-10h)
 
 | Row | Effort | Why |
 |---|---|---|
-| W13-BACKUP-SECRETS-REDACT + W13-BACKUP-INTEGRITY (SHA256 verify) | M (3-4h) | DeepSeek panel finding: backup tar may contain API keys; restore must verify integrity |
-| CI doc-doc-sync gate | S (1h) | Catch drift between AGENT_QUICKSTART + INTERNAL_OPERATOR_RUNBOOK + README |
-| W13-DISK-PRUNE + W13-LOCK-DEPS | S+S (~4h) | Disk hygiene + dep-pin reproducibility |
+| **W14-KIMI-REPLACEMENT-WITH-GLM** (from master plan, repointed at PAYG endpoint NOT Coding Plan) | M (~5h) | The $50/mo 3rd-engine slot. Unblocks the operator's budget split. |
+| **W14-BUDGET-METER-PER-ENGINE** (new) | M (~3-4h) | Per-engine monthly caps ($30 deepseek / $15 mimo / $50 glm) + 80%-spend observer flag + dispatch-time enforcement (refuse when over cap unless explicit override). Extends existing `harness budget set-cap`. |
+| W14-DISPATCH-HEALTH-AWARE-FALLBACK | M (4-5h) | Saves real money now that the operator is paying real money — skip dead engines, don't waste tokens on terminated Kimi / no-key Anthropic-Gemini-direct |
+
+### Then — Week 2 Operations Hardening (~6-8h)
+
+| Row | Effort | Why |
+|---|---|---|
+| W14-AUDIT-CHAIN-HMAC | M (3-4h) | Forensic integrity, security panel's #1 pick (0.90/0.95 confidence) |
+| W14-BACKUP-MANAGER (folds W13-BACKUP-SECRETS-REDACT + W13-BACKUP-INTEGRITY + W13-BACKUP-DRY-RUN + W14-BACKUP-PREFLIGHT-SCAN) | L (5-6h) | Multi-lens convergent pick — backup tar may contain API keys |
+| W14-PARALLEL-DISPATCH-RETRY-FIX | S (2h) | Production-evidenced bug (MiMo race in panels) |
+| W14-KEY-ROTATION-PLAYBOOK | S (2h) | Direct Kimi-termination response — `harness env rotate <engine>` |
 | Auto-default guardrail CI framework | M (4-5h) | Every new auto-default must ship with a "what would happen if this were wrong" test |
 
 ### Week 3 — Polish + Nice-to-haves (~4-6h, optional)
@@ -66,10 +87,13 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 ## Single most important action (live)
 
-**Start Week 2 with W13-BACKUP-SECRETS-REDACT + W13-BACKUP-INTEGRITY** — DeepSeek panel finding that backup tarballs may contain API keys and restore lacks integrity verification. The audit ledger from W13-AUDIT-JSONL handles redaction for the dispatch path; backups need the same treatment.
+**Acquire `GLM_API_KEY` from [open.bigmodel.cn](https://open.bigmodel.cn) (PAYG, NOT Coding Plan), then ship W14-KIMI-REPLACEMENT-WITH-GLM.** This is the unblocking move for the $195/mo engine-budget split — the harness can't enforce the 3rd-engine slot until GLM is wired.
 
-Secondary v1.0.1 housekeeping (not blocking Week 2):
-- **W14-KIMI-AUTH-DIAGNOSIS** — the release-gate panel hit HTTP 403 across all Kimi models despite `KIMI_API_KEY` being set + `harness capabilities` reporting `keys_present.kimi=true`. Investigate whether the key is invalid, the quota is exhausted, or the engine adapter is hitting a deprecated endpoint. Tracked separately so it doesn't block the hardening track.
+In parallel, decide the MiMo plan tier (Standard at $14.08/mo fits the $15 budget) and confirm whether to acquire a `sk-` PAYG MiMo key as fallback insurance (no cost until used).
+
+After GLM ships: W14-BUDGET-METER-PER-ENGINE so the harness can actually enforce the $30/$15/$50 caps + alert at 80% spend.
+
+Kimi (`W14-KIMI-AUTH-RESTORE`) is no longer in the action chain — replaced by GLM. The Kimi adapter stays in the codebase (TOS-compliant after W14-MIMO-TOS-COMPLIANCE) for any operator who later acquires a legitimate Moonshot-approved client license.
 
 ---
 
