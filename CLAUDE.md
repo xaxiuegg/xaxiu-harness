@@ -2,6 +2,32 @@
 
 You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone\` (migrated 2026-05-22 from `D:\Projects\xaxiu-harness\` — see MIGRATION.md).  Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope.  This project has its own isolated Claude Code memory directory at `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (43 entries) — warehouse-specific memory is intentionally NOT loaded here.
 
+## How to invoke the harness in THIS dev shell (READ FIRST)
+
+The bare `harness` console script requires `pip install -e .` to have been run in your active Python environment.  If it has NOT (the default in fresh sessions), `harness today` returns **exit 127 "command not found"**.
+
+**Always-works invocation from the repo root** (no install required):
+
+```bash
+PYTHONPATH=src python -m harness today
+PYTHONPATH=src python -m harness plan show
+PYTHONPATH=src python -m harness capabilities
+PYTHONPATH=src python -m harness --help
+```
+
+Use this form in every Bash tool call.  If you want the bare `harness` form to work, run `pip install -e .` first (W13-INSTALL-VERIFY proves this path works on a fresh venv).
+
+**Minimal session-resume orientation** (paste these two commands first thing):
+
+```bash
+PYTHONPATH=src python -m harness today
+PYTHONPATH=src python -m harness plan show
+```
+
+`today` shows what shipped + reachable engines + blockers; `plan show` renders the active strategic plan from `coord/CURRENT_PLAN.md`.  These two are the ground-truth orientation — trust them over any stale doc.
+
+---
+
 ## Current state — v0.5 (v2 production-hardened + Phase-5 operator UX layered on top)
 
 **v1 core** (single-Claude dev manager, in-session orchestration):
