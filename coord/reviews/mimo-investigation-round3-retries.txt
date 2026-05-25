@@ -1,0 +1,30 @@
+Source pack: 58807 chars
+
+=== RETRY-T11: 97KB sequential, max_tokens=8000 (n=3) ===
+  prompt: 58933 chars, max_tokens=8000
+  [#1/3] OK  44.2s in/out: 16181/1323t  server=MiFE/3.4.29
+  [#2/3] OK  48.9s in/out: 16181/1477t  server=MiFE/3.4.29
+  [#3/3] OK  41.5s in/out: 16181/1578t  server=MiFE/3.4.29
+  => 3/3 ok
+
+=== RETRY-T12-50KB: 50KB summarize, max_tokens=2000 (n=3) ===
+  prompt: 51230 chars, max_tokens=2000
+  [#1/3] OK  45.8s in/out: 14176/805t  server=MiFE/3.4.29
+  [#2/3] OK  18.8s in/out: 14176/528t  server=MiFE/3.4.29
+  [#3/3] OK  13.1s in/out: 14176/449t  server=MiFE/3.4.29
+  => 3/3 ok
+
+=== RETRY-T12-75KB: 75KB summarize, max_tokens=2000 (n=3) ===
+  prompt: 58837 chars, max_tokens=2000
+  [#1/3] OK  20.9s in/out: 16157/539t  server=MiFE/3.4.29
+  [#2/3] OK  20.7s in/out: 16157/435t  server=MiFE/3.4.29
+  [#3/3] OK  16.8s in/out: 16157/395t  server=MiFE/3.4.29
+  => 3/3 ok
+
+=== CONTROL-T12-100KB: 100KB summarize (control - was OK) (n=3) ===
+  prompt: 58837 chars, max_tokens=2000
+  [#1/3] OK  32.1s in/out: 16157/996t  server=MiFE/3.4.29
+  [#2/3] OK  25.5s in/out: 16157/688t  server=MiFE/3.4.29
+  [#3/3] OK  26.9s in/out: 16157/745t  server=MiFE/3.4.29
+  => 3/3 ok
+
