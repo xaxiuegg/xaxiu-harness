@@ -51,6 +51,7 @@ from harness.engines.concrete import get_engine  # noqa: E402
 
 
 PLAN_PATH = Path("spec/wave-6-plan.md")
+STATUS_CSV_PATH = Path("coord/STATUS.csv")
 # W7-AUDIT-POLICY 2026-05-23: operator extended the audit gate to all
 # Wn waves.  When the task_id begins with W7-, prefer the wave-7 plan;
 # generalised pattern picks the right plan by ID prefix.
@@ -72,14 +73,39 @@ _PLAN_BY_TASK_PREFIX = {
     "W11-": "spec/wave-11-plan.md",
 }
 
+# W13-AUDIT-INFRA-W13-PLUS 2026-05-25: W12+ work migrated to
+# coord/STATUS.csv + coord/CURRENT_PLAN.md — there is no spec/wave-13-
+# plan.md.  Before this fallback every W13 row shipped this week
+# returned `ERROR: task W13-FOO not found in plan spec\wave-6-plan.md`
+# (fell through to the default and obviously wasn't there).  The
+# generic regex picks spec/wave-N-plan.md if that file happens to
+# exist, else routes to STATUS.csv where load_acceptance() reads the
+# Notes column.
+_WAVE_PREFIX_RE = re.compile(r"^W(\d+)-")
+
 
 def _resolve_plan_path(task_id: str, override: str | None) -> Path:
-    """Pick the right plan file for *task_id* unless --plan overrides."""
+    """Pick the right plan file for *task_id* unless --plan overrides.
+
+    Resolution order:
+      1. ``override`` if provided.
+      2. Explicit prefix in _PLAN_BY_TASK_PREFIX (W6-, A1, ..., W11-).
+      3. Generic ``W<N>-`` match: ``spec/wave-N-plan.md`` if it exists,
+         else ``coord/STATUS.csv``.
+      4. Fallback to ``PLAN_PATH`` (the W6 plan).
+    """
     if override:
         return Path(override)
     for prefix, plan in _PLAN_BY_TASK_PREFIX.items():
         if task_id == prefix.rstrip("-") or task_id.startswith(prefix):
             return Path(plan)
+    m = _WAVE_PREFIX_RE.match(task_id)
+    if m:
+        wave_num = m.group(1)
+        candidate = Path(f"spec/wave-{wave_num}-plan.md")
+        if candidate.exists():
+            return candidate
+        return STATUS_CSV_PATH
     return PLAN_PATH  # default fallback
 OUT_DIR = Path("coord/reviews/audits")
 CONFIDENCE_GATE = 0.7
@@ -90,7 +116,7 @@ You are auditing a single Wave 6 task that just landed in xaxiu-harness.
 
 # Wave 6 task: {task_id}
 
-# Acceptance criteria (from spec/wave-6-plan.md)
+# Acceptance criteria (from {plan_path})
 
 {acceptance}
 
@@ -177,6 +203,65 @@ def extract_acceptance(plan_text: str, task_id: str) -> str | None:
     if not am:
         return section.strip()  # fallback to whole task section
     return am.group(1).strip()
+
+
+def _load_acceptance_from_status_csv(task_id: str, csv_path: Path) -> str | None:
+    """Pull the Notes column of *task_id*'s row + frame it as acceptance.
+
+    STATUS.csv rows don't have a structured `**Acceptance**:` bullet
+    block — their Notes column holds free-form prose describing what
+    shipped (and implicitly what was expected to ship).  We frame it
+    with the row's metadata so the auditor knows the format differs
+    from the spec/wave-N-plan.md style and can interpret accordingly.
+
+    Returns the framed markdown text, or None if no matching row.
+    """
+    if not csv_path.exists():
+        return None
+    import csv as _csv
+    with csv_path.open("r", encoding="utf-8", newline="") as fh:
+        reader = _csv.DictReader(fh)
+        for row in reader:
+            if (row.get("ID") or "").strip() != task_id:
+                continue
+            title = (row.get("Title") or "").strip()
+            category = (row.get("Category") or "").strip()
+            status = (row.get("Status") or "").strip()
+            owner = (row.get("Owner") or "").strip()
+            updated = (row.get("Updated") or "").strip()
+            notes = (row.get("Notes") or "").strip() or "(no notes — empty)"
+            return (
+                f"**Source**: coord/STATUS.csv "
+                f"(W12+ tasks track here, not in spec/wave-N-plan.md)\n\n"
+                f"- ID: `{task_id}`\n"
+                f"- Title: {title}\n"
+                f"- Category: {category}\n"
+                f"- Status: {status} (Owner: {owner}, Updated: {updated})\n\n"
+                f"**Acceptance criteria / shipped notes** "
+                f"(verbatim from Notes column — STATUS.csv rows do not "
+                f"have a structured `**Acceptance**:` block; the Notes "
+                f"column describes what the row was supposed to land):\n\n"
+                f"{notes}"
+            )
+    return None
+
+
+def load_acceptance(task_id: str, plan_path: Path) -> str | None:
+    """Load acceptance-criteria text for *task_id* from *plan_path*.
+
+    Dispatches on the source format:
+      * ``coord/STATUS.csv`` (or any ``.csv``) → ``_load_acceptance_from_status_csv``.
+      * Otherwise → reads the file and calls ``extract_acceptance``.
+
+    Returns None when the row/section is missing or the file does not
+    exist.  Callers use None as the "task not found in plan" signal.
+    """
+    if plan_path.suffix.lower() == ".csv" or plan_path.name == "STATUS.csv":
+        return _load_acceptance_from_status_csv(task_id, plan_path)
+    if not plan_path.exists():
+        return None
+    plan_text = plan_path.read_text(encoding="utf-8")
+    return extract_acceptance(plan_text, task_id)
 
 
 def _run_git(args: list[str]) -> str:
@@ -692,15 +777,17 @@ def main() -> int:
 
     # W7-AUDIT-POLICY: auto-resolve the plan path from task_id prefix
     # unless --plan overrides.
+    # W13-AUDIT-INFRA-W13-PLUS: W12+ task ids resolve to coord/STATUS.csv
+    # — load_acceptance dispatches by source format.
     plan_path = _resolve_plan_path(args.task_id, args.plan)
     if not plan_path.exists():
         print(f"plan not found: {plan_path}", file=sys.stderr)
         return 2
 
-    plan_text = plan_path.read_text(encoding="utf-8")
-    acceptance = extract_acceptance(plan_text, args.task_id)
+    acceptance = load_acceptance(args.task_id, plan_path)
     if not acceptance:
-        print(f"task {args.task_id} not found in plan", file=sys.stderr)
+        print(f"task {args.task_id} not found in plan {plan_path}",
+              file=sys.stderr)
         return 2
 
     # Resolve commit anchor: --reaudit / --commit-range / --since override --commit
@@ -730,6 +817,7 @@ def main() -> int:
     info = git_commits_info(shas)
     prompt = AUDIT_PROMPT.format(
         task_id=args.task_id,
+        plan_path=plan_path,
         acceptance=acceptance,
         sha=info["sha"][:12],
         author=info["author"],

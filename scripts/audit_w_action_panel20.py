@@ -40,8 +40,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from audit_task_with_mimo import (  # noqa: E402
     _resolve_plan_path,
-    extract_acceptance,
     git_commits_info,
+    load_acceptance,
     parse_audit_response,
 )
 
@@ -284,7 +284,9 @@ def _dispatch_persona(engine_name: str, model: str,
 def run_panel(task_id: str, commit: str,
               plan_override: str | None = None) -> dict:
     """Fire the 20-persona panel; return a structured summary dict."""
-    # Resolve plan + acceptance criteria
+    # Resolve plan + acceptance criteria.
+    # W13-AUDIT-INFRA-W13-PLUS 2026-05-25: W12+ task ids resolve to
+    # coord/STATUS.csv; load_acceptance reads the row's Notes column.
     plan_path = _resolve_plan_path(task_id, plan_override)
     if not plan_path.exists():
         return {
@@ -295,8 +297,7 @@ def run_panel(task_id: str, commit: str,
             "successful_personas": 0, "total_personas": 0,
             "pass_count": 0, "stop_count": 0, "elapsed_sec": 0,
         }
-    plan_text = plan_path.read_text(encoding="utf-8")
-    acceptance = extract_acceptance(plan_text, task_id)
+    acceptance = load_acceptance(task_id, plan_path)
     if not acceptance:
         return {
             "task_id": task_id, "commit": commit,

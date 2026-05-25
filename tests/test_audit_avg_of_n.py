@@ -255,6 +255,152 @@ def test_resolve_plan_path_override_wins():
     assert path == Path("spec/custom-plan.md")
 
 
+# -- W13-AUDIT-INFRA-W13-PLUS: W12+ rows route to STATUS.csv ---------------
+
+
+def test_resolve_plan_path_w13_routes_to_status_csv():
+    """W13- has no spec/wave-13-plan.md — must fall back to STATUS.csv."""
+    path = audit._resolve_plan_path("W13-MORNING-BRIEF-CONTEXT-BUG", None)
+    assert path == audit.STATUS_CSV_PATH
+    assert path.name == "STATUS.csv"
+
+
+def test_resolve_plan_path_w12_routes_to_status_csv():
+    """W12- has no spec/wave-12-plan.md — same fallback."""
+    path = audit._resolve_plan_path("W12-B-MAX-TOKENS-DEFAULT-RAISE", None)
+    assert path == audit.STATUS_CSV_PATH
+
+
+def test_resolve_plan_path_w14_routes_to_status_csv():
+    """Future-wave coverage: W14- without a spec file also falls back."""
+    path = audit._resolve_plan_path("W14-FOO-NOT-YET-SHIPPED", None)
+    assert path == audit.STATUS_CSV_PATH
+
+
+def test_resolve_plan_path_w11_still_routes_to_wave11_plan_regression():
+    """Regression: W6-W11 historic prefixes still go to spec files."""
+    path = audit._resolve_plan_path("W11-AGENT-INIT-VERB", None)
+    assert path == Path("spec/wave-11-plan.md")
+
+
+def test_resolve_plan_path_falls_through_when_spec_file_exists(tmp_path,
+                                                                monkeypatch):
+    """If spec/wave-N-plan.md exists for an otherwise-unmapped wave, use it."""
+    # Pretend spec/wave-99-plan.md exists by chdir'ing into a scratch dir
+    # where we manually create it.
+    spec_dir = tmp_path / "spec"
+    spec_dir.mkdir()
+    (spec_dir / "wave-99-plan.md").write_text("# wave 99\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    path = audit._resolve_plan_path("W99-FOO", None)
+    assert path == Path("spec/wave-99-plan.md")
+
+
+def test_resolve_plan_path_non_wave_prefix_returns_default():
+    """A task_id that doesn't start with W<N>- nor matches any explicit
+    prefix should still return the default PLAN_PATH (W6 plan).
+    """
+    path = audit._resolve_plan_path("X1-UNKNOWN", None)
+    assert path == audit.PLAN_PATH
+
+
+# -- W13-AUDIT-INFRA-W13-PLUS: STATUS.csv acceptance loader ----------------
+
+
+def _write_csv(tmp_path: Path, rows: list[dict]) -> Path:
+    """Helper: write a minimal STATUS.csv with given rows."""
+    import csv
+    csv_path = tmp_path / "STATUS.csv"
+    fieldnames = ["ID", "Category", "Title", "Status",
+                  "Owner", "Effort", "Updated", "Notes"]
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return csv_path
+
+
+def test_load_acceptance_from_status_csv_finds_row_by_id(tmp_path):
+    csv_path = _write_csv(tmp_path, [
+        {"ID": "W13-FOO", "Category": "Production",
+         "Title": "Test row", "Status": "shipped",
+         "Owner": "Claude", "Effort": "~10min",
+         "Updated": "2026-05-25",
+         "Notes": "Acceptance: things shipped. Tests pass."},
+    ])
+    acc = audit._load_acceptance_from_status_csv("W13-FOO", csv_path)
+    assert acc is not None
+    assert "W13-FOO" in acc
+    assert "Test row" in acc
+    assert "things shipped" in acc
+    # Source label so the auditor knows the format
+    assert "coord/STATUS.csv" in acc
+
+
+def test_load_acceptance_from_status_csv_returns_none_for_missing(tmp_path):
+    csv_path = _write_csv(tmp_path, [
+        {"ID": "W13-FOO", "Category": "X", "Title": "T",
+         "Status": "shipped", "Owner": "?", "Effort": "?",
+         "Updated": "2026-05-25", "Notes": "n"},
+    ])
+    assert audit._load_acceptance_from_status_csv(
+        "W13-MISSING", csv_path) is None
+
+
+def test_load_acceptance_from_status_csv_returns_none_when_file_absent(tmp_path):
+    """Missing STATUS.csv → None, not a crash."""
+    assert audit._load_acceptance_from_status_csv(
+        "W13-FOO", tmp_path / "does-not-exist.csv") is None
+
+
+def test_load_acceptance_handles_empty_notes(tmp_path):
+    """A row with an empty Notes column still produces a framed string."""
+    csv_path = _write_csv(tmp_path, [
+        {"ID": "W13-EMPTY", "Category": "X", "Title": "T",
+         "Status": "shipped", "Owner": "?", "Effort": "?",
+         "Updated": "2026-05-25", "Notes": ""},
+    ])
+    acc = audit._load_acceptance_from_status_csv("W13-EMPTY", csv_path)
+    assert acc is not None
+    assert "(no notes — empty)" in acc
+
+
+def test_load_acceptance_dispatches_csv_path_to_csv_loader(tmp_path):
+    """load_acceptance routes .csv paths to the CSV loader."""
+    csv_path = _write_csv(tmp_path, [
+        {"ID": "W13-DISPATCH", "Category": "X", "Title": "T",
+         "Status": "shipped", "Owner": "?", "Effort": "?",
+         "Updated": "2026-05-25", "Notes": "dispatched note"},
+    ])
+    acc = audit.load_acceptance("W13-DISPATCH", csv_path)
+    assert acc is not None
+    assert "dispatched note" in acc
+
+
+def test_load_acceptance_dispatches_spec_path_to_extract_acceptance(tmp_path):
+    """load_acceptance routes .md paths to the existing extract_acceptance."""
+    plan = tmp_path / "wave-99-plan.md"
+    plan.write_text(
+        "# Wave 99\n\n"
+        "#### W99-FOO — sample task\n\n"
+        "**Acceptance**:\n"
+        "- Criterion 1\n"
+        "- Criterion 2\n",
+        encoding="utf-8",
+    )
+    acc = audit.load_acceptance("W99-FOO", plan)
+    assert acc is not None
+    assert "Criterion 1" in acc
+    assert "Criterion 2" in acc
+
+
+def test_load_acceptance_missing_spec_file_returns_none(tmp_path):
+    """Non-existent .md plan path → None, not a crash."""
+    assert audit.load_acceptance(
+        "W99-FOO", tmp_path / "missing.md") is None
+
+
 # -- W9-AUDIT-ANCHOR-MULTI-COMMIT ------------------------------------------
 
 
