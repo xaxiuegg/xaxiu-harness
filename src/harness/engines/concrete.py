@@ -67,13 +67,31 @@ def _make_user_agent() -> str:
 
 
 def _make_kimi_user_agent() -> str:
-    """Kimi Code API requires a whitelisted User-Agent (gate per
-    ``reference_kimi_features_canonical``).  Default to ``claude-code/0.1.0``
-    which is verified-working from inside Claude Code sessions; override
-    via ``KIMI_USER_AGENT`` for other approved agents
-    (e.g. ``KimiCLI/1.5``).
+    """User-Agent for Kimi dispatches.  Default is ``xaxiu-harness/1.0``
+    (the truthful client identity) per W14-KIMI-TERMINATION-INVESTIGATION
+    2026-05-25.
+
+    Kimi Code's API uses a User-Agent allowlist to gate access to its
+    Token Plan endpoint, and the operator's account was terminated on
+    2026-05-25 for sending a spoofed ``claude-code/0.1.0`` UA — this
+    violates Kimi Code's community guideline #3 (no client-identity
+    tampering, "不伪造或篡改客户端身份信息").  Moonshot enforces this;
+    see ``coord/reviews/kimi-termination-investigation/FINDINGS.md``.
+
+    Practical consequences of the truthful default:
+      - The Kimi Code endpoint (api.kimi.com/coding/v1) will deny our
+        traffic at the gate, returning HTTP 403.  That is the CORRECT
+        outcome — we are not an approved third-party agent.
+      - The Kimi Platform pay-as-you-go endpoint (api.moonshot.ai/v1
+        or api.moonshot.cn/v1) does not enforce the UA gate and will
+        accept any UA, so PAYG keys still work.
+
+    The ``KIMI_USER_AGENT`` env var still lets an operator override
+    to a spoofed value (e.g. ``claude-code/0.1.0`` or ``KimiCLI/1.5``)
+    — but the operator must understand this is a TOS violation and
+    accept the documented risk of account termination.
     """
-    return os.environ.get("KIMI_USER_AGENT", "claude-code/0.1.0")
+    return os.environ.get("KIMI_USER_AGENT", "xaxiu-harness/1.0")
 
 
 def _resolve_kimi_upstream() -> str:
@@ -502,19 +520,43 @@ def _resolve_mimo_upstream(api_key: str) -> str:
 
 
 def _make_mimo_user_agent() -> str:
-    """User-Agent for MiMo Token Plan TOS compliance.
+    """User-Agent for MiMo dispatches.  Default is ``xaxiu-harness/1.0``
+    (the truthful client identity) per W14-MIMO-TOS-COMPLIANCE 2026-05-25.
 
-    Xiaomi's Token Plan terms restrict use to coding harnesses
-    (OpenClaw, OpenCode, Claude Code, KiloCode...).  Like Kimi Coding API,
-    the gate is enforced at the User-Agent level.  Default matches
-    Kimi's working value (``claude-code/0.1.0``); operators can override
-    via ``MIMO_USER_AGENT`` when they're calling from a different
-    approved coding tool.
+    Xiaomi's MiMo Token Plan endpoint (``token-plan-{region}.xiaomimimo.com``)
+    is User-Agent gated to an allowlist of approved coding tools:
+    OpenCode, OpenClaw, Claude Code, Cherry Studio, Cline, Qwen Code,
+    CodeBuddy, Kilo Code, Hermes Agent.  xaxiu-harness is NOT on that
+    list.  The Token Plan subscription page also explicitly prohibits
+    use outside approved programming tools:
+    "The Token Plan package quota can only be used in programming tools
+    (such as OpenClaw, OpenCode, etc.), and it is prohibited to use it
+    in the form of API calls for request behaviors in clearly non-Coding
+    scenarios such as automated scripts and custom application backends."
 
-    The pay-as-you-go endpoint does not enforce the gate, but sending
-    the same UA there is harmless and keeps one code path.
+    Enforcement (verbatim from MiMo TOS):
+    "If an API Key corresponding to a package is used for calls that
+    exceed the permitted scope, it will be considered a violation or
+    abuse, and the platform has the right to take measures such as
+    suspending service and banning the API Key."
+
+    Kimi Code already terminated the operator's account for the prior
+    ``claude-code/0.1.0`` spoofing default; Xiaomi could follow with the
+    same enforcement, so we switch to the truthful UA pre-emptively.
+
+    Practical consequences of the truthful default:
+      - Token Plan (tp- keys, regional endpoint) will deny our traffic
+        at the gate.  That is the CORRECT outcome — we are not an
+        approved third-party agent.
+      - Pay-as-you-go (sk- keys, ``api.xiaomimimo.com``) does not
+        enforce the UA gate and continues to work.
+
+    The ``MIMO_USER_AGENT`` env var still lets an operator override
+    to a spoofed value (e.g. ``claude-code/0.1.0``) — but the operator
+    must understand this is a TOS violation and accept the documented
+    risk of account termination.
     """
-    return os.environ.get("MIMO_USER_AGENT", "claude-code/0.1.0")
+    return os.environ.get("MIMO_USER_AGENT", "xaxiu-harness/1.0")
 
 
 # WIRE-MIMO-AUTO-ROUTING (2026-05-22): operator-policy default

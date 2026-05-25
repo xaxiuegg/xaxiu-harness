@@ -291,9 +291,13 @@ def test_kimi_success(
     assert resp.error is None
     assert captured["url"] == KIMI_URL
     assert captured["headers"]["authorization"] == "Bearer kimi-key"
-    # Kimi Code API enforces a User-Agent allowlist (battle-test #7);
-    # default is `claude-code/0.1.0`, configurable via KIMI_USER_AGENT.
-    assert captured["headers"]["user-agent"] == "claude-code/0.1.0"
+    # Kimi Code API enforces a User-Agent allowlist.  Per
+    # W14-KIMI-TERMINATION-INVESTIGATION 2026-05-25, the harness now
+    # ships a truthful ``xaxiu-harness/1.0`` UA — Kimi Code's gate will
+    # deny that traffic, which is the correct TOS-compliant outcome.
+    # Operators who consciously accept the TOS risk can override via
+    # the ``KIMI_USER_AGENT`` env var.
+    assert captured["headers"]["user-agent"] == "xaxiu-harness/1.0"
     assert captured["body"]["model"] == "kimi-model"
     assert captured["body"]["messages"] == [{"role": "user", "content": "hello"}]
     # W5-V: stream=true is always set for Kimi
@@ -797,9 +801,13 @@ def test_budget_mimo_pro_payg_dispatch_uses_priced_row(tmp_path, monkeypatch) ->
 
 
 def test_mimo_user_agent_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per W14-MIMO-TOS-COMPLIANCE 2026-05-25: default UA is truthful
+    (``xaxiu-harness/1.0``), Xiaomi's Token Plan gate will deny it as
+    the correct TOS-compliant outcome.  Operators can still override.
+    """
     from harness.engines.concrete import _make_mimo_user_agent
     monkeypatch.delenv("MIMO_USER_AGENT", raising=False)
-    assert _make_mimo_user_agent() == "claude-code/0.1.0"
+    assert _make_mimo_user_agent() == "xaxiu-harness/1.0"
     monkeypatch.setenv("MIMO_USER_AGENT", "OpenCode/1.2")
     assert _make_mimo_user_agent() == "OpenCode/1.2"
 
