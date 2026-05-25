@@ -36,7 +36,7 @@ cd xaxiu-harness
 pip install -e .
 
 # Restore the runtime state (last backup):
-harness restore <path-to-latest-backup-archive>
+harness backup restore <path-to-latest-backup-archive>
 # This restores: .harness/dispatched/ (cache), coord/observer/ (state),
 # coord/STATUS.csv (task tracker), and the dispatch budget ledger.
 
@@ -46,10 +46,10 @@ harness observer watchdog-status           # should be UNINITIALIZED (fresh)
 harness observer install-scheduler         # re-arm cron / Task Scheduler
 ```
 
-### 1b. If no backup exists (or W13-BACKUP-RESTORE hasn't shipped)
+### 1b. If no backup exists
 
 Everything important EXCEPT runtime state is in git.  You lose:
-- The dispatch cache (`.harness/dispatched/`) — affects `harness retrieve` for past dispatches
+- The dispatch cache (`.harness/dispatched/`) — affects `harness.retrieve()` (Python SDK function; there is no `harness retrieve` CLI verb today) for past dispatches
 - Cumulative cost ledger — `harness cost-today` shows $0 again
 - Observer cycle history
 
@@ -71,13 +71,14 @@ harness review some-test-doc.md            # smoke test
 
 ## Section 2: When an API key needs rotating
 
-### 2a. After W13-SECRETS-ROTATION ships (Wave 13)
+### 2a. **FUTURE (W13-SECRETS-ROTATION):** after this row ships
 
 ```bash
+# FUTURE — NOT YET SHIPPED.  When W13-SECRETS-ROTATION lands, this
+# verb will walk you through: get new key from platform.moonshot.cn,
+# update .env, update DPAPI on Windows, test connectivity, revert
+# if test fails.
 harness secrets rotate kimi
-# Walks you through: get new key from platform.moonshot.cn,
-# updates .env, updates DPAPI on Windows, tests connectivity,
-# reverts if test fails.
 ```
 
 ### 2b. Today (manual)
@@ -135,9 +136,12 @@ harness dispatch --backend deepseek --packet <(echo "test")
 ### 3d. Quarantine an engine deliberately
 
 ```bash
-# Not yet wired as a CLI verb; manual via state:
-# Edit state/engine_health.json to set quarantined=true on the engine
-# (W13-OPERATOR-RUNBOOK note: this should become `harness engines quarantine <name>`)
+# Today (no `harness engines quarantine` verb yet): edit
+# state/engine_health.json to set quarantined=true on the engine.
+#
+# **FUTURE (W13-ENGINES-QUARANTINE-VERB):** wire as a CLI verb so
+# `harness engines quarantine <name>` does this safely + audits the
+# action via W13-AUDIT-JSONL.
 ```
 
 ---
@@ -271,10 +275,12 @@ PYTHONPATH=src python -m harness dashboard-serve --port 8765 &
 
 ## Section 7: When you want to add a new engine
 
-### 7a. After W15-ENGINE-ABI ships (Wave 15)
+### 7a. **FUTURE (W15-ENGINE-ABI):** after this row ships
 
-Drop a file in `src/harness/engines/<name>.py` implementing the
-`EngineABI` protocol.  See `docs/PLUGIN_GUIDE.md`.
+W15 was DROPPED in the panel synthesis for the internal-tool variant
+(payback period 10-15 years for a solo operator).  This section is
+kept as a deferred-design note only — do NOT expect `docs/PLUGIN_GUIDE.md`
+to exist.  Use Section 7b for the actual procedure today.
 
 ### 7b. Today (manual)
 
@@ -432,8 +438,12 @@ r = harness.dispatch('test', engine='kimi')
 print(r)
 "
 
-# Inspect a stored dispatch by id:
-harness retrieve <dispatch_id> --scope full
+# Inspect a stored dispatch by id (Python SDK; no `harness retrieve`
+# CLI verb today — see **FUTURE (W13-RETRIEVE-CLI-VERB)**):
+PYTHONPATH=src python -c "
+import harness
+print(harness.retrieve('<dispatch_id>', scope='full'))
+"
 
 # Reset the cost cap for a fresh budget (env var):
 export COST_MAX_PER_SESSION=10.00   # raises cap to $10
