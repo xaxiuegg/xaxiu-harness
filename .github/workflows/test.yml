@@ -34,6 +34,17 @@ jobs:
       - name: Run pytest
         run: python -m pytest tests/ -q --tb=short
 
+      # W13-INSTALL-VERIFY (2026-05-25): universal #1 panel pick.
+      # The "regular" CI step above runs pytest in the runner's already-
+      # configured venv.  This step explicitly creates a FRESH venv +
+      # runs `pip install -e .` + verifies the `harness` console script
+      # works.  Catches the class of bug where the editable-install
+      # works for the CI runner's environment but breaks for a real
+      # `git clone + pip install -e .` flow.  Slow-marked tests are
+      # opt-in via `-m slow` so this is the only place they run.
+      - name: Install verification (real fresh-venv + pip install -e .)
+        run: python -m pytest tests/test_install_verify.py -m slow -v --tb=short
+
       # W12-CI-WINDOWS-CLI-SMOKE (2026-05-24): the 20-agent operator-review
       # panel found `harness --help`, `harness preflight`, and `harness
       # agent init` all crashing on Windows cp1252 console with
