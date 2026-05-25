@@ -1,0 +1,34 @@
+### Stance summary (3-5 sentences)
+
+v1.0.0 shipped with solid foundations, but the failure summary shows a clear **leak**: in the last 168 hours, the system burned **278 dispatch attempts** on engines with no API keys (anthropic, gemini) and **209 failures** on deepseek — that's nearly 500 wasted round-trips, each costing latency and operator wait time. The fallback chain treats every engine as equally available, but they are not: kimi is terminated, anthropic/gemini are unconfigured, and deepseek has an 18.7% failure rate. My lens wishes v1.0.0 had included a **dispatch pre-flight that checks key presence and recent failure health before attempting any engine**, so the system stops trying dead doors. The most important property to strengthen is **deterministic fallback ordering with fast-fail on known-dead engines** — every wasted call delays the operator and burns cost.
+
+### Top 3 rows to ship next (ranked)
+
+| Row ID | Title | Effort | Why this row, by YOUR lens | Acceptance criteria |
+|---|---|---|---|---|
+| **W14-DISPATCH-FALLBACK-PRUNE** | Prune dead engines from fallback chain using key‑presence + live‑probe history | **S** (~3h) | The failure log shows 139 anthropic + 139 gemini events (all failures) — each dispatch triggers these as fallbacks even though neither has a key. Removing them cuts 278 wasted round‑trips/week, saving ~10–15 minutes of operator wait time and $0.00–$0.02 in token cost per failed attempt. Also handles kimi‑terminated so it stops being tried. | 1. `dispatch()` checks `keys_present` dict before adding engine to fallback list; engines with `false` are skipped. 2. Live‑probe result `terminated` also skips that engine in fallback. 3. A new `harness engines --fallback-policy` verb shows the effective fallback order with reasons for exclusion. 4. All current tests pass; new tests verify that a missing‑key engine is never called in the fallback path. 5. Engine failure summary shows exactly 0 dispatch events to unconfigured engines after deploy. |
+| **W14-DISPATCH-TIER-AND-TIMEOUT** | Enforce per‑engine timeout and retry budgets with tiered dispatch priority | **M** (~5h) | DeepSeek receives 1116 events in 168h, 209 failures (18.7% failure rate). The current fallback is on‑failure‑retry‑immediately with no backoff; this creates a thundering‑herd against a single engine when it's degraded. A tiered policy (primary = fast‑timeout secondary = slower with backoff) would reduce failure rate and prevent cascading retries that waste both tokens and calendar time. | 1. Dispatch accepts a `tier` parameter (1/2/3) with default `1`. 2. Tier 1 engines have a configurable timeout (default 30s), Tier 2 (60s), Tier 3 (120s). 3. Auto‑retry count is tier‑dependent: Tier 1 → 0 retries, Tier 2 → 1 retry with backoff, Tier 3 → 2 retries. 4. `harness dispatch --tier 2` overrides default. 5. Tests show that a known‑slow engine (mock with delay) does not block Tier 1 dispatches. |
+| **W14-PARALLEL-RETRY-FIX** | Add retry logic for parallel‑dispatch race condition (RemoteProtocolError) | **S** (~2h) | The release‑gate panel hit a `RemoteProtocolError` on MiMo during parallel‑3 ThreadPoolExecutor run; serial retry succeeded. The current retry is per‑engine inside the streaming transport but doesn't cover the parallel‑dispatch race — a single transient failure kills the entire parallel batch, forcing a serial fallback that costs additional latency. This fix reduces mean time‑to‑success for parallel dispatches. | 1. The parallel‑dispatch loop catches `RemoteProtocolError` and re‑queues that engine’s work item (up to 1 retry). 2. Retry runs on the same ThreadPoolExecutor slot with a 5s backoff. 3. If retry fails, the parallel batch returns the partial results with an error note per engine. 4. Tests with a mock that fails once then succeeds prove the retry restores the response. 5. 0 regressions in serial dispatch tests. |
+
+### Rows you'd DROP from CURRENT_PLAN.md's Week 2/Week 3 sections
+
+- **CI doc-doc-sync gate** (Week 2) — Low performance ROI. The docs are important for operator orientation, but this row doesn't save a single millisecond or a single penny. Defer until after the three dispatch‑efficiency rows are shipped.
+- **W13-DISK-PRUNE + W13-LOCK-DEPS** (Week 2) — Disk hygiene and dep‑pinning are housekeeping, not performance-critical. The `~/.harness` directory is tiny; disk pressure is not a bottleneck. Lock deps improve reproducibility but the current `pip install -e .` works. Both can wait one more week.
+- **Schema versioning** (Week 3) — Data‑structure design is important, but this only activates when the *first* change happens. No data‑structure change is scheduled; this is pure speculative work. The dispatch‑efficiency rows have a concrete cost today; schema versioning can wait.
+- **`harness commands --did-you-mean`** (Week 3) — Saves the operator a few seconds when they mistype a verb. That’s a UX win, but not a performance or reliability win. The failure‑log waste dwarfs this by orders of magnitude.
+
+Kept from Week 2:
+- **W13-BACKUP-SECRETS-REDACT + W13-BACKUP-INTEGRITY** — Security is reliability; a leaking backup could get the operator’s credentials revoked, which would block all dispatch. This is a real failure mode.
+- **Auto‑default guardrail CI framework** — Indirectly prevents silent mis‑configuration that could lead to infinite retry loops or runaway token consumption. Accept as M‑priority.
+
+### Single most important action this week
+
+Prune dead engines from the fallback chain and add key‑presence pre‑check before any dispatch attempt — this will eliminate 278+ wasted fallback attempts in the last week alone, saving time and money immediately.
+
+### Confidence in your own recommendation (0.0-1.0)
+
+**0.85** — The failure numbers are hard data (139+139 = 278 wasted calls for unconfigured engines); the improvement is a direct removal of that waste. Confidence would rise to 0.95 if we could confirm that the operator never intentionally dispatches to unconfigured engines (e.g., to test fallback flow), but the current failure log shows zero successes for those engines, so pruning is safe. Confidence would drop below 0.7 if the operator relies on the fallback chain for temporary broken‑key scenarios (e.g., rotating keys weekly) — but that is not documented.
+
+### What this lens systematically MISSES
+
+This lens ignores **operator ergonomics and documentation comprehensiveness** — the doc‑sync gate, `--did-you-mean`, and schema versioning all make the tool easier to reason about for a solo non‑technical operator, but they don't reduce latency or cost. A UX/ops lens should sign off on the dispatch‑pruning changes to ensure they remain visible and auditable (e.g., the operator must be able to see why an engine was skipped).
