@@ -2341,6 +2341,96 @@ def preflight_latency_cmd(fmt: str, since_hours: float | None,
                                   check_name=check_name))
 
 
+@cli.group(name="backup")
+def backup_group() -> None:
+    """W13-BACKUP-RESTORE: snapshot + restore the harness runtime state.
+
+    Backs up: dispatch cache, observer state, STATUS.csv, engine health.
+    Does NOT back up: .env (secrets stay out of backups by design),
+    src/ (use git), tests/, docs/.
+    """
+
+
+@backup_group.command(name="create")
+@click.option("--output-dir", type=click.Path(file_okay=False,
+                                              path_type=Path),
+              default=None,
+              help="Where to write the archive (default: .harness/backups/).")
+@click.option("--name", default=None,
+              help="Archive filename (default: "
+                   "harness-backup-<UTC-stamp>.tar.gz).")
+def backup_create_cmd(output_dir: Path | None, name: str | None) -> None:
+    """Snapshot the harness runtime state into a .tar.gz archive."""
+    from harness.backup import create_backup
+    result = create_backup(output_dir=output_dir, archive_name=name)
+    size_mb = result.manifest.archive_size_bytes / (1024 * 1024)
+    click.echo(f"  archive:       {result.archive_path}")
+    click.echo(f"  files:         {result.manifest.files_count}")
+    click.echo(f"  size:          {size_mb:.2f} MB")
+    click.echo(f"  elapsed:       {result.elapsed_s:.1f}s")
+    click.echo(f"  paths_included: {', '.join(result.manifest.paths_included)}")
+
+
+@backup_group.command(name="list")
+def backup_list_cmd() -> None:
+    """List existing backup archives (newest first)."""
+    from harness.backup import list_backups
+    archives = list_backups()
+    if not archives:
+        click.echo("  (no backups yet — run `harness backup create`)")
+        return
+    for p in archives:
+        size_mb = p.stat().st_size / (1024 * 1024)
+        from datetime import datetime, timezone
+        mtime = datetime.fromtimestamp(p.stat().st_mtime,
+                                        tz=timezone.utc).isoformat()
+        click.echo(f"  {p.name}  {size_mb:.2f} MB  {mtime}")
+
+
+@backup_group.command(name="prune")
+@click.option("--keep-dailies", type=int, default=7)
+@click.option("--keep-weeklies", type=int, default=4)
+def backup_prune_cmd(keep_dailies: int, keep_weeklies: int) -> None:
+    """Delete old backups, keeping N most-recent."""
+    from harness.backup import prune_old_backups
+    deleted = prune_old_backups(keep_dailies=keep_dailies,
+                                  keep_weeklies=keep_weeklies)
+    if not deleted:
+        click.echo("  (nothing to prune)")
+        return
+    for p in deleted:
+        click.echo(f"  deleted: {p.name}")
+    click.echo(f"  total: {len(deleted)} archives removed")
+
+
+@backup_group.command(name="restore")
+@click.argument("archive", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path))
+@click.option("--overwrite/--no-overwrite", default=False,
+              help="Overwrite files that already exist in the runtime "
+                   "state.  Default --no-overwrite (skip existing).")
+def backup_restore_cmd(archive: Path, overwrite: bool) -> None:
+    """Restore a backup archive into the repo's runtime state."""
+    from harness.backup import restore_backup
+    try:
+        result = restore_backup(archive, overwrite_existing=overwrite)
+    except (FileNotFoundError, ValueError) as exc:
+        click.echo(f"  error: {exc}", err=True)
+        sys.exit(2)
+    click.echo(f"  archive:        {result.archive_path}")
+    click.echo(f"  manifest:       schema_v{result.manifest.schema_version}, "
+               f"created {result.manifest.created_at}")
+    click.echo(f"  files restored: {result.files_restored}")
+    click.echo(f"  elapsed:        {result.elapsed_s:.1f}s")
+    if result.warnings:
+        click.echo(f"  warnings ({len(result.warnings)}):")
+        for w in result.warnings[:10]:
+            click.echo(f"    - {w}")
+        if len(result.warnings) > 10:
+            click.echo(f"    ... and {len(result.warnings) - 10} more")
+    sys.exit(0 if result.files_restored > 0 or not result.warnings else 1)
+
+
 @cli.command(name="review")
 @click.argument("document", type=click.Path(exists=True, dir_okay=False,
                                             path_type=Path))
