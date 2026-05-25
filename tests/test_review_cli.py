@@ -14,7 +14,7 @@ import pytest
 
 
 def test_extract_text_reads_markdown(tmp_path: Path) -> None:
-    from harness.review import extract_text
+    from harness.reviewer import extract_text
     p = tmp_path / "doc.md"
     p.write_text("# hello\n\nworld\n", encoding="utf-8")
     assert "hello" in extract_text(p)
@@ -22,20 +22,20 @@ def test_extract_text_reads_markdown(tmp_path: Path) -> None:
 
 
 def test_extract_text_reads_py(tmp_path: Path) -> None:
-    from harness.review import extract_text
+    from harness.reviewer import extract_text
     p = tmp_path / "script.py"
     p.write_text("def foo():\n    return 42\n", encoding="utf-8")
     assert "def foo" in extract_text(p)
 
 
 def test_extract_text_missing_raises(tmp_path: Path) -> None:
-    from harness.review import extract_text
+    from harness.reviewer import extract_text
     with pytest.raises(FileNotFoundError):
         extract_text(tmp_path / "nope.md")
 
 
 def test_extract_text_unsupported_raises_with_hint(tmp_path: Path) -> None:
-    from harness.review import extract_text
+    from harness.reviewer import extract_text
     p = tmp_path / "thing.docx"
     p.write_bytes(b"PK\x03\x04")
     with pytest.raises(ValueError, match="unsupported file type"):
@@ -62,7 +62,7 @@ def _stub_engine(success: bool = True, text: str = "test review output",
 
 
 def test_review_document_writes_per_engine_files(tmp_path, monkeypatch):
-    from harness import review
+    from harness import reviewer as review
 
     monkeypatch.setattr(review, "get_engine", lambda *a, **k: _stub_engine())
 
@@ -81,7 +81,7 @@ def test_review_document_writes_per_engine_files(tmp_path, monkeypatch):
 
 
 def test_review_document_writes_synthesis(tmp_path, monkeypatch):
-    from harness import review
+    from harness import reviewer as review
 
     monkeypatch.setattr(review, "get_engine", lambda *a, **k: _stub_engine())
     doc = tmp_path / "doc.md"
@@ -98,7 +98,7 @@ def test_review_document_writes_synthesis(tmp_path, monkeypatch):
 
 def test_review_document_handles_engine_failure(tmp_path, monkeypatch):
     """One lens failing must not crash the whole review."""
-    from harness import review
+    from harness import reviewer as review
 
     call_count = {"n": 0}
 
@@ -123,7 +123,7 @@ def test_review_document_handles_engine_failure(tmp_path, monkeypatch):
 
 def test_review_document_respects_max_tokens(tmp_path, monkeypatch):
     """max_tokens must flow through to the engine.dispatch call."""
-    from harness import review
+    from harness import reviewer as review
 
     captured: list[dict] = []
 
@@ -164,7 +164,7 @@ def test_cli_review_invokes_review_document(tmp_path, monkeypatch):
     """End-to-end: harness review <file> calls review_document."""
     from click.testing import CliRunner
     from harness.cli import cli
-    from harness import review as _review_mod
+    from harness import reviewer as _review_mod
 
     captured: dict = {}
 
@@ -183,7 +183,7 @@ def test_cli_review_invokes_review_document(tmp_path, monkeypatch):
 
     # Also patch the import inside cli.py
     from harness import cli as _cli_mod
-    monkeypatch.setattr("harness.review.review_document", _fake_review)
+    monkeypatch.setattr("harness.reviewer.review_document", _fake_review)
 
     doc = tmp_path / "doc.md"
     doc.write_text("test", encoding="utf-8")
@@ -193,14 +193,16 @@ def test_cli_review_invokes_review_document(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "document_path" in captured
     assert captured["document_path"] == doc
-    # Default max_tokens
-    assert captured["max_tokens"] == 6000
+    # W13 Tier 1 Shift F: auto-default = SAFE_MAX_TOKENS_FLOOR (4000)
+    # when --max-tokens isn't passed.  Previously was 6000.
+    from harness.reviewer import SAFE_MAX_TOKENS_FLOOR
+    assert captured["max_tokens"] == SAFE_MAX_TOKENS_FLOOR
 
 
 def test_cli_review_supports_lens_set_flag(tmp_path, monkeypatch):
     from click.testing import CliRunner
     from harness.cli import cli
-    from harness import review as _review_mod
+    from harness import reviewer as _review_mod
 
     captured: dict = {}
 
@@ -213,7 +215,7 @@ def test_cli_review_supports_lens_set_flag(tmp_path, monkeypatch):
             "total_cost_usd": 0.0,
         }
 
-    monkeypatch.setattr("harness.review.review_document", _fake)
+    monkeypatch.setattr("harness.reviewer.review_document", _fake)
 
     doc = tmp_path / "code.py"
     doc.write_text("x = 1", encoding="utf-8")
@@ -237,14 +239,14 @@ def test_cli_review_missing_file_exits_nonzero(tmp_path):
 
 def test_default_lens_set_has_3_engines():
     """The default lens set must dispatch to all 3 production engines."""
-    from harness.review import DEFAULT_LENSES
+    from harness.reviewer import DEFAULT_LENSES
     engines = {lens.engine for lens in DEFAULT_LENSES}
     assert engines == {"kimi", "deepseek", "mimo"}
 
 
 def test_all_lens_sets_have_valid_engine_names():
     """No typos in engine names across the lens sets."""
-    from harness.review import LENS_SETS
+    from harness.reviewer import LENS_SETS
     valid_engines = {"kimi", "deepseek", "mimo", "anthropic", "gemini"}
     for set_name, lenses in LENS_SETS.items():
         for lens in lenses:

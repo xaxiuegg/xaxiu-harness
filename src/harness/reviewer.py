@@ -144,6 +144,65 @@ DEFAULT_LENSES: list[Lens] = [
 ]
 
 
+# -- auto-default helpers (W13 Tier 1 Shift A + F) --------------------------
+
+# Suffix -> lens-set name.  Source files default to code-review; prose
+# files default to doc-review; everything else falls back to the
+# 3-engine general "default" set.  Operator can override with explicit
+# lens_set / --lens-set on every call.
+_CODE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".c",
+                   ".cpp", ".cc", ".h", ".hpp", ".rs", ".go", ".rb",
+                   ".php", ".cs", ".swift", ".kt", ".sh", ".bat",
+                   ".ps1", ".sql", ".lua", ".r", ".m"}
+_DOC_SUFFIXES = {".md", ".markdown", ".txt", ".rst", ".pdf",
+                  ".html", ".htm"}
+
+
+def infer_lens_set(path: Path | str) -> str:
+    """Pick a lens-set name from the file extension.
+
+    W13 Tier 1 Shift A: auto-default so agents calling
+    ``harness.review()`` don't have to learn the lens-set vocabulary
+    before they get useful output.  Source files (.py/.js/.ts/...) ->
+    'code-review'; prose files (.md/.txt/.pdf/...) -> 'doc-review';
+    unknown extensions -> 'default' (3-engine general review).
+    """
+    p = Path(path)
+    suffix = p.suffix.lower()
+    if suffix in _CODE_SUFFIXES:
+        return "code-review"
+    if suffix in _DOC_SUFFIXES:
+        return "doc-review"
+    return "default"
+
+
+# W13 Tier 1 Shift F: safe-floor max_tokens.  4000 keeps multi-paragraph
+# reviews intact (the 2000 prior default frequently truncated mid-finding,
+# noted by the master audit + operator's 2026-05-24 high-cap directive).
+SAFE_MAX_TOKENS_FLOOR = 4000
+QUICK_MAX_TOKENS = 1000
+
+
+def auto_max_tokens(*, quick: bool = False,
+                     override: int | None = None) -> int:
+    """Resolve max_tokens with safe floor + --quick opt-down.
+
+    Precedence:
+      1. Explicit ``override`` int (e.g. CLI ``--max-tokens 8000``) wins.
+      2. ``quick=True`` selects ``QUICK_MAX_TOKENS`` (fast preview).
+      3. Otherwise the safe floor ``SAFE_MAX_TOKENS_FLOOR``.
+
+    Designed so an agent calling ``harness.review(path)`` with no
+    keyword args gets quality-by-default; a deliberate ``quick=True``
+    is the only way to drop below the floor without an explicit number.
+    """
+    if override is not None:
+        return int(override)
+    if quick:
+        return QUICK_MAX_TOKENS
+    return SAFE_MAX_TOKENS_FLOOR
+
+
 # Alternative lens sets the operator can pick via --lens-set
 LENS_SETS: dict[str, list[Lens]] = {
     "default": DEFAULT_LENSES,

@@ -473,6 +473,234 @@ def retrieve(dispatch_id: str,
     return chunks
 
 
+@dataclass
+class ReviewResult:
+    """Result of a single ``harness.review()`` call.
+
+    Wraps the multi-engine document review pipeline.  Most agents only
+    need ``synthesis_path`` (the one-file Markdown summary of convergent
+    + divergent findings) — the rest is for richer integrations.
+    """
+    synthesis_path: str
+    out_dir: str
+    document_text_length: int
+    elapsed_s: float
+    total_cost_usd: float
+    successful_lenses: int
+    failed_lenses: int
+    lens_set_used: str
+    max_tokens_used: int
+    lens_results: list[dict] = field(default_factory=list)
+
+
+def review(document_path: str,
+           *,
+           lens_set: str | None = None,
+           max_tokens: int | None = None,
+           quick: bool = False,
+           out_dir: str | None = None,
+           max_concurrent: int = 3,
+           progress_cb=None) -> ReviewResult:
+    """Multi-engine document review — the SDK twin of ``harness review``.
+
+    W13 Wed-Thu bundle (universal panel pick): bottles the CLI verb
+    into a programmatic API so agents can chain reviews into their own
+    workflows (e.g. "review every patch, gate merge on score").
+
+    Args:
+        document_path: TXT / MD / PDF / source-file path.
+        lens_set: Named lens set (``'default'`` / ``'code-review'`` /
+            ``'doc-review'``).  When ``None`` (the default), the file
+            extension picks one via :func:`harness.review.infer_lens_set`
+            — W13 Tier 1 Shift A.
+        max_tokens: Per-engine output cap.  When ``None``, picks the
+            safe floor (4000) — W13 Tier 1 Shift F.  Explicit int wins.
+        quick: Shortcut to drop max_tokens to ``QUICK_MAX_TOKENS``
+            (1000) for fast preview.  Ignored if ``max_tokens`` is set.
+        out_dir: Where to write artifacts.  Defaults to
+            ``coord/reviews/review-<basename>/``.
+        max_concurrent: Parallel engine dispatches.
+        progress_cb: Optional ``callable(str)`` for progress lines
+            (mirrors the CLI's ``click.echo`` log).
+
+    Returns:
+        :class:`ReviewResult` — small object; rich data lives at
+        ``synthesis_path`` on disk so the agent's context stays light.
+
+    Raises:
+        FileNotFoundError: ``document_path`` doesn't exist
+        ValueError: unsupported file type or unknown ``lens_set``
+    """
+    from pathlib import Path as _Path
+    from harness.reviewer import (
+        LENS_SETS as _LENS_SETS,
+        auto_max_tokens as _auto_max_tokens,
+        infer_lens_set as _infer_lens_set,
+        review_document as _review_document,
+    )
+    doc = _Path(document_path)
+    resolved_lens_set = lens_set or _infer_lens_set(doc)
+    if resolved_lens_set not in _LENS_SETS:
+        raise ValueError(
+            f"unknown lens_set {resolved_lens_set!r}; "
+            f"allowed: {sorted(_LENS_SETS)}"
+        )
+    resolved_max_tokens = _auto_max_tokens(quick=quick, override=max_tokens)
+    out_dir_path = _Path(out_dir) if out_dir is not None else None
+    raw = _review_document(
+        document_path=doc,
+        lenses=_LENS_SETS[resolved_lens_set],
+        max_tokens=resolved_max_tokens,
+        out_dir=out_dir_path,
+        max_concurrent=max_concurrent,
+        progress_cb=progress_cb,
+    )
+    successful = sum(1 for r in raw["results"] if r.ok)
+    failed = sum(1 for r in raw["results"] if not r.ok)
+    lens_results = [
+        {
+            "lens_id": r.lens.id,
+            "engine": r.lens.engine,
+            "ok": r.ok,
+            "error": r.error if not r.ok else None,
+            "elapsed_s": round(r.elapsed_s, 3),
+            "tokens_in": r.tokens_in,
+            "tokens_out": r.tokens_out,
+            "cost_usd": r.cost_usd,
+        }
+        for r in raw["results"]
+    ]
+    return ReviewResult(
+        synthesis_path=str(raw["synthesis_path"]),
+        out_dir=str(raw["out_dir"]),
+        document_text_length=int(raw["document_text_length"]),
+        elapsed_s=float(raw["elapsed_s"]),
+        total_cost_usd=float(raw["total_cost_usd"]),
+        successful_lenses=successful,
+        failed_lenses=failed,
+        lens_set_used=resolved_lens_set,
+        max_tokens_used=resolved_max_tokens,
+        lens_results=lens_results,
+    )
+
+
+def capabilities() -> dict:
+    """Return a dict describing what this harness install can do.
+
+    W13 Wed-Thu bundle: closes the "I just cloned the repo, what does
+    this thing do?" gap for fresh agents.  Cheap to call (introspection
+    only, no engine dispatch).  Returned dict fields:
+
+        version: harness package version
+        python_version: e.g. '3.13.13'
+        platform: e.g. 'win32'
+        sdk_functions: list of stable callable names
+        cli_verbs: list of top-level ``harness <verb>`` names
+        review:
+            supported_extensions: file types ``harness review`` accepts
+            lens_sets: named lens sets the operator can pick
+            default_max_tokens: the safe-floor default
+            quick_max_tokens: the --quick shortcut value
+        engines:
+            configured: engine names known to the adapter system
+            keys_present: per-engine bool — is the API key reachable
+        audit:
+            ledger_path: where ``~/.harness/audit.jsonl`` resolves
+            max_age_days: retention window
+    """
+    import platform as _platform
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    # --- SDK surface (just the public names) -----------------------
+    from harness import __all__ as _all
+    sdk_funcs = sorted(
+        n for n in _all
+        if n not in (
+            "__version__", "DispatchResult", "HarnessSDKError",
+            "ResultNotFoundError", "ResultCorruptedError",
+            "ReturnMode", "RetrieveScope", "ReviewResult",
+        )
+    )
+
+    # --- CLI verbs ------------------------------------------------
+    try:
+        from harness.cli import cli as _cli
+        cli_verbs = sorted(_cli.commands.keys())
+    except Exception:
+        cli_verbs = []
+
+    # --- Review surface ------------------------------------------
+    try:
+        from harness.reviewer import (
+            LENS_SETS as _LENS_SETS,
+            QUICK_MAX_TOKENS as _QUICK,
+            SAFE_MAX_TOKENS_FLOOR as _FLOOR,
+            _CODE_SUFFIXES as _CODE,
+            _DOC_SUFFIXES as _DOC,
+            _TXT_SUFFIXES as _TXT,
+        )
+        review_info = {
+            "supported_extensions": sorted(
+                set(_CODE) | set(_DOC) | set(_TXT) | {".pdf"},
+            ),
+            "lens_sets": sorted(_LENS_SETS.keys()),
+            "default_max_tokens": _FLOOR,
+            "quick_max_tokens": _QUICK,
+        }
+    except Exception as exc:
+        review_info = {"error": f"introspection_failed: {exc}"}
+
+    # --- Engines available + key reachability --------------------
+    engines_info: dict = {"configured": [], "keys_present": {}}
+    try:
+        from harness.engines.concrete import get_engine as _get_engine
+        # Known production engines per CLAUDE.md routing rules
+        for engine_name in ("kimi", "deepseek", "mimo",
+                             "anthropic", "gemini"):
+            engines_info["configured"].append(engine_name)
+            try:
+                _get_engine(engine_name, prefer_dpapi=False)
+                engines_info["keys_present"][engine_name] = True
+            except Exception:
+                engines_info["keys_present"][engine_name] = False
+    except Exception as exc:
+        engines_info = {"error": f"introspection_failed: {exc}"}
+
+    # --- Audit ledger settings -----------------------------------
+    try:
+        from harness.audit_jsonl import (
+            _ledger_path as _aud_path,
+            _max_age_days as _aud_age,
+        )
+        audit_info = {
+            "ledger_path": str(_aud_path()),
+            "max_age_days": _aud_age(),
+        }
+    except Exception as exc:
+        audit_info = {"error": f"introspection_failed: {exc}"}
+
+    return {
+        "version": _harness_version(),
+        "python_version": _sys.version.split()[0],
+        "platform": _sys.platform,
+        "sdk_functions": sdk_funcs,
+        "cli_verbs": cli_verbs,
+        "review": review_info,
+        "engines": engines_info,
+        "audit": audit_info,
+    }
+
+
+def _harness_version() -> str:
+    """Resolve harness package version without circular import."""
+    try:
+        from harness import __version__ as _v
+        return _v
+    except Exception:
+        return "unknown"
+
+
 def budget_status(*, since_hours: float | None = None,
                   ledger_path=None) -> dict:
     """Return the current session's offload + cost telemetry.

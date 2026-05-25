@@ -2434,24 +2434,29 @@ def backup_restore_cmd(archive: Path, overwrite: bool) -> None:
 @cli.command(name="review")
 @click.argument("document", type=click.Path(exists=True, dir_okay=False,
                                             path_type=Path))
-@click.option("--lens-set", default="default",
+@click.option("--lens-set", default=None,
               type=click.Choice(["default", "code-review", "doc-review"]),
-              help="Which set of lenses to apply.  default = 3 engines "
-                   "(correctness + technical/security + realism).  "
-                   "code-review tunes for source files.  doc-review for "
-                   "documentation.")
-@click.option("--max-tokens", type=int, default=6000,
-              help="Per-engine output cap.  Default 6000 per the high-cap "
-                   "directive (operator 2026-05-24).")
+              help="Which set of lenses to apply.  Default: auto-pick "
+                   "from file extension (W13 Tier 1 Shift A) — source "
+                   "files -> code-review, prose -> doc-review, else "
+                   "the 3-engine 'default' set.")
+@click.option("--max-tokens", type=int, default=None,
+              help="Per-engine output cap.  Default: safe floor 4000 "
+                   "(W13 Tier 1 Shift F); --quick lowers to 1000.")
+@click.option("--quick", is_flag=True, default=False,
+              help="Fast preview mode: drops --max-tokens to 1000.  "
+                   "Useful for first-look reviews; rerun without --quick "
+                   "for full-depth findings.")
 @click.option("--out-dir", type=click.Path(file_okay=False, path_type=Path),
               default=None,
               help="Where to write artifacts.  Defaults to "
                    "coord/reviews/review-<document-basename>/.")
 @click.option("--max-concurrent", type=int, default=3,
               help="Parallel engine dispatches (default 3).")
-def review_cmd(document: Path, lens_set: str, max_tokens: int,
+def review_cmd(document: Path, lens_set: Optional[str],
+                max_tokens: Optional[int], quick: bool,
                 out_dir: Path | None, max_concurrent: int) -> None:
-    """W12-B-INSTANT-REVIEW: multi-engine document review.
+    """W12-B-INSTANT-REVIEW + W13 Tier 1 Shifts A+F: multi-engine document review.
 
     Drops a TXT/MD/PDF (or source file) on the harness for parallel
     multi-engine audit.  Outputs a synthesis Markdown summarizing
@@ -2460,21 +2465,44 @@ def review_cmd(document: Path, lens_set: str, max_tokens: int,
     Default cost: $0 for the 3-engine subscription mix (Kimi + MiMo
     are subscription; DeepSeek is fractions of a cent per call).
 
+    Auto-defaults (W13 Wed-Thu bundle):
+      - --lens-set: picked from file extension (.py -> code-review,
+        .md/.pdf -> doc-review, else 'default')
+      - --max-tokens: 4000 safe floor (--quick drops to 1000)
+
     Examples:
 
       harness review ./student-project-brief.pdf
 
-      harness review src/foo/parser.py --lens-set code-review
+      harness review src/foo/parser.py        # auto: code-review
 
-      harness review docs/AGENT_QUICKSTART.md --lens-set doc-review
+      harness review docs/AGENT_QUICKSTART.md # auto: doc-review
+
+      harness review big.md --quick           # fast preview
     """
-    from harness.review import review_document, LENS_SETS
-    lenses = LENS_SETS[lens_set]
+    from harness.reviewer import (
+        review_document, LENS_SETS, infer_lens_set, auto_max_tokens,
+    )
+    resolved_lens_set = lens_set or infer_lens_set(document)
+    resolved_max_tokens = auto_max_tokens(quick=quick, override=max_tokens)
+    if resolved_lens_set not in LENS_SETS:
+        click.echo(f"error: unknown lens_set {resolved_lens_set!r}; "
+                   f"allowed: {sorted(LENS_SETS)}", err=True)
+        sys.exit(2)
+    lenses = LENS_SETS[resolved_lens_set]
+    if lens_set is None:
+        click.echo(f"[review] auto-picked lens-set: {resolved_lens_set} "
+                   f"(from suffix {document.suffix or '<none>'!r}) — "
+                   f"override with --lens-set")
+    if max_tokens is None:
+        mode = "quick" if quick else "safe-floor"
+        click.echo(f"[review] auto-picked max-tokens: {resolved_max_tokens} "
+                   f"({mode}) — override with --max-tokens")
     try:
         result = review_document(
             document_path=document,
             lenses=lenses,
-            max_tokens=max_tokens,
+            max_tokens=resolved_max_tokens,
             out_dir=out_dir,
             max_concurrent=max_concurrent,
             progress_cb=lambda line: click.echo(f"[review] {line}"),
@@ -2602,6 +2630,63 @@ def audit_summary_cmd(since_hours: float, fmt: str) -> None:
         for eng, n in sorted(s["by_engine"].items()):
             click.echo(f"    {eng:>15s}  {n:>5d}")
     click.echo("Ledger: ~/.harness/audit.jsonl")
+
+
+@cli.command(name="capabilities")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty", help="Output format.")
+def capabilities_cmd(fmt: str) -> None:
+    """W13 Wed-Thu bundle: show what this harness install can do.
+
+    Cheap introspection — no engine dispatch.  Lists SDK functions,
+    CLI verbs, reachable engines (by API key presence), review lens
+    sets + supported extensions, and audit ledger settings.
+
+    Designed for fresh agents asking "what does this harness know how
+    to do?" without grepping the source.
+    """
+    from harness import capabilities as cap_fn
+    cap = cap_fn()
+    if fmt == "json":
+        click.echo(json.dumps(cap, indent=2, default=str))
+        return
+    click.echo(f"harness v{cap.get('version', '?')} on "
+               f"Python {cap.get('python_version', '?')} "
+               f"({cap.get('platform', '?')})")
+    click.echo("")
+    click.echo("SDK functions:")
+    for fn in cap.get("sdk_functions", []):
+        click.echo(f"  harness.{fn}()")
+    click.echo("")
+    click.echo("Top-level CLI verbs:")
+    verbs = cap.get("cli_verbs", [])
+    # 4-column display
+    width = max((len(v) for v in verbs), default=0) + 2
+    cols = 4
+    for i in range(0, len(verbs), cols):
+        click.echo("  " + "".join(
+            v.ljust(width) for v in verbs[i:i + cols]
+        ))
+    click.echo("")
+    rv = cap.get("review", {})
+    click.echo("Review (`harness review` / `harness.review()`):")
+    click.echo(f"  lens-sets: {', '.join(rv.get('lens_sets', []))}")
+    click.echo(f"  default max_tokens: {rv.get('default_max_tokens', '?')}")
+    click.echo(f"  --quick max_tokens: {rv.get('quick_max_tokens', '?')}")
+    exts = rv.get("supported_extensions", [])
+    click.echo(f"  supported extensions ({len(exts)}): {', '.join(exts[:12])}"
+               + (f", ...+{len(exts) - 12} more" if len(exts) > 12 else ""))
+    click.echo("")
+    eng = cap.get("engines", {})
+    click.echo("Engines:")
+    for name in eng.get("configured", []):
+        ok = "OK" if eng.get("keys_present", {}).get(name) else "no key"
+        click.echo(f"  {name:<12s} {ok}")
+    click.echo("")
+    aud = cap.get("audit", {})
+    click.echo("Audit:")
+    click.echo(f"  ledger: {aud.get('ledger_path', '?')}")
+    click.echo(f"  retention: {aud.get('max_age_days', '?')} days")
 
 
 @cli.command(name="l5-banner-demo", hidden=True)
@@ -2859,6 +2944,30 @@ def today_cmd(since_hours: int) -> None:
             click.echo(f"  ... and {len(blockers) - 8} more")
     else:
         click.echo("  None — preflight is green.")
+
+    # Section 2.5: capabilities surface (W13 Wed-Thu bundle)
+    # One-line install snapshot so a fresh agent / operator sees what
+    # this binary can do without firing `harness capabilities` separately.
+    click.echo("\n## Install + capabilities\n")
+    try:
+        from harness import capabilities as _cap_fn
+        cap = _cap_fn()
+        eng_keys = cap.get("engines", {}).get("keys_present", {})
+        eng_ok = sorted(k for k, v in eng_keys.items() if v)
+        eng_missing = sorted(k for k, v in eng_keys.items() if not v)
+        click.echo(f"  harness v{cap.get('version', '?')} on "
+                   f"Python {cap.get('python_version', '?')} "
+                   f"({cap.get('platform', '?')})")
+        click.echo(f"  Engines reachable: "
+                   f"{', '.join(eng_ok) if eng_ok else '(none — set API keys)'}")
+        if eng_missing:
+            click.echo(f"  Engines unreachable: {', '.join(eng_missing)} "
+                       f"(set the *_API_KEY env vars)")
+        click.echo(f"  Audit ledger: {cap.get('audit', {}).get('ledger_path', '?')}")
+        click.echo(f"  SDK: {', '.join(cap.get('sdk_functions', [])) or '(none)'}")
+        click.echo(f"  Run `harness capabilities` for the full dict.")
+    except Exception as exc:
+        click.echo(f"  (capabilities introspection failed: {exc})")
 
     # Section 3: next 1-3 actions
     click.echo("\n## Suggested next actions\n")
