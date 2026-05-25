@@ -2,29 +2,29 @@
 
 You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone\` (migrated 2026-05-22 from `D:\Projects\xaxiu-harness\` — see MIGRATION.md).  Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope.  This project has its own isolated Claude Code memory directory at `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (43 entries) — warehouse-specific memory is intentionally NOT loaded here.
 
-## How to invoke the harness in THIS dev shell (READ FIRST)
+## First action in any fresh session / clone / worktree (READ FIRST)
 
-The bare `harness` console script requires `pip install -e .` to have been run in your active Python environment.  If it has NOT (the default in fresh sessions), `harness today` returns **exit 127 "command not found"**.
-
-**Always-works invocation from the repo root** (no install required):
+**Always run this single command first, before anything else:**
 
 ```bash
-PYTHONPATH=src python -m harness today
-PYTHONPATH=src python -m harness plan show
-PYTHONPATH=src python -m harness capabilities
-PYTHONPATH=src python -m harness --help
+pip install -e . --quiet && harness today && harness plan show
 ```
 
-Use this form in every Bash tool call.  If you want the bare `harness` form to work, run `pip install -e .` first (W13-INSTALL-VERIFY proves this path works on a fresh venv).
+- `pip install -e .` is **idempotent** — fast (~1s) if already done in this shell's environment, ~30s on a cold fresh clone.  W13-INSTALL-VERIFY's CI gate proves this works end-to-end on a fresh venv.  Required because a fresh clone has no runtime deps importable (`click`, `httpx`, `pypdf` etc.) and no console script on PATH.
+- After the install, `harness today` (shipped + reachable engines + blockers) and `harness plan show` (active strategic plan from `coord/CURRENT_PLAN.md`) give the ground-truth orientation.
 
-**Minimal session-resume orientation** (paste these two commands first thing):
+If `pip install -e .` is genuinely impossible (no network, locked-down env), fall back to **module form** which only needs the runtime deps already installed:
 
 ```bash
 PYTHONPATH=src python -m harness today
 PYTHONPATH=src python -m harness plan show
 ```
 
-`today` shows what shipped + reachable engines + blockers; `plan show` renders the active strategic plan from `coord/CURRENT_PLAN.md`.  These two are the ground-truth orientation — trust them over any stale doc.
+If THIS also fails with `ModuleNotFoundError`, you're in a truly fresh clone with no deps — `pip install -e .` is the only path.
+
+**Recommended minimal session-resume prompt** (works against any clone/worktree state):
+
+> *"Resume xaxiu-harness. Run `pip install -e . --quiet && harness today && harness plan show`. Propose next action."*
 
 ---
 

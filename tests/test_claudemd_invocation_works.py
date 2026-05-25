@@ -49,28 +49,37 @@ def test_claudemd_exists() -> None:
     assert CLAUDE_MD.is_file()
 
 
-def test_claudemd_documents_pythonpath_invocation() -> None:
-    """The always-works invocation form must be prominent in CLAUDE.md.
+def test_claudemd_documents_bootstrap_command() -> None:
+    """The bootstrap command must be PROMINENT and lead the file.
 
-    A fresh agent reading the file should learn within the first 80
-    lines that the working command is
-    ``PYTHONPATH=src python -m harness ...`` — NOT the bare ``harness``
-    console script which requires pip install -e ..
+    A fresh clone has no runtime deps importable and no `harness`
+    console script.  The only invocation that works against ANY state
+    (fresh clone / cold worktree / already-installed shell) is
+    `pip install -e .` first.  CLAUDE.md must teach this within the
+    first 80 lines so a fresh agent learns it before running anything.
     """
     text = _claudemd_text()
-    # Substring check — must appear at all
-    assert "PYTHONPATH=src python -m harness" in text, (
-        "CLAUDE.md must document the always-works invocation form "
-        "`PYTHONPATH=src python -m harness ...` so fresh sessions "
-        "don't hit `exit 127: harness: command not found`.  See "
-        "the 'How to invoke the harness in THIS dev shell' section."
-    )
-    # Proximity check — should be early in the file (within first 80 lines)
     head = "\n".join(text.splitlines()[:80])
-    assert "PYTHONPATH=src python -m harness" in head, (
-        "The PYTHONPATH=src invocation note must appear within the "
-        "first 80 lines of CLAUDE.md so it's visible before a fresh "
-        "agent runs any commands."
+    # The single canonical bootstrap-or-orient command
+    assert "pip install -e ." in head, (
+        "CLAUDE.md must document `pip install -e .` within the first "
+        "80 lines as the bootstrap step.  Fresh clones / worktrees "
+        "have no deps; without this, every other invocation form "
+        "fails with ModuleNotFoundError or exit 127."
+    )
+
+
+def test_claudemd_documents_pythonpath_fallback() -> None:
+    """The PYTHONPATH=src module form must remain documented as fallback.
+
+    Some restricted environments can't `pip install` (locked-down CI,
+    network-isolated boxes).  In that case, if runtime deps ARE
+    already importable, the module form still works.  Keep it visible.
+    """
+    text = _claudemd_text()
+    assert "PYTHONPATH=src python -m harness" in text, (
+        "CLAUDE.md should keep the `PYTHONPATH=src python -m harness` "
+        "form documented as a fallback for envs that can't pip install."
     )
 
 
