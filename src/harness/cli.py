@@ -2341,6 +2341,69 @@ def preflight_latency_cmd(fmt: str, since_hours: float | None,
                                   check_name=check_name))
 
 
+@cli.command(name="review")
+@click.argument("document", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path))
+@click.option("--lens-set", default="default",
+              type=click.Choice(["default", "code-review", "doc-review"]),
+              help="Which set of lenses to apply.  default = 3 engines "
+                   "(correctness + technical/security + realism).  "
+                   "code-review tunes for source files.  doc-review for "
+                   "documentation.")
+@click.option("--max-tokens", type=int, default=6000,
+              help="Per-engine output cap.  Default 6000 per the high-cap "
+                   "directive (operator 2026-05-24).")
+@click.option("--out-dir", type=click.Path(file_okay=False, path_type=Path),
+              default=None,
+              help="Where to write artifacts.  Defaults to "
+                   "coord/reviews/review-<document-basename>/.")
+@click.option("--max-concurrent", type=int, default=3,
+              help="Parallel engine dispatches (default 3).")
+def review_cmd(document: Path, lens_set: str, max_tokens: int,
+                out_dir: Path | None, max_concurrent: int) -> None:
+    """W12-B-INSTANT-REVIEW: multi-engine document review.
+
+    Drops a TXT/MD/PDF (or source file) on the harness for parallel
+    multi-engine audit.  Outputs a synthesis Markdown summarizing
+    convergent + divergent findings + the raw per-engine reviews.
+
+    Default cost: $0 for the 3-engine subscription mix (Kimi + MiMo
+    are subscription; DeepSeek is fractions of a cent per call).
+
+    Examples:
+
+      harness review ./student-project-brief.pdf
+
+      harness review src/foo/parser.py --lens-set code-review
+
+      harness review docs/AGENT_QUICKSTART.md --lens-set doc-review
+    """
+    from harness.review import review_document, LENS_SETS
+    lenses = LENS_SETS[lens_set]
+    try:
+        result = review_document(
+            document_path=document,
+            lenses=lenses,
+            max_tokens=max_tokens,
+            out_dir=out_dir,
+            max_concurrent=max_concurrent,
+            progress_cb=lambda line: click.echo(f"[review] {line}"),
+        )
+    except FileNotFoundError as exc:
+        click.echo(f"error: file not found: {exc}", err=True)
+        sys.exit(2)
+    except ValueError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(2)
+    click.echo("")
+    click.echo(f"  Synthesis: {result['synthesis_path']}")
+    click.echo(f"  Per-engine artifacts: {result['out_dir']}")
+    click.echo(f"  Cost: ${result['total_cost_usd']:.4f} "
+               f"({result['elapsed_s']:.0f}s)")
+    n_failed = sum(1 for r in result["results"] if not r.ok)
+    sys.exit(0 if n_failed == 0 else 1)
+
+
 @cli.command(name="cost-today")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
               default="pretty",

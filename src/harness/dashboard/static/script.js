@@ -16,6 +16,93 @@
     if (el) el.textContent = text;
   }
 
+  // W12-A2 cost widget --------------------------------------------------
+  function fmtMoney(n) {
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    return '$' + Number(n).toFixed(4);
+  }
+
+  function fmtBudget(n) {
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    return '$' + Number(n).toFixed(2);
+  }
+
+  function renderCost(cost) {
+    const summaryEl = document.querySelector('#cost .cost-summary');
+    const barEl = document.querySelector('#cost .cost-bar');
+    const subEl = document.querySelector('#cost .cost-sub');
+    const paidEl = document.querySelector('#cost .cost-paid');
+    const offloadEl = document.querySelector('#cost .cost-offload');
+    if (!summaryEl || !barEl) return;
+    if (!cost || cost.error) {
+      summaryEl.textContent = '(no cost data)';
+      barEl.style.width = '0%';
+      barEl.className = 'cost-bar';
+      return;
+    }
+    const spent = cost.spent_usd || 0;
+    const budget = cost.budget_usd || 5.0;
+    const pct = Math.max(0, Math.min(100, (cost.pct_of_budget_used || 0) * 100));
+    summaryEl.textContent =
+      fmtMoney(spent) + ' spent / ' + fmtBudget(budget) +
+      ' (' + (cost.window_label || 'today') + ') — ' +
+      (cost.dispatches || 0) + ' dispatches';
+    barEl.style.width = pct.toFixed(1) + '%';
+    barEl.className = 'cost-bar' + (
+      cost.status === 'exhausted' ? ' exhausted'
+      : cost.status === 'warn' ? ' warn'
+      : ''
+    );
+    if (subEl) {
+      subEl.textContent = (cost.subscription_dispatches || 0) + ' sub';
+    }
+    if (paidEl) {
+      paidEl.textContent = (cost.paid_dispatches || 0) + ' paid';
+    }
+    if (offloadEl) {
+      offloadEl.textContent =
+        Math.round((cost.offload_ratio || 0) * 100) + '% offload';
+    }
+  }
+
+  // W12-A2 L5 banner -----------------------------------------------------
+  function renderL5(l5) {
+    const banner = document.querySelector('#l5-banner');
+    const body = document.querySelector('#l5-banner .l5-body');
+    if (!banner || !body) return;
+    const events = (l5 && l5.events) || [];
+    if (!events.length) {
+      banner.classList.add('hidden');
+      return;
+    }
+    banner.classList.remove('hidden');
+    body.textContent = events.map(function (ev) {
+      return ev.code + ' — ' + ev.summary + '\n  ACTION: ' + ev.action;
+    }).join('\n\n');
+  }
+
+  function fetchJSON(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error(url + ' returned ' + r.status);
+      return r.json();
+    });
+  }
+
+  function refreshCostAndL5() {
+    fetchJSON('/api/cost').then(renderCost).catch(function (e) {
+      console.warn('[dashboard] /api/cost', e);
+      renderCost(null);
+    });
+    fetchJSON('/api/l5-events').then(renderL5).catch(function (e) {
+      console.warn('[dashboard] /api/l5-events', e);
+      renderL5(null);
+    });
+  }
+
+  refreshCostAndL5();
+  setInterval(refreshCostAndL5, 30000);  // 30s refresh
+  // --------------------------------------------------------------------
+
   function renderSnapshot(data) {
     const state = data.state || {};
 

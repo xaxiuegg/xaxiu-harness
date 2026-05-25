@@ -9,6 +9,26 @@
 <body>
   <h1>xaxiu-harness</h1>
 
+  <!-- W12-A2: L5 banner pinned top so it catches the operator's eye first -->
+  <section id="l5-banner" class="l5-banner hidden">
+    <div class="l5-title">L5 ESCALATION</div>
+    <div class="l5-body content">Waiting for data…</div>
+  </section>
+
+  <!-- W12-A2: cost-today widget pulled from /api/cost -->
+  <section id="cost">
+    <h2>Cost today</h2>
+    <div class="cost-summary content">Waiting for data…</div>
+    <div class="cost-bar-wrap">
+      <div class="cost-bar" style="width: 0%"></div>
+    </div>
+    <div class="cost-breakdown">
+      <span class="cost-sub">— sub</span>
+      <span class="cost-paid">— paid</span>
+      <span class="cost-offload">— offload</span>
+    </div>
+  </section>
+
   <section id="loop">
     <h2>Loop</h2>
     <div class="content">Waiting for data…</div>
