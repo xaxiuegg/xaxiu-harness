@@ -1,11 +1,7 @@
 # Current strategic plan — xaxiu-harness
 
-**Source**: 15-engine strategic panel (Round 2 final verdict, 2026-05-25)
-**Full verdict**: [coord/reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md](reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md)
-**Synthesized from**: 13/18 substantive engine voices (Round 1: 11/15; Round 2: 2/3 — MiMo unable to complete strategic-language synthesis)
-**Combined confidence**: ~0.87
-**Last updated**: 2026-05-25
-**Last commit on update**: pending (W13-HARNESS-PLAN-VERB)
+**Source**: 15-engine Round 2 strategic panel ([FINAL_VERDICT](reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md)) + Friday v1.0.0 release-gate ([FINAL_VERDICT](reviews/v1-release-gate/FINAL_VERDICT.md), 2/3 APPROVE).
+**Last updated**: 2026-05-25 (v1.0.0 tagged)
 
 > **For agents**: this file is the active "what are we trying to ship right now" document. `coord/STATUS.csv` is the per-row task tracker; this file is the strategic narrative that explains why those rows exist. When the rows here disagree with `harness today`, trust `harness today` for current state and update this file.
 
@@ -21,32 +17,17 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 ## Where we are right now (as of 2026-05-25)
 
-**Tag**: `v1.0.0-rc.1` (working toward `v1.0.0` final)
-**Tests**: 2360 passed, 6 skipped (slow-marked install-verify), 0 failed
+**Tag**: **`v1.0.0`** (tagged at commit `d30bace` after 2/3 APPROVE on the Friday release-gate panel — DeepSeek + MiMo APPROVE, Kimi auth-out)
+**Tests**: 2377 passed, 6 skipped (slow-marked install-verify), 0 failed
 **Budget**: well under $5/session cap
 
-### Shipped this week (Week 1 of the panel plan)
-
-| Day | Row | Status | Commit |
-|---|---|---|---|
-| Mon | FUTURE-prefix sweep + CI gate | shipped | `734ad5b` |
-| Mon | W13-INSTALL-VERIFY (universal #1 panel pick) | shipped | `014390d` |
-| Tue | W13-AUDIT-JSONL + secret redaction (universal #2 panel pick) | shipped | `cbd6ae3` |
-| Wed-Thu | `harness.review()` SDK + `harness.capabilities()` SDK + Tier 1 Shifts A+F (auto-lens-set + safe-floor max_tokens) | shipped | `81411a4` |
-| Thu (bonus) | Doc-refresh + `tests/test_docs_mention_all_sdk_fns.py` (symmetric CI gate) + `harness plan show` verb | shipped | `4317fe8` |
-| Fri | `W13-MORNING-BRIEF-CONTEXT-BUG` test fix + broaden `.harness/` + stop-hook gitignore | shipped | this commit |
+**Week 1 complete**: 11 W13 rows + v1.0.0 tagged at `d30bace` on 2026-05-25. Per-row detail in [coord/releases/v1.0.0.md](releases/v1.0.0.md). Audit infra now routes W12+ tasks to STATUS.csv via [W13-AUDIT-INFRA-W12-PLUS].
 
 ---
 
 ## What's next
 
-### Immediate (today / tomorrow)
-
-1. **Friday re-run panel** — fire the same 3-engine (Kimi + DeepSeek + MiMo) panel against the v1.0.0-rc.1 state, now with a fully green 2360/2360 suite.
-   - If ≥80% APPROVE → tag `v1.0.0` final.
-   - If <80% → fix specific blockers called out by the panel, then re-run.
-
-### Week 2 — Operations Hardening (~6-8h)
+### Immediate — Week 2 Operations Hardening (~6-8h)
 
 | Row | Effort | Why |
 |---|---|---|
@@ -85,9 +66,10 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 ## Single most important action (live)
 
-**Run Friday's re-panel. If ≥80% APPROVE, tag `v1.0.0` final.**
+**Start Week 2 with W13-BACKUP-SECRETS-REDACT + W13-BACKUP-INTEGRITY** — DeepSeek panel finding that backup tarballs may contain API keys and restore lacks integrity verification. The audit ledger from W13-AUDIT-JSONL handles redaction for the dispatch path; backups need the same treatment.
 
-After v1.0.0 ships, the Week 2 hardening rows become the new "next" — but until v1.0.0 is tagged, the immediate question is binary: are we ready, or do we need to fix something the panel surfaces?
+Secondary v1.0.1 housekeeping (not blocking Week 2):
+- **W14-KIMI-AUTH-DIAGNOSIS** — the release-gate panel hit HTTP 403 across all Kimi models despite `KIMI_API_KEY` being set + `harness capabilities` reporting `keys_present.kimi=true`. Investigate whether the key is invalid, the quota is exhausted, or the engine adapter is hitting a deprecated endpoint. Tracked separately so it doesn't block the hardening track.
 
 ---
 
