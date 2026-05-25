@@ -2517,6 +2517,93 @@ def cost_today_cmd(fmt: str, since_hours: float) -> None:
         click.echo(format_cost_widget(since_hours=window))
 
 
+@cli.group(name="audit")
+def audit_group() -> None:
+    """W13-AUDIT-JSONL: forensic audit trail for every dispatch.
+
+    Append-only redacted ledger at ``~/.harness/audit.jsonl``.  Every
+    call to ``harness.dispatch()`` (SDK + CLI) lands one row with
+    engine, tokens, cost, retry count, and redacted prompt/response
+    excerpts.  Foundation for trustworthy auto-defaults — without it,
+    every auto-lens-set / auto-max-tokens / auto-retry becomes an
+    un-debuggable black box.
+    """
+
+
+@audit_group.command(name="show")
+@click.option("--since-hours", type=float, default=24.0,
+              help="Window in hours (default 24).  Use 0 for all-time.")
+@click.option("--engine", default=None,
+              help="Filter by engine name (kimi/deepseek/mimo/anthropic/gemini).")
+@click.option("--tail", type=int, default=20,
+              help="Show only the last N matching events (default 20). "
+                   "Use 0 for all matches.")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty", help="Output format.")
+def audit_show_cmd(since_hours: float, engine: Optional[str],
+                    tail: int, fmt: str) -> None:
+    """Show recent dispatch audit events (redacted)."""
+    from harness.audit_jsonl import iter_events
+    window = None if since_hours <= 0 else since_hours
+    tail_n = None if tail <= 0 else tail
+    events = iter_events(since_hours=window, engine=engine, tail=tail_n)
+    if fmt == "json":
+        click.echo(json.dumps(events, indent=2))
+        return
+    if not events:
+        scope = (f"in the last {since_hours:g}h"
+                 if since_hours > 0 else "all-time")
+        eng_scope = f" for engine={engine!r}" if engine else ""
+        click.echo(f"No audit events {scope}{eng_scope}.")
+        click.echo("Ledger: ~/.harness/audit.jsonl")
+        return
+    for ev in events:
+        ts = ev.get("ts", "?")
+        eng = ev.get("engine", "?")
+        ok = "ok" if ev.get("success") else "FAIL"
+        tin = ev.get("tokens_in", 0)
+        tout = ev.get("tokens_out", 0)
+        cost = ev.get("cost_usd", 0.0)
+        elapsed = ev.get("elapsed_ms", 0)
+        retry = ev.get("retry_count", 0)
+        retry_s = f" retry={retry}" if retry else ""
+        err = ev.get("error")
+        err_s = f" err={err[:60]!r}" if err else ""
+        click.echo(
+            f"{ts}  {eng:>10s}  {ok:>4s}  "
+            f"in={tin:>5d}  out={tout:>5d}  ${cost:.4f}  "
+            f"{elapsed:>6d}ms{retry_s}{err_s}"
+        )
+
+
+@audit_group.command(name="summary")
+@click.option("--since-hours", type=float, default=24.0,
+              help="Window in hours (default 24).  Use 0 for all-time.")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty", help="Output format.")
+def audit_summary_cmd(since_hours: float, fmt: str) -> None:
+    """Aggregate audit events into a one-screen summary."""
+    from harness.audit_jsonl import summary as audit_summary
+    window = None if since_hours <= 0 else since_hours
+    s = audit_summary(since_hours=window)
+    if fmt == "json":
+        click.echo(json.dumps(s, indent=2))
+        return
+    win_s = (f"last {since_hours:g}h" if since_hours > 0 else "all-time")
+    click.echo(f"Audit summary ({win_s}):")
+    click.echo(f"  total events   : {s['total_events']}")
+    click.echo(f"  successful     : {s['successful']}")
+    click.echo(f"  failed         : {s['failed']}")
+    click.echo(f"  retries total  : {s['retries_total']}")
+    click.echo(f"  total tokens   : {s['total_tokens']}")
+    click.echo(f"  total cost USD : ${s['total_cost_usd']:.4f}")
+    if s["by_engine"]:
+        click.echo("  by engine:")
+        for eng, n in sorted(s["by_engine"].items()):
+            click.echo(f"    {eng:>15s}  {n:>5d}")
+    click.echo("Ledger: ~/.harness/audit.jsonl")
+
+
 @cli.command(name="l5-banner-demo", hidden=True)
 def l5_banner_demo_cmd() -> None:
     """W11-L5-OUTPUT-CONTRACT: render a sample L5 ESCALATION banner.

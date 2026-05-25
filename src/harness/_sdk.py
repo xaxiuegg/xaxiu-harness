@@ -200,21 +200,96 @@ def dispatch(prompt: str,
     if no_cache:
         _os.environ["HARNESS_DISPATCH_CACHE_BYPASS"] = "1"
 
+    # W13-AUDIT-JSONL 2026-05-24: capture elapsed for audit ledger so
+    # every dispatch lands one append-only redacted row.  Wrapping the
+    # dispatch call in a time.monotonic() pair lets us record both
+    # successful and failed paths uniformly.
+    import time as _time
+    _audit_start_mono = _time.monotonic()
+    _dispatch_exc: BaseException | None = None
+    result = None
     try:
         # Re-import dispatch_packet at call time so test monkeypatches
         # of "harness.engines.dispatcher.dispatch_packet" take effect.
         from harness.engines import dispatcher as _dispatcher
-        result = _dispatcher.dispatch_packet(
-            project=project,
-            packet_path=packet_path,
-            force_engine=force_engine,
-        )
+        try:
+            result = _dispatcher.dispatch_packet(
+                project=project,
+                packet_path=packet_path,
+                force_engine=force_engine,
+            )
+        except BaseException as _e:  # noqa: BLE001
+            _dispatch_exc = _e
+            raise
     finally:
         if no_cache:
             if cache_env_snapshot is None:
                 _os.environ.pop("HARNESS_DISPATCH_CACHE_BYPASS", None)
             else:
                 _os.environ["HARNESS_DISPATCH_CACHE_BYPASS"] = cache_env_snapshot
+
+        # W13-AUDIT-JSONL: best-effort audit append.  NEVER raises;
+        # NEVER blocks the dispatch return / re-raise path.
+        try:
+            from harness.audit_jsonl import (
+                append_dispatch_event as _audit_append,
+            )
+            _audit_elapsed_ms = int(
+                (_time.monotonic() - _audit_start_mono) * 1000,
+            )
+            if result is not None:
+                _audit_engine = getattr(result, "engine_used", "") \
+                    or force_engine or "unknown"
+                _audit_success = bool(getattr(result, "success", False))
+                _audit_error = getattr(result, "error", None) \
+                    or getattr(result, "error_excerpt", None)
+                _audit_tokens_in = int(
+                    getattr(result, "tokens_in", 0) or 0,
+                )
+                _audit_tokens_out = int(
+                    getattr(result, "tokens_out", 0) or 0,
+                )
+                _audit_cost = float(
+                    getattr(result, "cost_usd", 0.0) or 0.0,
+                )
+                _audit_dispatch_id = getattr(result, "dispatch_id", None)
+                _audit_response = getattr(result, "text", None)
+                _audit_retry = int(
+                    getattr(result, "retry_count", 0) or 0,
+                )
+            else:
+                # Dispatcher itself raised; record what we know.
+                _audit_engine = force_engine or "unknown"
+                _audit_success = False
+                _audit_error = (
+                    f"dispatcher_exception: "
+                    f"{type(_dispatch_exc).__name__}: {_dispatch_exc}"
+                    if _dispatch_exc is not None else "dispatcher_unknown_error"
+                )
+                _audit_tokens_in = 0
+                _audit_tokens_out = 0
+                _audit_cost = 0.0
+                _audit_dispatch_id = None
+                _audit_response = None
+                _audit_retry = 0
+            _audit_append(
+                engine=_audit_engine,
+                model=_audit_engine,
+                dispatch_id=_audit_dispatch_id,
+                success=_audit_success,
+                error=_audit_error,
+                tokens_in=_audit_tokens_in,
+                tokens_out=_audit_tokens_out,
+                cost_usd=_audit_cost,
+                elapsed_ms=_audit_elapsed_ms,
+                retry_count=_audit_retry,
+                lens_set=None,  # FUTURE W13-AUTO-LENS: wire when impl lands
+                max_tokens_used=None,  # FUTURE W13-AUTO-MAX-TOKENS
+                prompt=prompt if isinstance(prompt, str) else None,
+                response=_audit_response,
+            )
+        except Exception:
+            pass  # Audit is best-effort; NEVER block the dispatch return path.
 
     # Convert the dispatcher's DispatchResult (which has a different
     # field set: `error` instead of `error_excerpt`, no `.full()` method)
