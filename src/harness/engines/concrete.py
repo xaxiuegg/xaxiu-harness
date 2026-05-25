@@ -406,8 +406,14 @@ class AnthropicConcrete(Engine):
     ) -> EngineResponse:
         extra = extra_args or {}
 
-        start = time.monotonic()
-        try:
+        # W13-ENGINE-RETRY-RESILIENT 2026-05-25: same shared retry
+        # helper as MiMo + Gemini.  Auto-retry once on transient httpx
+        # errors; preserve repr(exc) for non-transient ones (replaces
+        # the prior bare ``except Exception:`` -> "internal").
+        from harness.engines._retry import run_with_retry
+
+        def _do_http() -> EngineResponse:
+            start = time.monotonic()
             with httpx.Client(
                 verify=True,
                 timeout=_DEFAULT_TIMEOUT,
@@ -435,38 +441,8 @@ class AnthropicConcrete(Engine):
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                 )
-        except httpx.HTTPStatusError as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error=f"HTTP {e.response.status_code}",
-            )
-        except httpx.TimeoutException:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="timeout",
-            )
-        except httpx.ConnectError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="network",
-            )
-        except Exception:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="internal",
-            )
+
+        return run_with_retry(_do_http)
 
     @staticmethod
     def _build_payload(
@@ -619,8 +595,17 @@ class MiMoConcrete(Engine):
         if not model or model.strip().lower() in {"auto", "mimo", "default"}:
             model = detect_mimo_model(packet_content, extra)
 
-        start = time.monotonic()
-        try:
+        # W13-ENGINE-RETRY-RESILIENT 2026-05-25: wrap the HTTP work in
+        # the shared retry helper.  Previously a bare ``except Exception:``
+        # masked transient RemoteProtocolError events as the opaque
+        # string "internal" — the W13 investigation showed 12/12
+        # retries of those "failures" succeeded.  The helper auto-
+        # retries once on transient httpx errors + preserves repr(exc)
+        # in the error field for non-transient ones.
+        from harness.engines._retry import run_with_retry
+
+        def _do_http() -> EngineResponse:
+            start = time.monotonic()
             with httpx.Client(
                 verify=True,
                 timeout=_DEFAULT_TIMEOUT,
@@ -649,38 +634,8 @@ class MiMoConcrete(Engine):
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                 )
-        except httpx.HTTPStatusError as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error=f"HTTP {e.response.status_code}",
-            )
-        except httpx.TimeoutException:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="timeout",
-            )
-        except httpx.ConnectError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="network",
-            )
-        except Exception:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="internal",
-            )
+
+        return run_with_retry(_do_http)
 
     @staticmethod
     def _build_payload(

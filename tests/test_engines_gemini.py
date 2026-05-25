@@ -194,7 +194,8 @@ def test_gemini_connect_error(
     resp = gemini_engine.dispatch("hello", "gemini-model", {})
 
     assert resp.success is False
-    assert resp.error == "network"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves repr(exc)
+    assert resp.error.startswith("network"), resp.error
 
 
 def test_gemini_timeout(
@@ -208,7 +209,8 @@ def test_gemini_timeout(
     resp = gemini_engine.dispatch("hello", "gemini-model", {})
 
     assert resp.success is False
-    assert resp.error == "timeout"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25
+    assert resp.error.startswith("timeout"), resp.error
 
 
 def test_gemini_malformed_json(
@@ -222,7 +224,10 @@ def test_gemini_malformed_json(
     resp = gemini_engine.dispatch("hello", "gemini-model", {})
 
     assert resp.success is False
-    assert resp.error == "internal"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: "internal" replaced with
+    # "unexpected: <ExcType>: <repr>" for debuggability.
+    assert resp.error.startswith("unexpected"), resp.error
+    assert "JSONDecodeError" in resp.error, resp.error
 
 
 def test_gemini_missing_api_key(

@@ -151,84 +151,80 @@ class StreamingTransport(Engine):
         url = self._endpoint_url()
         headers = self._headers()
 
-        start = time.monotonic()
-        accumulated: dict[str, Any] = {}
-        usage_info: Optional[dict] = None
-        finish_reason: str = ""
+        # W13-ENGINE-RETRY-RESILIENT 2026-05-25: shared retry helper.
+        # Streaming has one nuance vs the other engines: on
+        # ``RemoteProtocolError`` Kimi can RESCUE accumulated partial
+        # content via ``_handle_remote_protocol_error``.  Preserve
+        # that — if rescue returns a partial-success response, return
+        # it directly (no retry, we already got content).  Only when
+        # rescue returns None do we re-raise so the outer helper can
+        # retry the whole stream.
+        from harness.engines._retry import run_with_retry
 
-        try:
-            with httpx.Client(verify=True, timeout=_default_timeout()) as client:
-                with client.stream(
-                    "POST", url, headers=headers, json=payload,
-                ) as response:
-                    if response.status_code != 200:
-                        latency_ms = int((time.monotonic() - start) * 1000)
-                        return EngineResponse(
-                            success=False, text="", latency_ms=latency_ms,
-                            error=f"HTTP {response.status_code}",
-                        )
-                    for line in response.iter_lines():
-                        if not line:
-                            continue
-                        # W5-V / W5-MM: both "data: " (standard) and "data:"
-                        # (Kimi's non-standard) prefix variants.
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                        elif line.startswith("data:"):
-                            data_str = line[5:]
-                        else:
-                            continue
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                        except (ValueError, json.JSONDecodeError):
-                            continue
-                        choices = chunk.get("choices") or []
-                        if choices:
-                            delta = choices[0].get("delta") or {}
-                            self._process_delta(delta, accumulated)
-                            fr = choices[0].get("finish_reason")
-                            if fr:
-                                finish_reason = fr
-                        if chunk.get("usage"):
-                            usage_info = chunk["usage"]
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return self._finalize_response(
-                accumulated, latency_ms, usage_info, finish_reason,
-            )
-        except httpx.HTTPStatusError as exc:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error=f"HTTP {exc.response.status_code}",
-            )
-        except httpx.TimeoutException:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="timeout",
-            )
-        except httpx.ConnectError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="network",
-            )
-        except httpx.RemoteProtocolError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            rescued = self._handle_remote_protocol_error(
-                accumulated, latency_ms,
-            )
-            if rescued is not None:
-                return rescued
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="remote_protocol_error",
-            )
-        except Exception:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False, text="", latency_ms=latency_ms,
-                error="internal",
-            )
+        def _do_stream() -> EngineResponse:
+            start = time.monotonic()
+            accumulated: dict[str, Any] = {}
+            usage_info: Optional[dict] = None
+            finish_reason: str = ""
+            try:
+                with httpx.Client(
+                    verify=True, timeout=_default_timeout(),
+                ) as client:
+                    with client.stream(
+                        "POST", url, headers=headers, json=payload,
+                    ) as response:
+                        if response.status_code != 200:
+                            # Explicit non-200 — don't retry; just
+                            # surface the status (auth failures etc).
+                            latency_ms = int((time.monotonic() - start) * 1000)
+                            return EngineResponse(
+                                success=False, text="",
+                                latency_ms=latency_ms,
+                                error=f"HTTP {response.status_code}",
+                            )
+                        for line in response.iter_lines():
+                            if not line:
+                                continue
+                            # W5-V / W5-MM: both "data: " (standard) and
+                            # "data:" (Kimi's non-standard) variants.
+                            if line.startswith("data: "):
+                                data_str = line[6:]
+                            elif line.startswith("data:"):
+                                data_str = line[5:]
+                            else:
+                                continue
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                            except (ValueError, json.JSONDecodeError):
+                                continue
+                            choices = chunk.get("choices") or []
+                            if choices:
+                                delta = choices[0].get("delta") or {}
+                                self._process_delta(delta, accumulated)
+                                fr = choices[0].get("finish_reason")
+                                if fr:
+                                    finish_reason = fr
+                            if chunk.get("usage"):
+                                usage_info = chunk["usage"]
+                latency_ms = int((time.monotonic() - start) * 1000)
+                return self._finalize_response(
+                    accumulated, latency_ms, usage_info, finish_reason,
+                )
+            except httpx.RemoteProtocolError:
+                # Streaming-specific: try to rescue accumulated partial
+                # content BEFORE retrying.  Kimi overrides this to
+                # return a partial-success response.  If rescue returns
+                # a response, we use it (no retry).  If None, re-raise
+                # so run_with_retry treats this as a transient error
+                # and retries the whole stream once.
+                latency_ms = int((time.monotonic() - start) * 1000)
+                rescued = self._handle_remote_protocol_error(
+                    accumulated, latency_ms,
+                )
+                if rescued is not None:
+                    return rescued
+                raise  # let run_with_retry catch + retry
+
+        return run_with_retry(_do_stream)

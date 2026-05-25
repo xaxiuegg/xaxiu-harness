@@ -115,6 +115,9 @@ def test_default_dispatch_returns_http_error_for_non_200(monkeypatch) -> None:
 
 
 def test_default_dispatch_handles_timeout(monkeypatch) -> None:
+    """W13-ENGINE-RETRY-RESILIENT 2026-05-25: timeout is now retried
+    ONCE before returning failure.  We raise the same exception both
+    attempts to force the failure path."""
     def handler(request):
         raise httpx.TimeoutException("server too slow")
 
@@ -122,7 +125,7 @@ def test_default_dispatch_handles_timeout(monkeypatch) -> None:
     eng = _MinimalTransport()
     resp = eng.dispatch("hi", "test-model", {})
     assert resp.success is False
-    assert resp.error == "timeout"
+    assert resp.error.startswith("timeout"), resp.error
 
 
 def test_default_dispatch_handles_connect_error(monkeypatch) -> None:
@@ -133,14 +136,18 @@ def test_default_dispatch_handles_connect_error(monkeypatch) -> None:
     eng = _MinimalTransport()
     resp = eng.dispatch("hi", "test-model", {})
     assert resp.success is False
-    assert resp.error == "network"
+    # W13: error preserves repr(exc), prefixed with "network: "
+    assert resp.error.startswith("network"), resp.error
 
 
 def test_default_dispatch_handles_remote_protocol_error_default(
     monkeypatch
 ) -> None:
-    """Default ``_handle_remote_protocol_error`` returns None →
-    base raises ``error="remote_protocol_error"``."""
+    """W13-ENGINE-RETRY-RESILIENT 2026-05-25: default
+    ``_handle_remote_protocol_error`` returns None → first attempt
+    re-raises → run_with_retry retries once → if the second attempt
+    also raises RemoteProtocolError, the failure response carries
+    the categorized error with 'remote_protocol_error' prefix."""
     def handler(request):
         raise httpx.RemoteProtocolError("disconnected")
 
@@ -148,7 +155,7 @@ def test_default_dispatch_handles_remote_protocol_error_default(
     eng = _MinimalTransport()
     resp = eng.dispatch("hi", "test-model", {})
     assert resp.success is False
-    assert resp.error == "remote_protocol_error"
+    assert resp.error.startswith("remote_protocol_error"), resp.error
 
 
 def test_subclass_remote_protocol_error_hook_rescues_partial(

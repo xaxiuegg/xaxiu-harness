@@ -194,7 +194,10 @@ def test_deepseek_connect_error(
     resp = deepseek_engine.dispatch("hello", "deepseek-chat", {})
 
     assert resp.success is False
-    assert resp.error == "network"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves
+    # repr(exc) prefixed with "network: ".  Substring-check the
+    # category so future repr changes don't break this test.
+    assert resp.error.startswith("network"), resp.error
 
 
 def test_deepseek_timeout(
@@ -208,7 +211,9 @@ def test_deepseek_timeout(
     resp = deepseek_engine.dispatch("hello", "deepseek-chat", {})
 
     assert resp.success is False
-    assert resp.error == "timeout"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves
+    # repr(exc) prefixed with "timeout: ".
+    assert resp.error.startswith("timeout"), resp.error
 
 
 def test_deepseek_malformed_json(
@@ -352,7 +357,10 @@ def test_kimi_connect_error(
     resp = kimi_engine.dispatch("hello", "kimi-model", {})
 
     assert resp.success is False
-    assert resp.error == "network"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves
+    # repr(exc) prefixed with "network: ".  Substring-check the
+    # category so future repr changes don't break this test.
+    assert resp.error.startswith("network"), resp.error
 
 
 def test_kimi_timeout(
@@ -366,7 +374,9 @@ def test_kimi_timeout(
     resp = kimi_engine.dispatch("hello", "kimi-model", {})
 
     assert resp.success is False
-    assert resp.error == "timeout"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves
+    # repr(exc) prefixed with "timeout: ".
+    assert resp.error.startswith("timeout"), resp.error
 
 
 def test_kimi_malformed_json(
@@ -506,7 +516,10 @@ def test_anthropic_connect_error(
     resp = anthropic_engine.dispatch("hello", "claude-3", {})
 
     assert resp.success is False
-    assert resp.error == "network"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves
+    # repr(exc) prefixed with "network: ".  Substring-check the
+    # category so future repr changes don't break this test.
+    assert resp.error.startswith("network"), resp.error
 
 
 def test_anthropic_timeout(
@@ -520,7 +533,9 @@ def test_anthropic_timeout(
     resp = anthropic_engine.dispatch("hello", "claude-3", {})
 
     assert resp.success is False
-    assert resp.error == "timeout"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: error now preserves
+    # repr(exc) prefixed with "timeout: ".
+    assert resp.error.startswith("timeout"), resp.error
 
 
 def test_anthropic_malformed_json(
@@ -534,7 +549,11 @@ def test_anthropic_malformed_json(
     resp = anthropic_engine.dispatch("hello", "claude-3", {})
 
     assert resp.success is False
-    assert resp.error == "internal"
+    # W13-ENGINE-RETRY-RESILIENT 2026-05-25: the bare "internal" string
+    # was the bug we fixed.  JSONDecodeError now surfaces with its
+    # actual type name, prefixed with "unexpected: ".
+    assert resp.error.startswith("unexpected"), resp.error
+    assert "JSONDecodeError" in resp.error, resp.error
 
 
 # ---------------------------------------------------------------------------

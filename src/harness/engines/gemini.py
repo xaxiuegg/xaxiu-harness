@@ -68,8 +68,13 @@ class GeminiConcrete(Engine):
         extra = extra_args or {}
         effective_model = model or self.default_model
 
-        start = time.monotonic()
-        try:
+        # W13-ENGINE-RETRY-RESILIENT 2026-05-25: shared retry helper.
+        # Auto-retry once on transient httpx errors; preserve repr(exc)
+        # for non-transient ones (replaces the prior bare except).
+        from harness.engines._retry import run_with_retry
+
+        def _do_http() -> EngineResponse:
+            start = time.monotonic()
             with httpx.Client(
                 verify=True,
                 timeout=_DEFAULT_TIMEOUT,
@@ -102,38 +107,8 @@ class GeminiConcrete(Engine):
                     latency_ms=latency_ms,
                     error=None,
                 )
-        except httpx.HTTPStatusError as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error=f"HTTP {e.response.status_code}",
-            )
-        except httpx.TimeoutException:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="timeout",
-            )
-        except httpx.ConnectError:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="network",
-            )
-        except Exception:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return EngineResponse(
-                success=False,
-                text="",
-                latency_ms=latency_ms,
-                error="internal",
-            )
+
+        return run_with_retry(_do_http)
 
     @staticmethod
     def _build_payload(

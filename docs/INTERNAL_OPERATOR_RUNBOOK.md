@@ -248,6 +248,16 @@ Check `r.error_excerpt` for the cause.  Common ones:
 - `engine_pool_exhausted`: all engines in fallback chain failed; check cooldowns + API keys
 - `cost_cap_exceeded`: you hit the $5 session cap; raise via `COST_MAX_PER_SESSION` env var
 
+Post-W13-ENGINE-RETRY-RESILIENT (2026-05-25), error strings are now categorized + preserve the actual exception:
+
+- `HTTP <code>`: explicit server response (4xx/5xx) — never retried; check auth + payload
+- `remote_protocol_error: <repr>`: server disconnected mid-stream — retried once automatically; if still failing, the server is genuinely down
+- `timeout: <Class>: <repr>`: client-side timeout (Read/Connect/Write/Pool) — retried once automatically
+- `network: <repr>`: TCP refusal or DNS failure — NOT retried; check network + endpoint
+- `unexpected: <ExcType>: <repr>`: bug or unhandled case — preserves the original exception class + repr.  Replaced the old opaque `"internal"` string from the bare-except wrapper.
+
+The harness automatically retries ONCE on `remote_protocol_error` and `timeout` types (transient API noise).  If both attempts fail, the failure surfaces with the LAST attempt's error string preserved.
+
 ### 6e. The dashboard at localhost:8765 isn't loading
 
 ```bash
