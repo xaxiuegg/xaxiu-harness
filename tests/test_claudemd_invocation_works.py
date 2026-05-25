@@ -69,6 +69,29 @@ def test_claudemd_documents_bootstrap_command() -> None:
     )
 
 
+def test_claudemd_recommends_python_m_harness_form() -> None:
+    """The universal post-install form `python -m harness` must lead
+    the file's recommendation, NOT bare `harness`.
+
+    Windows + Git Bash gotcha: pip install creates `harness.exe` in
+    the Python Scripts directory, but Git Bash often doesn't have
+    that directory on PATH — so `harness today` still returns
+    `command not found` even after a successful pip install.
+
+    `python -m harness <verb>` sidesteps PATH entirely (works
+    whenever `import harness` works).  CLAUDE.md must recommend
+    THIS form, not the bare `harness` form.
+    """
+    text = _claudemd_text()
+    head = "\n".join(text.splitlines()[:80])
+    assert "python -m harness today" in head, (
+        "CLAUDE.md must show `python -m harness today` within the "
+        "first 80 lines.  The bare `harness today` form fails on "
+        "Windows + Git Bash when Python Scripts dir isn't on PATH; "
+        "`python -m harness` is the universal post-install form."
+    )
+
+
 def test_claudemd_documents_pythonpath_fallback() -> None:
     """The PYTHONPATH=src module form must remain documented as fallback.
 
@@ -80,6 +103,21 @@ def test_claudemd_documents_pythonpath_fallback() -> None:
     assert "PYTHONPATH=src python -m harness" in text, (
         "CLAUDE.md should keep the `PYTHONPATH=src python -m harness` "
         "form documented as a fallback for envs that can't pip install."
+    )
+
+
+def test_claudemd_recommended_prompt_has_python_m_form() -> None:
+    """The 'Recommended minimal session-resume prompt' line — the one
+    operators copy-paste verbatim into fresh sessions — must use the
+    universal `python -m harness` form."""
+    text = _claudemd_text()
+    # The recommended-prompt block should chain pip install with the
+    # python -m harness invocations, not bare `harness today`.
+    assert ("python -m harness today" in text
+            and "python -m harness plan show" in text), (
+        "CLAUDE.md's recommended-minimal-prompt section must use "
+        "`python -m harness <verb>` (universal form), NOT bare "
+        "`harness <verb>` (Windows + Git Bash PATH gotcha)."
     )
 
 

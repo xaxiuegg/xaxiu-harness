@@ -7,24 +7,21 @@ You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone
 **Always run this single command first, before anything else:**
 
 ```bash
-pip install -e . --quiet && harness today && harness plan show
+pip install -e . --quiet && python -m harness today && python -m harness plan show
 ```
 
-- `pip install -e .` is **idempotent** — fast (~1s) if already done in this shell's environment, ~30s on a cold fresh clone.  W13-INSTALL-VERIFY's CI gate proves this works end-to-end on a fresh venv.  Required because a fresh clone has no runtime deps importable (`click`, `httpx`, `pypdf` etc.) and no console script on PATH.
-- After the install, `harness today` (shipped + reachable engines + blockers) and `harness plan show` (active strategic plan from `coord/CURRENT_PLAN.md`) give the ground-truth orientation.
+Why this exact form:
 
-If `pip install -e .` is genuinely impossible (no network, locked-down env), fall back to **module form** which only needs the runtime deps already installed:
+- **`pip install -e .`** — idempotent (~1s if already done, ~30s cold fresh clone).  Required because a fresh clone has no runtime deps importable (`click`, `httpx`, `pypdf` etc.).  W13-INSTALL-VERIFY's CI gate proves this works on a fresh venv.
+- **`python -m harness`** (not bare `harness`) — universal post-install form that works regardless of whether your shell's PATH includes Python's Scripts/bin directory.  This is the Windows + Git Bash gotcha: `pip install` creates `harness.exe`, but Git Bash often doesn't have the Scripts dir on PATH, so `harness today` still returns `command not found` even after a successful install.  `python -m harness` sidesteps PATH entirely — it works whenever `import harness` works.
 
-```bash
-PYTHONPATH=src python -m harness today
-PYTHONPATH=src python -m harness plan show
-```
+The bare `harness` form works only AFTER both (a) `pip install -e .` and (b) your shell's PATH includes the Python Scripts directory.  When uncertain, prefer `python -m harness`.
 
-If THIS also fails with `ModuleNotFoundError`, you're in a truly fresh clone with no deps — `pip install -e .` is the only path.
+**Recommended minimal session-resume prompt** (works against any clone/worktree state on any OS):
 
-**Recommended minimal session-resume prompt** (works against any clone/worktree state):
+> *"Resume xaxiu-harness. Run `pip install -e . --quiet && python -m harness today && python -m harness plan show`. Propose next action."*
 
-> *"Resume xaxiu-harness. Run `pip install -e . --quiet && harness today && harness plan show`. Propose next action."*
+If `pip install -e .` is genuinely impossible (no network, locked-down env) BUT deps are somehow already importable, `PYTHONPATH=src python -m harness <verb>` is the last-resort form.
 
 ---
 

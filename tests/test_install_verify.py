@@ -255,6 +255,56 @@ class TestInstallVerify:
         assert "spent" in result.stdout.lower() or \
                "cost" in result.stdout.lower()
 
+    def test_python_m_harness_works_post_install(
+        self, installed_venv: Path,
+    ) -> None:
+        """REGRESSION (W13-PYTHON-M-HARNESS-FORM, caught 2026-05-25):
+
+        On Windows + Git Bash, `pip install -e .` creates `harness.exe`
+        in the venv's Scripts directory, but the bare `harness` form
+        may still fail with `command not found` because Git Bash
+        doesn't always have that directory on PATH.
+
+        The universal post-install form is `python -m harness <verb>` —
+        works whenever `import harness` works, no PATH dependency.
+
+        This test proves that form is reachable from the installed venv
+        for the orientation verbs a fresh agent will run first.
+        """
+        py = _venv_python(installed_venv)
+        for verb in ("today", "plan", "capabilities"):
+            result = _run([str(py), "-m", "harness", verb, "--help"],
+                          timeout=15)
+            assert result.returncode == 0, (
+                f"`python -m harness {verb} --help` failed in the "
+                f"installed venv — this is the universal post-install "
+                f"invocation form CLAUDE.md recommends.\n"
+                f"stdout={result.stdout}\nstderr={result.stderr}"
+            )
+
+    def test_orientation_one_liner_works_post_install(
+        self, installed_venv: Path,
+    ) -> None:
+        """The exact orientation invocation an agent runs after pip
+        install must succeed end-to-end.  Today + plan show are the
+        two commands the recommended-prompt chains together; if either
+        fails, the prompt fails too."""
+        py = _venv_python(installed_venv)
+        # `today` may surface no shipped activity / no plan etc., but
+        # the command itself must exit 0.
+        for verb_args in (["today"], ["plan", "show"]):
+            result = _run(
+                [str(py), "-m", "harness", *verb_args],
+                cwd=REPO_ROOT,  # plan show reads coord/CURRENT_PLAN.md
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"`python -m harness {' '.join(verb_args)}` failed "
+                f"end-to-end in installed venv.  This is verb #{verb_args[0]} "
+                f"of the orientation one-liner CLAUDE.md recommends.\n"
+                f"stdout={result.stdout[:600]}\nstderr={result.stderr[:600]}"
+            )
+
 
 # -- one fast smoke (always runs, even without `-m slow`) -------------------
 
