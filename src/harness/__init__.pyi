@@ -6,7 +6,7 @@ runtime contract in harness/_sdk.py.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Callable, Literal
 
 __version__: str
 
@@ -32,6 +32,20 @@ class DispatchResult:
     def full(self) -> str: ...
 
 
+@dataclass
+class ReviewResult:
+    synthesis_path: str
+    out_dir: str
+    document_text_length: int
+    elapsed_s: float
+    total_cost_usd: float
+    successful_lenses: int
+    failed_lenses: int
+    lens_set_used: str
+    max_tokens_used: int
+    lens_results: list[dict] = ...
+
+
 class HarnessSDKError(Exception): ...
 class ResultNotFoundError(HarnessSDKError): ...
 class ResultCorruptedError(HarnessSDKError): ...
@@ -53,7 +67,27 @@ def retrieve(
     scope: RetrieveScope = ...,
     *,
     chunk_size_tokens: int = ...,
+    project_root: str | None = ...,
 ) -> str | list[str]: ...
 
 
-def budget_status() -> dict: ...
+def review(
+    document_path: str,
+    *,
+    lens_set: str | None = ...,
+    max_tokens: int | None = ...,
+    quick: bool = ...,
+    out_dir: str | None = ...,
+    max_concurrent: int = ...,
+    progress_cb: Callable[[str], None] | None = ...,
+) -> ReviewResult: ...
+
+
+def capabilities() -> dict[str, Any]: ...
+
+
+def budget_status(
+    *,
+    since_hours: float | None = ...,
+    ledger_path: Any | None = ...,
+) -> dict: ...

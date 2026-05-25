@@ -1,8 +1,12 @@
-# xaxiu-harness — cross-project multi-engine LLM dispatch + autonomous loop, v0.4.2
+# xaxiu-harness — cross-project multi-engine LLM dispatch + autonomous loop, v0.1.0 (v1.0.0-rc.1 tagged)
 
-> One command center that sends work packets to Kimi K2.6, MiMo Pro v2.5, DeepSeek v4-flash, or Anthropic; tracks every task in a shared spreadsheet; and keeps running even while you sleep.
+> One command center that sends work packets to Kimi K2.6, MiMo Pro v2.5, DeepSeek v4-flash, Anthropic, or Gemini; tracks every task in a shared spreadsheet; and keeps running even while you sleep.
 
-**Non-technical operator? → [docs/OPERATOR_RUNBOOK.md](docs/OPERATOR_RUNBOOK.md)** is the single-page daily playbook.  Three commands every morning, plain-language recovery for the common failures, no Python knowledge required.
+**Version note (2026-05-25)**: package version stays at `0.1.0` while the Horizon C internal-tool work continues; the current release tag is **`v1.0.0-rc.1`**.  Run `harness capabilities` for the live install snapshot — it's the canonical source of truth for what this binary can do.
+
+**Non-technical operator? → [docs/INTERNAL_OPERATOR_RUNBOOK.md](docs/INTERNAL_OPERATOR_RUNBOOK.md)** is the daily playbook covering laptop-dies recovery, key rotation, engine-down debugging, and the daily loop.  No Python knowledge required.
+
+**Fresh agent?** → [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md) gets you from `git clone` to a real engine response in under 5 commands, plus a hallucination-resistance checklist.
 
 ---
 
@@ -17,19 +21,18 @@
 
 ---
 
-## What's new (Wave 5 closeout, 2026-05-23)
+## What's new (Wave 13, 2026-05-25)
 
-- **`harness start` boot screen (W5-SS)** — interactive orchestrator picker (Claude / MiMo / DeepSeek / Kimi) with connection status, mode toggle (interactive vs autonomous), state persistence. The Claude-Code-style entry point for the harness.
-- **Engine-as-tool architecture (post-brainstorm)** — Claude positioned alongside Kimi/MiMo/DeepSeek as a selectable backend rather than the only orchestrator. 18/20 brainstorm agents endorse MiMo-primary + DeepSeek-fallback for production; Claude best for strategic planning bursts via Task Scheduler.
-- **Kimi wiring fix (W5-V)** — Kimi K2.6 now reliably handles source-laden packets (was silently empty under wiring drift). Two bugs fixed: streaming requirement (`stream=true`) and non-standard SSE prefix (`data:` without space).
-- **Unbounded `max_tokens` for subscription engines (W5-W)** — Kimi default raised 32K → 200K, MiMo 32K → 131K (hardware max). Operator directive: don't artificially cap engines on flat-rate subscriptions.
-- **Autonomous orchestrator (Phase 3)** — `harness orchestrator start` (Path α: STATUS-backlog-driven) and `harness queue execute` (Path β: spec-queue-driven). Both ship and validated end-to-end.
-- **Kimi-API default planner (W5-AA)** — `harness queue execute --planner-engine kimi-api` (new default) plans for $0 instead of using Claude.
-- **Strict paths (W5-BB)** — declare `## Strict Paths` in a spec to bind the worker to exact output paths. Pre-creates dirs, injects packet hint, post-validates file existence.
-- **L5 operator-escalation contract (W5-Y, W5-DD)** — `HarnessError` subclasses that reach the CLI top level emit a stable `*** OPERATOR ESCALATION (L5) ***` banner so observer scrapers can grep reliably.
-- **Task Scheduler interval bounds (W5-Z)** — `orchestrator install-scheduler` now auto-selects `/SC MINUTE` vs `/SC DAILY` based on interval (fixes the `Invalid value for /MO` failure on intervals ≥ 24h).
+This section is updated by-hand and drifts; **`coord/STATUS.csv` is the canonical truth** and `harness today` shows the last 24h live.
 
-See [`memory/engine-reliability.md`](memory/engine-reliability.md) for the post-W5 reliability matrix.
+- **`harness.review()` + `harness.capabilities()` SDK functions** — multi-engine document review is now programmatically callable, and `capabilities()` gives a one-call introspection dict (SDK fns, CLI verbs, engine key presence, lens-sets, audit ledger).  W13 Wed-Thu bundle.
+- **W13 Tier 1 Shifts A + F (auto-defaults)** — `harness review` auto-picks `--lens-set` from file extension (`.py` → code-review, `.md`/`.pdf` → doc-review, else default) and `--max-tokens` to a safe floor of 4000 (or 1000 with `--quick`).  Explicit flags always win.
+- **W13-AUDIT-JSONL forensic ledger** — every `harness.dispatch()` call lands one redacted row in `~/.harness/audit.jsonl` (7 secret-pattern classes scrubbed; never raises; size-cap + age-prune).  Surfaced via `harness audit show` / `harness audit summary`.
+- **W13-INSTALL-VERIFY CI gate** — every PR runs `pip install -e .` in a fresh venv and verifies the console script + SDK imports + `harness review --help` all work end-to-end.  Closes the "fresh-clone agent install promise" gap from AGENT_QUICKSTART.md.
+- **W13-ENGINE-RETRY-RESILIENT** — all 5 engine adapters (Kimi, DeepSeek, MiMo, Anthropic, Gemini) share a retry helper that classifies transient errors (`RemoteProtocolError`, `TimeoutException`) and retries once with a 0.5s cooldown.  Replaces the opaque `error="internal"` strings with descriptive `repr(exc)`.
+- **W13-FUTURE-MARKER-AUDIT** — docs that reference unimplemented CLI verbs now must use the `**FUTURE (...)**` marker, enforced by `tests/test_docs_no_future_as_present.py`.  Same gate now also enforces (via the new `tests/test_docs_mention_all_sdk_fns.py`) that every public SDK name appears in `docs/AGENT_QUICKSTART.md`.
+
+See [`memory/engine-reliability.md`](memory/engine-reliability.md) for engine reliability + cooldown policy and [`docs/INTERNAL_OPERATOR_RUNBOOK.md`](docs/INTERNAL_OPERATOR_RUNBOOK.md) for operational procedures.
 
 ---
 
@@ -69,12 +72,17 @@ harness <verb> --help
 
 ---
 
-## The 25 CLI verb groups at a glance
+## The CLI verb groups at a glance
+
+> **Note**: this table drifts.  Run `harness --help` for the live list or `harness capabilities` for the introspected snapshot.  As of v1.0.0-rc.1 (2026-05-25) there are 50+ top-level verbs.
 
 | Group | Subcommands | What it does |
 |---|---|---|
 | `adapter` | `from-description`, `list`, `validate` | Create or check project adapters (YAML configs that tell harness how to talk to each project). |
+| `audit` | `show`, `summary` | **W13-AUDIT-JSONL**: read the forensic ledger at `~/.harness/audit.jsonl`.  Every `harness.dispatch()` lands one redacted row. |
+| `backup` | `create`, `list`, `prune`, `restore` | **W13-BACKUP-RESTORE**: snapshot `.harness/`, `coord/observer/`, `coord/STATUS.csv`, `state/` for laptop-dies recovery.  Secrets stay out by design. |
 | `budget` | `show`, `summary`, `set-cap`, `reset` | Track spending per engine and set monthly spending limits. |
+| `capabilities` | — | **W13 Wed-Thu**: introspection only — print SDK functions, CLI verbs, engine key presence, lens-sets, audit ledger.  Cheap; no engine dispatch. |
 | `burst` | — | Temporarily send all traffic to one engine for a set number of minutes. |
 | `coord` | `plan`, `plan-from-description`, `run`, `work`, `retry`, `integrate`, `replan`, `status`, `watch`, `list`, `cancel`, `cleanup` | Run the multi-agent coordinator: plan a wave (from spec OR natural language), run workers, retry failed ones, merge results, live-tail events, list runs, cancel in-flight, GC stale worktrees. |
 | `dashboard-serve` | — | Launch the operator web dashboard (default port 7878). |
@@ -95,6 +103,7 @@ harness <verb> --help
 | `queue` | `list`, `execute` | **W5-U Path β** — burst-composition spec queue.  Drop `spec/auto/*.md` files, run `harness queue execute --once --planner-engine kimi-api --no-merge` to process them autonomously. |
 | `replay` | — | Reconstruct what happened during a past dispatch for debugging. |
 | `retro` | — | Generate a daily retro summary from history. |
+| `review` | — | **W12-B + W13 Wed-Thu**: drop a TXT/MD/PDF/source file for parallel multi-engine review.  Auto-picks lens-set from extension; `--quick` for fast preview. |
 | `session` | `check`, `bootstrap`, `ack`, `crisis-check`, `arm-crisis-check`, `ok-to-stop` | Monitor session health and recommend when to start a fresh Claude session; `ok-to-stop --json` exposes the canonical "are you done yet" gate. |
 | `state` | `inspect` | Pretty-print the dev loop runtime state file for human reading (uses ConfigCorruption + L5 banner on bad JSON). |
 | `status` | `report`, `init`, `add`, `update`, `list`, `summary`, `verify` | Manage the canonical task tracker ([`coord/STATUS.csv`](coord/STATUS.csv)). |

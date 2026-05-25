@@ -2632,6 +2632,60 @@ def audit_summary_cmd(since_hours: float, fmt: str) -> None:
     click.echo("Ledger: ~/.harness/audit.jsonl")
 
 
+@cli.group(name="plan")
+def plan_group() -> None:
+    """W13-HARNESS-PLAN-VERB: surface the active strategic plan.
+
+    The plan lives at ``coord/CURRENT_PLAN.md`` — a hand-maintained
+    narrative document distilled from the most recent strategic
+    planning panel.  ``coord/STATUS.csv`` is the per-row task tracker;
+    this file explains WHY those rows exist + what comes after.
+
+    A fresh agent can run ``harness plan show`` to load the current
+    strategic narrative without grepping the repo.
+    """
+
+
+@plan_group.command(name="show")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "raw", "json"]),
+              default="pretty", help="Output format.  'raw' prints the "
+                                       "Markdown verbatim; 'pretty' adds "
+                                       "a header banner; 'json' returns "
+                                       "{path, exists, last_modified_iso, "
+                                       "body_chars, body}.")
+def plan_show_cmd(fmt: str) -> None:
+    """Print the active strategic plan from ``coord/CURRENT_PLAN.md``."""
+    from harness.plan import load_current_plan, plan_path
+    info = load_current_plan()
+    if fmt == "json":
+        click.echo(json.dumps(info, indent=2, default=str))
+        return
+    if not info["exists"]:
+        click.echo(
+            f"No plan found at {info['path']}.\n"
+            f"  Create it by writing a Markdown file at that path "
+            f"summarizing the active strategic plan.\n"
+            f"  (See coord/reviews/ for the most recent planning panel "
+            f"output if you need a starting point.)",
+            err=True,
+        )
+        sys.exit(2)
+    if fmt == "pretty":
+        click.echo("=" * 60)
+        click.echo(f"  Current strategic plan ({info['path']})")
+        click.echo(f"  Last modified: {info['last_modified_iso']}")
+        click.echo("=" * 60)
+        click.echo("")
+    click.echo(info["body"])
+
+
+@plan_group.command(name="path")
+def plan_path_cmd() -> None:
+    """Print the absolute path to ``coord/CURRENT_PLAN.md``."""
+    from harness.plan import plan_path
+    click.echo(str(plan_path()))
+
+
 @cli.command(name="capabilities")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
               default="pretty", help="Output format.")

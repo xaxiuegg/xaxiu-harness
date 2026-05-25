@@ -6,6 +6,28 @@
 
 This guide is validated end-to-end against Kimi, DeepSeek, and MiMo (see `coord/coverage/W11_E2E_SDK_PROOF.md`).
 
+> **Orientation shortcut**: once installed, an agent can self-discover everything below by running two commands — `harness today` (shows shipped today, blockers, **install + capabilities**) and `harness capabilities` (lists SDK functions, CLI verbs, reachable engines, audit ledger path).  These are the live truth; if anything in this doc disagrees, the runtime introspection wins.  See sections 0 and 12.
+
+---
+
+## 0. Orient yourself in 2 commands
+
+After install (section 1), before doing anything else, an agent should run:
+
+```bash
+harness today           # shipped in last 24h + blockers + reachable engines + L5 events
+harness capabilities    # SDK function list, CLI verb list, engine key presence, audit ledger
+```
+
+These are **introspection-only** — no engine dispatch, near-zero cost.  Use them as the source of truth for "what can this binary do right now."  They are protected by a CI gate (`tests/test_docs_no_future_as_present.py`) so they never reference fictional verbs.
+
+The W13-AUDIT-JSONL ledger at `~/.harness/audit.jsonl` records every dispatch with redacted prompt/response excerpts — review it with:
+
+```bash
+harness audit show --tail 20         # last 20 dispatch rows (redacted)
+harness audit summary --since-hours 24
+```
+
 ---
 
 ## 1. Clone + install
@@ -166,7 +188,7 @@ harness today --since-hours 24
 ## 10. The API surface, briefly
 
 ```python
-# harness/__init__.py re-exports:
+# harness/__init__.py re-exports (validated by tests/test_docs_mention_all_sdk_fns.py):
 dispatch(prompt, engine=None, *, return_mode='summary', timeout_sec=420.0,
          with_full_text=False, no_cache=False) -> DispatchResult
 
@@ -174,6 +196,19 @@ retrieve(dispatch_id, scope='summary'|'full'|'chunks', *,
          chunk_size_tokens=2000, project_root=None) -> str | list[str]
 
 budget_status(*, since_hours=None, ledger_path=None) -> dict
+
+review(document_path, *, lens_set=None, max_tokens=None, quick=False,
+       out_dir=None, max_concurrent=3, progress_cb=None) -> ReviewResult
+    # W13 Wed-Thu bundle: multi-engine document review.  lens_set=None
+    # auto-picks from file extension (.py->code-review, .md/.pdf->doc-
+    # review, else 'default').  max_tokens=None resolves via safe-floor
+    # (4000 default; quick=True drops to 1000; explicit int wins).
+
+capabilities() -> dict
+    # Cheap introspection.  Returns {version, python_version, platform,
+    # sdk_functions, cli_verbs, review (lens_sets+supported_extensions+
+    # default_max_tokens+quick_max_tokens), engines (configured+
+    # keys_present), audit (ledger_path+max_age_days)}.
 
 # DispatchResult attributes (context-frugal defaults):
 .success      bool
@@ -189,21 +224,49 @@ budget_status(*, since_hours=None, ledger_path=None) -> dict
 
 .full() -> str           # lazy round-trip to cache + retrieve()
 
+# ReviewResult attributes:
+.synthesis_path   str    # path to SYNTHESIS.md (most agents only need this)
+.out_dir          str
+.document_text_length  int
+.elapsed_s        float
+.total_cost_usd   float
+.successful_lenses, .failed_lenses  int
+.lens_set_used    str
+.max_tokens_used  int
+.lens_results     list[dict]  # per-lens engine + ok + tokens + cost
+
 # Exceptions:
 HarnessSDKError              # base
 ResultNotFoundError          # dispatch_id has no cached body
 ResultCorruptedError         # cached payload malformed
 ```
 
-Type stubs live in `src/harness/__init__.pyi` for IDE autocomplete.
+Type stubs live in `src/harness/__init__.pyi` for IDE autocomplete.  A CI gate
+(`tests/test_docs_mention_all_sdk_fns.py`) fails the build if anything in
+`harness.__all__` is missing from this section.
 
 ## 11. Where to look next
 
 - `CLAUDE.md` — project memory + operator directives
 - `coord/STATUS.csv` — canonical task tracker (this is THE source of truth)
+- `coord/CURRENT_PLAN.md` — active strategic plan (also surfaced via `harness plan show`)
 - `spec/` — wave plans + acceptance criteria
-- `coord/reviews/wave-11-closeout.md` — what shipped in the most recent wave
 - `coord/coverage/W11_E2E_SDK_PROOF.md` — the live-engine E2E proof this quickstart is validated against
+- `docs/INTERNAL_OPERATOR_RUNBOOK.md` — laptop-dies / key-rotation / engine-down / daily-loop / debugging procedures
 - `harness --help` — full CLI surface (`harness advanced list` shows the hidden engineering verbs)
 
 If `harness.dispatch()` returns `success=False` with a message you don't understand, run `harness preflight` and look for the `L5 ESCALATION` banner — it will name the exact next action.
+
+## 12. Hallucination-resistance checklist
+
+Before claiming a verb / SDK function / behavior exists, an agent should:
+
+1. **Trust the binary, not the doc.**  Run `harness capabilities` for the live SDK + CLI surface, or `harness <verb> --help` for verb-level signatures.
+2. **Check STATUS.csv for shipped status.**  Rows tagged `shipped` are done; `todo` / `in_progress` are not.  Don't claim a `todo` row is shipped.
+3. **Use `harness audit show` to verify dispatch history**, not memory of what you "think happened" earlier in the session.
+4. **CI gates that already protect you**:
+   - `tests/test_docs_no_future_as_present.py` — fails if a doc references a non-registered CLI verb
+   - `tests/test_docs_mention_all_sdk_fns.py` — fails if `harness.__all__` adds a public name this doc doesn't mention
+   - `tests/test_install_verify.py` (W13) — fails if `pip install -e .` doesn't produce a working `harness` console script with the public SDK importable
+
+If you propose a behavior and a CI gate isn't covering it, that's a row worth filing.
