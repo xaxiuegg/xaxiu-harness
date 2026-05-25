@@ -111,7 +111,7 @@ def test_default_dispatch_returns_http_error_for_non_200(monkeypatch) -> None:
     eng = _MinimalTransport()
     resp = eng.dispatch("hi", "test-model", {})
     assert resp.success is False
-    assert resp.error == "HTTP 500"
+    assert resp.error.startswith("HTTP 500")
 
 
 def test_default_dispatch_handles_timeout(monkeypatch) -> None:

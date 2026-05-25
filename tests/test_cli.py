@@ -222,12 +222,16 @@ def test_engines_list(mock_read_engine_health, runner: CliRunner) -> None:
 
 @patch("harness.cli.probe_all_engines")
 def test_engines_health(mock_probe, runner: CliRunner) -> None:
+    # W13-ENGINE-FAILURE-VISIBILITY: ``engines --health`` now defaults to a
+    # live dispatch probe.  This test continues to exercise the legacy
+    # shallow probe via the ``--shallow`` flag.  See
+    # tests/test_engine_failure_visibility.py for live-probe coverage.
     mock_probe.return_value = {
         "deepseek": ("up", None),
         "kimi": ("down", "No API key for kimi. Run `harness env` to verify."),
         "anthropic": ("down", "network"),
     }
-    result = runner.invoke(cli, ["engines", "--health"])
+    result = runner.invoke(cli, ["engines", "--health", "--shallow"])
     assert result.exit_code == 0
     assert "deepseek: up" in result.output
     assert "kimi: down (No API key" in result.output

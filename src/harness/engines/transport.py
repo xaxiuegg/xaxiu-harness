@@ -176,11 +176,25 @@ class StreamingTransport(Engine):
                         if response.status_code != 200:
                             # Explicit non-200 — don't retry; just
                             # surface the status (auth failures etc).
+                            # W13-ENGINE-FAILURE-VISIBILITY: include the
+                            # first ~200 chars of the body so downstream
+                            # categorization can distinguish "Access
+                            # terminated" from other 403/401 causes.
                             latency_ms = int((time.monotonic() - start) * 1000)
+                            try:
+                                body_bytes = response.read()
+                                body_excerpt = body_bytes[:200].decode(
+                                    "utf-8", errors="replace",
+                                ).strip()
+                            except Exception:
+                                body_excerpt = ""
+                            err = f"HTTP {response.status_code}"
+                            if body_excerpt:
+                                err = f"{err}: {body_excerpt}"
                             return EngineResponse(
                                 success=False, text="",
                                 latency_ms=latency_ms,
-                                error=f"HTTP {response.status_code}",
+                                error=err,
                             )
                         for line in response.iter_lines():
                             if not line:

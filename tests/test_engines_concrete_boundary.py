@@ -166,7 +166,7 @@ def test_deepseek_429(
     resp = deepseek_engine.dispatch("hello", "deepseek-chat", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 429"
+    assert resp.error.startswith("HTTP 429")
 
 
 def test_deepseek_500(
@@ -180,7 +180,7 @@ def test_deepseek_500(
     resp = deepseek_engine.dispatch("hello", "deepseek-chat", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 500"
+    assert resp.error.startswith("HTTP 500")
 
 
 def test_deepseek_connect_error(
@@ -329,7 +329,7 @@ def test_kimi_429(
     resp = kimi_engine.dispatch("hello", "kimi-model", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 429"
+    assert resp.error.startswith("HTTP 429")
 
 
 def test_kimi_500(
@@ -343,7 +343,7 @@ def test_kimi_500(
     resp = kimi_engine.dispatch("hello", "kimi-model", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 500"
+    assert resp.error.startswith("HTTP 500")
 
 
 def test_kimi_connect_error(
@@ -488,7 +488,7 @@ def test_anthropic_429(
     resp = anthropic_engine.dispatch("hello", "claude-3", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 429"
+    assert resp.error.startswith("HTTP 429")
 
 
 def test_anthropic_500(
@@ -502,7 +502,7 @@ def test_anthropic_500(
     resp = anthropic_engine.dispatch("hello", "claude-3", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 500"
+    assert resp.error.startswith("HTTP 500")
 
 
 def test_anthropic_connect_error(

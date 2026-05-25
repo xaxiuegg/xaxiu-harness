@@ -3388,47 +3388,98 @@ def loops(
 @cli.command()
 @click.argument("subcmd", required=False)
 @click.option("--list", "list_", is_flag=True, help="List engines.")
-@click.option("--health", is_flag=True, help="Check engine health.")
-def engines(subcmd: str | None, list_: bool, health: bool) -> None:
+@click.option("--health", is_flag=True, help="Check engine health (live "
+              "dispatch probe by default; --shallow for network-only check).")
+@click.option("--shallow", is_flag=True, help="With --health, use the "
+              "legacy network-GET probe instead of a real dispatch probe.")
+@click.option("--since-hours", type=int, default=168, help="With "
+              "'engines failures' subcommand, look back this many hours "
+              "(default 168 = 7 days).")
+@click.option("--engine", "engine_filter", default=None, help="With "
+              "'engines failures' subcommand, restrict to one engine.")
+def engines(subcmd: str | None, list_: bool, health: bool, shallow: bool,
+            since_hours: int, engine_filter: str | None) -> None:
     """Query or modify the engine pool.
 
-    W4-H 2026-05-22: accept either ``engines --list`` (original flag) or
-    ``engines list`` (subcommand-style guess from W4-G campaign).  Same
-    for ``engines health`` ↔ ``engines --health``.  No-arg invocation
-    defaults to listing.
+    Subcommands:
+      list       — show priority/locked/status per engine (default)
+      health     — live-dispatch probe categorizing each engine's state
+                   (terminated/auth-failed/quota-exceeded/transient/...)
+      heal       — re-issue the in-memory engine health state from disk
+      failures   — read state/engine_performance_log.jsonl +
+                   state/engine_health_probes.jsonl, aggregate failure
+                   counts by category per engine, show recent samples
+
+    W13-ENGINE-FAILURE-VISIBILITY 2026-05-25: ``engines --health`` now
+    defaults to a real dispatch probe (~5 tokens per engine).  The
+    legacy network-GET probe — which marks any HTTP response as "up",
+    including 403 "Access terminated" — is still available via the
+    ``--shallow`` flag.  The live probe catches account-termination,
+    quota-exhaustion, and key-revocation cases that the shallow probe
+    misses.
     """
     # Normalise subcommand-style guesses into flag-style
     if subcmd == "list":
         list_ = True
     elif subcmd == "health":
         health = True
+    elif subcmd == "failures":
+        from harness.cli_helpers import read_failure_summary
+        summary = read_failure_summary(
+            since_hours=since_hours, engine=engine_filter,
+        )
+        if not summary["engines"]:
+            click.echo(f"No engine events in the last {since_hours}h"
+                       + (f" for {engine_filter}" if engine_filter else "")
+                       + ".")
+            sys.exit(0)
+        click.echo(f"Engine failure summary (last {since_hours}h):")
+        for eng_name, slot in sorted(summary["engines"].items()):
+            total = slot["total"]
+            by_cat = slot["by_category"]
+            failures = sum(v for k, v in by_cat.items() if k != "up")
+            click.echo(f"\n  {eng_name}: {total} events"
+                       f" ({failures} failures, "
+                       f"{by_cat.get('up', 0)} successes)")
+            for cat in sorted(by_cat, key=lambda c: -by_cat[c]):
+                if cat == "up":
+                    continue
+                click.echo(f"    {cat:<18} {by_cat[cat]}")
+            if slot["recent_samples"]:
+                click.echo("    recent samples:")
+                for s in slot["recent_samples"]:
+                    excerpt = (s.get('error_excerpt') or '')[:80]
+                    click.echo(
+                        f"      {s['timestamp']} {s['category']:<14} "
+                        f"({s['source']}) {excerpt}"
+                    )
+        sys.exit(0)
     elif subcmd == "heal":
-        # W8-AUDIT follow-through 2026-05-24: route ``engines heal`` to the
-        # standalone engines_heal_cmd so the MiMo-flagged subcommand naming
-        # works as the auditor expected.  Top-level ``harness engines-heal``
-        # also continues to work.
         from click.testing import CliRunner as _CR  # local import OK
         runner = _CR()
-        # Reinvoke with default args — operator can still use
-        # ``harness engines-heal --dry-run`` for flags.
         ctx = click.get_current_context()
         ctx.invoke(engines_heal_cmd, dry_run=False, engine=None)
         return
     elif subcmd is not None:
-        click.echo(f"Error: unknown subcommand {subcmd!r}; use 'list', 'health', or 'heal' "
+        click.echo(f"Error: unknown subcommand {subcmd!r}; use 'list', "
+                   f"'health', 'failures', or 'heal' "
                    f"(or --list / --health flags)", err=True)
         sys.exit(2)
 
     state = read_engine_health()
 
     if health:
-        probes = probe_all_engines()
+        if shallow:
+            probes = probe_all_engines()
+        else:
+            from harness.cli_helpers import probe_all_engines_live
+            probes = probe_all_engines_live()
         for name, (st, err) in probes.items():
             click.echo(f"{name}: {st}" + (f" ({err})" if err else ""))
         sys.exit(0)
 
     # Default / --list
-    for name in ["deepseek", "kimi", "anthropic", "gemini"]:
+    for name in ["deepseek", "kimi", "mimo", "anthropic", "gemini"]:
         cfg = state.get(name)
         if cfg:
             click.echo(

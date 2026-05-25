@@ -166,7 +166,7 @@ def test_gemini_429(
     resp = gemini_engine.dispatch("hello", "gemini-model", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 429"
+    assert resp.error.startswith("HTTP 429")
 
 
 def test_gemini_500(
@@ -180,7 +180,7 @@ def test_gemini_500(
     resp = gemini_engine.dispatch("hello", "gemini-model", {})
 
     assert resp.success is False
-    assert resp.error == "HTTP 500"
+    assert resp.error.startswith("HTTP 500")
 
 
 def test_gemini_connect_error(
