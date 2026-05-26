@@ -1,0 +1,167 @@
+[
+  {
+    "engine": "kimi-via-claude",
+    "category": "trivial",
+    "ok": true,
+    "elapsed_s": 6.286556899998686,
+    "tokens_in": 784,
+    "tokens_out": 37,
+    "cost_usd": 0.005545999999999999,
+    "output_excerpt": "OK",
+    "error": ""
+  },
+  {
+    "engine": "kimi-via-claude",
+    "category": "code",
+    "ok": true,
+    "elapsed_s": 10.441025300009642,
+    "tokens_in": 804,
+    "tokens_out": 108,
+    "cost_usd": 0.007546,
+    "output_excerpt": "def is_palindrome(s):     return s == s[::-1]",
+    "error": ""
+  },
+  {
+    "engine": "kimi-via-claude",
+    "category": "reasoning",
+    "ok": true,
+    "elapsed_s": 8.902604999995674,
+    "tokens_in": 791,
+    "tokens_out": 100,
+    "cost_usd": 0.007216,
+    "output_excerpt": "Mergesort is O(n log n) because it recursively splits the array into halves, creating log n levels of recursion, and then merges all elements back together at each level, doing O(n) work per level.",
+    "error": ""
+  },
+  {
+    "engine": "kimi-via-claude",
+    "category": "long_context",
+    "ok": true,
+    "elapsed_s": 23.52196170001116,
+    "tokens_in": 1463,
+    "tokens_out": 545,
+    "cost_usd": 0.029359999999999997,
+    "output_excerpt": "The Fenwick tree array is initialized with length `n` instead of `n + 1`, so the 1-based update loop writes past the end of the array when it reaches index `n`.",
+    "error": ""
+  },
+  {
+    "engine": "kimi-via-claude",
+    "category": "multimodal_probe",
+    "ok": false,
+    "elapsed_s": 90.04726179999125,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.0,
+    "output_excerpt": "",
+    "error": "subprocess timeout after 90.0s"
+  },
+  {
+    "engine": "mimo-via-claude",
+    "category": "trivial",
+    "ok": true,
+    "elapsed_s": 7.50624470000912,
+    "tokens_in": 1816,
+    "tokens_out": 19,
+    "cost_usd": 0.012815,
+    "output_excerpt": "OK",
+    "error": ""
+  },
+  {
+    "engine": "mimo-via-claude",
+    "category": "code",
+    "ok": true,
+    "elapsed_s": 8.115890999994008,
+    "tokens_in": 1834,
+    "tokens_out": 25,
+    "cost_usd": 0.01196,
+    "output_excerpt": "```python def is_palindrome(s):     return s == s[::-1] ```",
+    "error": ""
+  },
+  {
+    "engine": "mimo-via-claude",
+    "category": "reasoning",
+    "ok": true,
+    "elapsed_s": 12.049309299996821,
+    "tokens_in": 1821,
+    "tokens_out": 63,
+    "cost_usd": 0.012925,
+    "output_excerpt": "Merge sort is O(n log n) because it recursively divides the array in half (producing log n levels of recursion) and performs a linear-time O(n) merge at each level, giving O(n) Ã— O(log n) = O(n log n",
+    "error": ""
+  },
+  {
+    "engine": "mimo-via-claude",
+    "category": "long_context",
+    "ok": true,
+    "elapsed_s": 12.405366899998626,
+    "tokens_in": 2663,
+    "tokens_out": 114,
+    "cost_usd": 0.023568,
+    "output_excerpt": "The Fenwick tree uses 1-based indexing, but the tree is allocated with only `n` elements instead of `n + 1`, causing an `IndexError` when `fenwick_update` tries to access index 10 (since `len(tree)` i",
+    "error": ""
+  },
+  {
+    "engine": "mimo-via-claude",
+    "category": "multimodal_probe",
+    "ok": false,
+    "elapsed_s": 90.22883760000695,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.0,
+    "output_excerpt": "",
+    "error": "subprocess timeout after 90.0s"
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "category": "trivial",
+    "ok": true,
+    "elapsed_s": 34.57202020000841,
+    "tokens_in": 1629,
+    "tokens_out": 24,
+    "cost_usd": 0.015009999999999999,
+    "output_excerpt": "OK",
+    "error": ""
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "category": "code",
+    "ok": false,
+    "elapsed_s": 100.071901599993,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.0,
+    "output_excerpt": "",
+    "error": "subprocess timeout after 90.0s"
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "category": "reasoning",
+    "ok": true,
+    "elapsed_s": 16.083119799994165,
+    "tokens_in": 1637,
+    "tokens_out": 66,
+    "cost_usd": 0.013315,
+    "output_excerpt": "Merge sort recursively divides the array in half (log n levels) and at each level performs a linear merge of all elements (O(n)), yielding O(n log n) total time.",
+    "error": ""
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "category": "long_context",
+    "ok": true,
+    "elapsed_s": 48.70099699999264,
+    "tokens_in": 2699,
+    "tokens_out": 782,
+    "cost_usd": 0.043085000000000005,
+    "output_excerpt": "The Fenwick tree array is allocated with size `n` (10) instead of `n + 1` (11), so the update for index `n` is silently dropped because the while-loop condition `i < len(tree)` is false when `i == n`,",
+    "error": ""
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "category": "multimodal_probe",
+    "ok": false,
+    "elapsed_s": 94.21381050000491,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.0,
+    "output_excerpt": "",
+    "error": "subprocess timeout after 90.0s"
+  }
+]
