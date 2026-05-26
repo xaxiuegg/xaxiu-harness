@@ -44,6 +44,7 @@ from harness.engines.claude_code_subprocess import (
     _resolve_mimo_tp_region,
     _verify_binary_available,
     reset_subprocess_semaphore,
+    strip_missing_markdown_image_refs,
 )
 
 
@@ -732,6 +733,106 @@ class TestModelAliases:
 # ---------------------------------------------------------------------------
 # W14-KIMI-VIA-CLAUDE: Kimi via subprocess Claude Code
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# W14-DEEPSEEK-TIMEOUT-BUMP + W14-MULTIMODAL-STRIP-MARKDOWN-REFS
+# ---------------------------------------------------------------------------
+
+
+class TestDeepSeekTimeoutBump:
+    def test_default_timeout_is_180s(self) -> None:
+        """W14-DEEPSEEK-TIMEOUT-BUMP: DeepSeekViaClaudeCodeEngine
+        defaults to 180s timeout (override of base 300s) because
+        smoke matrix showed avg 56.7s latency vs Kimi/MiMo 26-28s."""
+        eng = DeepSeekViaClaudeCodeEngine(
+            api_key="sk-x", verify_binary=False,
+        )
+        assert eng._timeout_s == 180
+
+    def test_kimi_keeps_inherited_default(self) -> None:
+        """Kimi engine doesn't get the bump — Kimi is faster than
+        DeepSeek in the smoke matrix."""
+        eng = KimiViaClaudeCodeEngine(
+            api_key="sk-x", verify_binary=False,
+        )
+        assert eng._timeout_s == 300
+
+    def test_mimo_keeps_inherited_default(self) -> None:
+        eng = MimoViaClaudeCodeEngine(
+            api_key="tp-x", verify_binary=False,
+        )
+        assert eng._timeout_s == 300
+
+    def test_explicit_override_still_wins(self) -> None:
+        """Caller can override DeepSeek's default via constructor arg."""
+        eng = DeepSeekViaClaudeCodeEngine(
+            api_key="sk-x", verify_binary=False, timeout_s=600,
+        )
+        assert eng._timeout_s == 600
+
+
+class TestStripMarkdownImageRefs:
+    def test_missing_file_stripped_with_alt_text(self) -> None:
+        text = "Look at ![system arch](architecture.png) here."
+        result, stripped = strip_missing_markdown_image_refs(text)
+        assert "(image: system arch)" in result
+        assert "architecture.png" in stripped
+        assert "![system arch](architecture.png)" not in result
+
+    def test_missing_file_stripped_with_generic_when_no_alt(self) -> None:
+        text = "Look at ![](missing.png) here."
+        result, stripped = strip_missing_markdown_image_refs(text)
+        assert "(image: not available)" in result
+        assert "missing.png" in stripped
+
+    def test_url_reference_preserved(self) -> None:
+        text = ("See ![diagram](https://example.com/diagram.png) "
+                "for context.")
+        result, stripped = strip_missing_markdown_image_refs(text)
+        # URL refs should pass through untouched
+        assert "https://example.com/diagram.png" in result
+        assert "![diagram]" in result
+        assert stripped == []
+
+    def test_existing_file_preserved(self, tmp_path: Path) -> None:
+        # Create a real file in cwd
+        real_file = tmp_path / "real_image.png"
+        real_file.write_bytes(b"fake png bytes")
+        text = f"See ![real]({real_file}) please."
+        # Use cwd=tmp_path so the relative path resolves
+        result, stripped = strip_missing_markdown_image_refs(
+            text, cwd=tmp_path,
+        )
+        assert "![real]" in result  # preserved
+        assert stripped == []
+
+    def test_data_url_preserved(self) -> None:
+        text = "See ![inline](data:image/png;base64,abc123) here."
+        result, stripped = strip_missing_markdown_image_refs(text)
+        assert "data:image/png" in result
+        assert stripped == []
+
+    def test_multiple_refs_handled_independently(self) -> None:
+        text = ("![A](a.png) and ![B](https://x/b.png) and "
+                "![C](c.png)")
+        result, stripped = strip_missing_markdown_image_refs(text)
+        # A and C are missing → stripped; B is a URL → preserved
+        assert "(image: A)" in result
+        assert "(image: C)" in result
+        assert "https://x/b.png" in result
+        assert set(stripped) == {"a.png", "c.png"}
+
+    def test_empty_text_no_op(self) -> None:
+        result, stripped = strip_missing_markdown_image_refs("")
+        assert result == ""
+        assert stripped == []
+
+    def test_text_without_markdown_returns_unchanged(self) -> None:
+        text = "Plain text with no image references."
+        result, stripped = strip_missing_markdown_image_refs(text)
+        assert result == text
+        assert stripped == []
 
 
 class TestKimiViaClaudeCodeEngine:

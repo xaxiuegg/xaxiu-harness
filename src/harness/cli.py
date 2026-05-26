@@ -2341,6 +2341,73 @@ def preflight_latency_cmd(fmt: str, since_hours: float | None,
                                   check_name=check_name))
 
 
+@cli.group(name="keys")
+def keys_group() -> None:
+    """W14-HARNESS-KEYS-WEB-UI: interactive API-key entry + listing.
+
+    Subcommands:
+      serve  - launch a local HTTP form for entering provider API keys
+               (binds 127.0.0.1, ephemeral port, token-gated)
+      list   - print the current key-status table without launching UI
+    """
+
+
+@keys_group.command(name="serve")
+@click.option("--port", type=int, default=0,
+              help="Bind to this port (default: OS-assigned ephemeral).")
+@click.option("--no-open", is_flag=True,
+              help="Don't auto-open the browser; just print the URL.")
+@click.option("--idle-timeout", type=int, default=600,
+              help="Self-shutdown after this many idle seconds "
+                   "(default 600).")
+def keys_serve(port: int, no_open: bool, idle_timeout: int) -> None:
+    """W14-HARNESS-KEYS-WEB-UI: launch the interactive key-entry form.
+
+    Binds to 127.0.0.1 (loopback) only.  Token-gated.  Form lets the
+    operator paste each provider key, live-probe via /api/test, and
+    save to .env in the current working directory.  Self-shuts-down
+    after the idle-timeout.
+    """
+    from harness.keys_ui import serve_key_ui
+    serve_key_ui(
+        port=port,
+        auto_open=not no_open,
+        idle_timeout_seconds=float(idle_timeout),
+    )
+
+
+@keys_group.command(name="list")
+@click.option("--format", "fmt",
+              type=click.Choice(["pretty", "json"]), default="pretty")
+def keys_list(fmt: str) -> None:
+    """Show the current API-key status (no UI, no probe).
+
+    For each known provider: env-var name, source (shell env / .env /
+    missing), masked value excerpt.  Read-only.
+    """
+    from harness.keys_ui import list_key_status
+    status = list_key_status()
+    if fmt == "json":
+        import json as _json
+        click.echo(_json.dumps(status, indent=2))
+        sys.exit(0)
+    click.echo(f"{'provider':<22} {'env var':<22} {'source':<8}  "
+               f"key (masked)")
+    click.echo("-" * 80)
+    for item in status:
+        source_label = item["source"]
+        if source_label == "missing":
+            source_styled = click.style(source_label, fg="red")
+        elif source_label == "env":
+            source_styled = click.style(source_label, fg="blue")
+        else:
+            source_styled = click.style(source_label, fg="magenta")
+        masked = item["masked"] or "(not set)"
+        click.echo(f"  {item['display']:<20} {item['env']:<22} "
+                   f"{source_styled:<17} {masked}")
+    sys.exit(0)
+
+
 @cli.group(name="backup")
 def backup_group() -> None:
     """W13-BACKUP-RESTORE: snapshot + restore the harness runtime state.

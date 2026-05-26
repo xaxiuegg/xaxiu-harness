@@ -175,6 +175,80 @@ def _looks_multimodal(text: str) -> bool:
     return bool(_MULTIMODAL_MARKERS_RE.search(text))
 
 
+# W14-MULTIMODAL-STRIP-MARKDOWN-REFS 2026-05-26: regex to extract
+# markdown image syntax as alt-text + path so we can strip the
+# `![alt](path)` reference but preserve the alt text as inline prose.
+#
+# Background: in the 2026-05-26 Pattern B smoke matrix, all 3 engines
+# (kimi/mimo/deepseek-via-claude) timed out at 90s on the
+# multimodal_probe category which contained a markdown image
+# reference to a non-existent ``architecture.png``.  Claude Code's
+# --print mode tries to load the referenced file before dispatch and
+# stalls when the file is missing.  Stripping the syntax (while
+# keeping the alt text as plain prose) makes such packets dispatchable
+# without losing the operator's intent.
+_MARKDOWN_IMAGE_REF_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\]\((?P<path>[^)]+)\)",
+)
+
+
+def strip_missing_markdown_image_refs(
+    text: str,
+    cwd: Optional[Path] = None,
+) -> tuple[str, list[str]]:
+    """Strip markdown image syntax for files that don't exist on disk.
+
+    For each ``![alt](path)`` occurrence:
+      - If ``path`` is an http(s) URL: leave the reference alone (the
+        target subprocess may successfully fetch it).
+      - If ``path`` resolves to an existing file on disk: leave the
+        reference alone (Claude Code will load it correctly).
+      - Otherwise (file missing or unreachable): replace the syntax
+        with the alt text in parentheses — e.g.
+        ``![system architecture](architecture.png)`` becomes
+        ``(image: system architecture)`` — and record the stripped
+        path for the caller's audit.
+
+    Returns ``(transformed_text, stripped_paths)``.
+
+    Resolves paths relative to ``cwd`` (default: current working
+    directory).  Absolute paths are checked literally.
+    """
+    if not text or "![" not in text:
+        return text, []
+
+    resolved_cwd = (cwd or Path.cwd()).resolve()
+    stripped: list[str] = []
+
+    def _replace(match: "re.Match[str]") -> str:
+        alt = match.group("alt").strip()
+        path_str = match.group("path").strip()
+        # URLs we leave alone — Claude Code will try to fetch them
+        if path_str.startswith(("http://", "https://", "ftp://")):
+            return match.group(0)
+        # Data URLs we leave alone
+        if path_str.startswith("data:"):
+            return match.group(0)
+        # Resolve relative-to-cwd OR absolute
+        candidate = Path(path_str)
+        if not candidate.is_absolute():
+            candidate = resolved_cwd / candidate
+        try:
+            if candidate.exists() and candidate.is_file():
+                # Real file → preserve the reference, Claude Code loads it
+                return match.group(0)
+        except OSError:
+            pass
+        # File doesn't exist or unreachable — strip the syntax
+        stripped.append(path_str)
+        if alt:
+            return f"(image: {alt})"
+        return "(image: not available)"
+
+    out = _MARKDOWN_IMAGE_REF_RE.sub(_replace, text)
+    return out, stripped
+
+
 # Default binary name + lookup paths.  The CLI is typically installed at
 # ~/.local/bin/claude or /usr/local/bin/claude.  Operators on Windows
 # (Git Bash) may need to set HARNESS_CLAUDE_CODE_BINARY explicitly.
@@ -490,6 +564,30 @@ class ClaudeCodeSubprocessEngine(Engine):
                 ),
             )
 
+        # W14-MULTIMODAL-STRIP-MARKDOWN-REFS 2026-05-26: strip markdown
+        # image references for files that don't exist on disk.  Without
+        # this, Claude Code's --print mode tries to file-load missing
+        # references and stalls until subprocess timeout (3/3 engines
+        # observed timeout at 90s on smoke-matrix multimodal_probe).
+        # Opt-out via HARNESS_PRESERVE_MARKDOWN_IMAGE_REFS=1.
+        strip_markdown = os.environ.get(
+            "HARNESS_PRESERVE_MARKDOWN_IMAGE_REFS", "",
+        ).strip().lower() not in {"1", "true", "yes"}
+        if strip_markdown and "![" in packet_content:
+            new_content, stripped = strip_missing_markdown_image_refs(
+                packet_content,
+            )
+            if stripped:
+                logger.info(
+                    "claude-code-subprocess: stripped %d markdown image "
+                    "reference(s) to missing file(s): %s",
+                    len(stripped),
+                    ", ".join(stripped[:5])
+                    + (f" (+{len(stripped) - 5} more)"
+                       if len(stripped) > 5 else ""),
+                )
+            packet_content = new_content
+
         cmd = self._build_command(model, extra)
         env = self._build_env()
         timeout = float(extra.get("timeout_s", self._timeout_s))
@@ -698,7 +796,16 @@ class DeepSeekViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
     (with silent truncation by DeepSeek) so the caller can decide
     whether the warning is actionable.  The log message names the
     detected marker class so the operator can audit what got dropped.
+
+    W14-DEEPSEEK-TIMEOUT-BUMP 2026-05-26: default subprocess timeout
+    raised to 180s.  Smoke-matrix testing showed avg latency 56.7s vs
+    Kimi/MiMo 26-28s; the inherited 90s default timed out on code-gen
+    workloads.  Caller can still override via
+    ``extra_args["timeout_s"]``.
     """
+
+    # W14-DEEPSEEK-TIMEOUT-BUMP: subclass-level default override
+    _DEFAULT_TIMEOUT_S: int = 180
 
     def __init__(self, api_key: str, **kwargs) -> None:
         super().__init__(
