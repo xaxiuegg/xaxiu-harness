@@ -15,7 +15,7 @@ from harness.engines.routing_recommend import (
 class TestRecommendCore:
     def test_valid_task_classes(self) -> None:
         assert VALID_TASK_CLASSES == frozenset({
-            "default", "latency", "verbose", "cost",
+            "default", "latency", "verbose", "cost", "high-volume",
             "multimodal", "audit",
         })
 
@@ -39,8 +39,15 @@ class TestRecommendCore:
 
     def test_cost_class(self) -> None:
         rec = recommend("cost")
-        assert rec.engine == "kimi-via-claude"  # cheapest in matrix
-        assert "mimo-via-claude" in rec.alternates
+        # W14-MIMO-PRICE-CUT 2026-05-26: MiMo flipped to cheapest after
+        # the permanent price cut (-57%/-71%/-98%).
+        assert rec.engine == "mimo-via-claude"
+        assert "kimi-via-claude" in rec.alternates
+
+    def test_high_volume_class(self) -> None:
+        # New class for batch workloads — MiMo Token Plan dominates
+        rec = recommend("high-volume")
+        assert rec.engine == "mimo-via-claude"
 
     def test_multimodal_class(self) -> None:
         rec = recommend("multimodal")

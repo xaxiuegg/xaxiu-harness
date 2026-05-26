@@ -31,6 +31,7 @@ VALID_TASK_CLASSES: frozenset[str] = frozenset({
     "latency",
     "verbose",
     "cost",
+    "high-volume",
     "multimodal",
     "audit",
 })
@@ -111,12 +112,31 @@ def recommend(
             "the deliverable.  Accept the 18-50s latency."
         )
     elif tc == "cost":
-        primary = "kimi-via-claude"
-        alternates = ("mimo-via-claude",)
+        # W14-MIMO-PRICE-CUT 2026-05-26 6PM PDT: MiMo-V2.5-Pro permanent
+        # price cut (-57%/-71%/-98%) makes MiMo the cost leader by ~2x
+        # over Kimi/DeepSeek.  Token Plan Pro $50/month → 38B credits
+        # ≈ 6200 audit-class dispatches.
+        primary = "mimo-via-claude"
+        alternates = ("kimi-via-claude", "deepseek-via-claude")
         rationale = (
-            "Kimi-via-claude smoked at $0.068 total vs MiMo $0.075 "
-            "and DeepSeek $0.088 in the 5-category matrix.  At "
-            "operator scale (~$30/month) differences are small."
+            "MiMo-via-claude smoked at $0.033 total for 5 categories "
+            "(post-2026-05-26 price cut), 2x cheaper than Kimi $0.076 "
+            "and DeepSeek $0.055.  Token Plan Pro $50/month buys "
+            "~6,200 audit-class dispatches.  Note MiMo's tool-call "
+            "XML markup quirk on long structured prompts - see the "
+            "empirical doc."
+        )
+    elif tc == "high-volume":
+        # New task class for "batch dispatch, 100s-1000s of times"
+        # workloads.  MiMo TP economics dominate by a wide margin.
+        primary = "mimo-via-claude"
+        alternates = ("deepseek-via-claude",)
+        rationale = (
+            "For batch workloads (100s+ dispatches), MiMo Token Plan "
+            "Pro at $50/month → 38B credits ~ 6,200 audit-class "
+            "dispatches gives effectively unlimited headroom.  "
+            "DeepSeek-flash at $0.055/5-category is the PAYG "
+            "alternate when MiMo's tool-call markup is unacceptable."
         )
     elif tc == "multimodal":
         primary = "mimo-via-claude"

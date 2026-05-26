@@ -212,6 +212,30 @@ class TestBuildCommand:
         idx = cmd.index("--max-budget-usd")
         assert float(cmd[idx + 1]) == pytest.approx(0.05)
 
+    def test_tools_disabled_by_default(self) -> None:
+        # W14-MIMO-BLOAT-INVESTIGATION 2026-05-26: --bare does NOT
+        # disable tools; we must explicitly pass --tools "".  This
+        # test pins the behavior so a future refactor can't silently
+        # re-enable tools and re-introduce the MiMo agent-loop bloat.
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x", default_model="d",
+        )
+        cmd = eng._build_command(model="m", extra_args={})
+        assert "--tools" in cmd
+        idx = cmd.index("--tools")
+        # Empty string disables all tools (single-inference mode)
+        assert cmd[idx + 1] == ""
+
+    def test_tools_can_be_overridden(self) -> None:
+        # Escape hatch: callers that DO need agent-loop behavior
+        # can pass extra_args={"tools": "default"} to re-enable.
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x", default_model="d",
+        )
+        cmd = eng._build_command(model="m", extra_args={"tools": "default"})
+        idx = cmd.index("--tools")
+        assert cmd[idx + 1] == "default"
+
 
 class TestBuildEnv:
     def test_sets_anthropic_base_url(

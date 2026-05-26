@@ -1,18 +1,24 @@
 # Engine routing — empirical recommendations
 
-**Source**: [W14-CROSS-ENGINE-AUDIT](../coord/reviews/pattern-b-smoke-matrix/RESULTS.md) — 2026-05-26.  Three rounds of 5-category × 3-engine smoke testing through Pattern B.
+**Source**: [W14-CROSS-ENGINE-AUDIT](../coord/reviews/pattern-b-smoke-matrix/RESULTS.md) — 2026-05-26.  Multiple rounds of 5-category × 3-engine smoke testing through Pattern B.
+
+**Updated 2026-05-26 evening** after two material changes:
+1. **W14-MIMO-BLOAT-INVESTIGATION**: added `--tools ""` to subprocess command line.  MiMo's input tokens collapsed 22× on audit-class prompts (17,600 → 806); cost dropped 95%; latency dropped 94%.  Same fix applied uniformly to all 3 engines.
+2. **MiMo-V2.5-Pro PERMANENT PRICE CUT** (effective 2026-05-26 6:00 PM PDT): input cache-miss $1.00 → $0.435 (-57%); output $3.00 → $0.87 (-71%); cache-hit $0.20 → $0.0036 (-98%).  Token Plan Pro: $50 → 38B credits (≈127M input / 63M output tokens / month).  This makes MiMo the cost leader across all task classes.
 
 This document supersedes the per-engine sections of [coord/dev_loop/dispatch-rules.md](../coord/dev_loop/dispatch-rules.md) for Pattern B (`*-via-claude`) engines.  The original swarm-based rules (xaxiu-swarm with `swarm/kimi`, `swarm/kimi-api`, `swarm/deepseek`) still apply for that path.
 
 ## Headline
 
-**All three Pattern B engines are production-ready across all 5 test categories.**  As of the W14-CROSS-ENGINE-AUDIT 2026-05-26: 15/15 dispatches succeed in 50s wall-clock for the full matrix, $0.23 total cost.
+**All three Pattern B engines are production-ready across all 5 test categories.**  Post-`--tools` fix smoke matrix 2026-05-26 evening: 15/15 dispatches in 76s wall-clock, $0.16 total cost.
 
 | Engine | Avg latency | Total cost | Tokens out | Cost / success | Default model |
 |---|---|---|---|---|---|
-| `kimi-via-claude` | 17.9s | $0.068 | 1,406 | $0.014 | `kimi-for-coding` |
-| `mimo-via-claude` | 9.3s | $0.075 | 596 | $0.015 | (provider default) |
-| `deepseek-via-claude` | 10.0s | $0.088 | 608 | $0.018 | `deepseek-v4-flash` |
+| `kimi-via-claude` | 29.8s | $0.076 | 2,136 | $0.015 | `kimi-for-coding` |
+| `mimo-via-claude` | 10.9s | $0.033 | 299 | $0.0067 | (provider default) |
+| `deepseek-via-claude` | 5.0s | $0.055 | 591 | $0.011 | `deepseek-v4-flash` |
+
+MiMo is now the cost leader by a ~2× margin (was ~par with Kimi pre-price-cut).  DeepSeek-flash is the latency leader at 5.0s (Pattern B subprocess overhead dominates anything below).
 
 **Latency:** `mimo-via-claude` is fastest on average; `deepseek-via-claude` close second (since W14-CROSS-ENGINE-AUDIT flipped its default to v4-flash); `kimi-via-claude` has highest variance — fast on simple prompts (~8s), slow on long-context (50s).
 
@@ -58,11 +64,15 @@ The 50s latency is acceptable when the output is the deliverable.
 For background tasks where dollars matter and you'll dispatch thousands:
 
 ```
-kimi-via-claude   ← cheapest in the matrix ($0.068 for 5 categories)
-mimo-via-claude   ← close second
+mimo-via-claude   ← cheapest in the matrix ($0.033 for 5 categories);
+                   on Token Plan Pro, ~$0.008 / audit-class dispatch
+                   gives you ~6,200 such dispatches / month for $50
+kimi-via-claude   ← second; ~$0.076 for 5 categories
+deepseek-via-claude ← $0.055 for 5; cheaper than Kimi but no
+                     subscription tier
 ```
 
-But: at this scale (~$30/month operator budget), all three are equivalent.  Cost matters more for `swarm/*` direct-PAYG paths than for Pattern B subscription paths.
+At the new MiMo Token Plan Pro pricing ($50 → 38B credits), high-volume work shifts decisively to MiMo.  Per-dispatch cost on a 17k-input audit-class prompt is ~$0.008.
 
 ### Multimodal-adjacent (markdown image refs in prompts)
 
@@ -114,8 +124,10 @@ Triangulation (3-engine consensus) is rarely needed but available via the panel 
 ### mimo-via-claude
 
 - **Most concise**: returns the lowest token count for equivalent prompts.  For applications that parse model output (e.g. extracting just the code block), this saves downstream tokens.
+- **Cheapest engine post-2026-05-26**: V2.5-Pro permanent price cut (effective 6PM PDT) makes MiMo the cost leader by ~2× over Kimi/DeepSeek.  Token Plan Pro $50/month buys ≈ 127M input / 63M output tokens, or ≈ 6,200 audit-class dispatches.
 - **Token Plan vs PAYG**: the engine auto-detects the operator's MIMO_API_KEY prefix and routes to the correct endpoint (`tp-` → Token Plan; `mp-` or other → PAYG).  No operator action required.
 - **Multimodal-safe**: handles `(image: alt)` stripped refs without warning.
+- **Tool-call output quirk**: MiMo's model is more agent-loop-trained than Kimi or DeepSeek.  With `--tools ""` (the harness default) it produces correct text output for simple prompts but may emit unexecuted `<tool_call>...</tool_call>` XML-style markup on long structured prompts.  This is a model-trained tendency, not a harness bug — Claude Code blocks execution but doesn't strip the markup.  Workarounds: (a) post-process the response to strip `<tool_call>` blocks, or (b) add an explicit "respond in plain text, do not emit any tool-call markup" instruction in the prompt.  Without `--tools ""`, MiMo runs an actual agent loop that bloats input 22× — far worse than the markup.
 
 ### deepseek-via-claude
 

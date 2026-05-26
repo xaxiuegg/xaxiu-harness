@@ -445,6 +445,26 @@ class ClaudeCodeSubprocessEngine(Engine):
 
         ``--bare`` strips session state, plugins, hooks, keychain, and
         CLAUDE.md auto-discovery for a clean, deterministic dispatch.
+
+        ``--tools ""`` (empty string) DISABLES ALL TOOLS - this is what
+        makes the dispatch a single-inference chat completion rather
+        than an agent loop.  W14-MIMO-BLOAT-INVESTIGATION 2026-05-26:
+        without this, the model on the provider side may decide to use
+        Claude Code's built-in tools (Read, Bash, Edit) which triggers
+        Claude Code to execute them and loop back with results.
+        Empirically, MiMo's model invoked tools on the 2026-05-26
+        conversation-audit panel prompt, ballooning input tokens
+        7-12x (17,600 input for ~2,500-token prompt) and burning
+        $0.35 on what should have been a $0.09 dispatch.  Kimi and
+        DeepSeek did NOT exhibit this on the same prompt - confirming
+        ``--bare`` alone is insufficient to guarantee single-shot
+        behavior.  ``--tools ""`` makes it deterministic across
+        models.
+
+        Callers that NEED tool use (e.g. dispatching to xaxiu-swarm-
+        style agentic workers via Pattern B) should subclass and
+        override _build_command() or pass an extra_args override.
+
         ``--print --output-format json`` produces a structured response
         we can parse.  ``--no-session-persistence`` keeps the dispatch
         ephemeral (no resume artifacts).
@@ -452,10 +472,15 @@ class ClaudeCodeSubprocessEngine(Engine):
         budget = extra_args.get("max_budget_usd", self._max_budget_usd)
         output_format = extra_args.get("output_format", "json")
         permission_mode = extra_args.get("permission_mode", "auto")
+        # extra_args["tools"] = "default" lets callers re-enable tools
+        # for the rare case they want the agent loop.  Default is
+        # disabled (empty string) for deterministic single-inference.
+        tools = extra_args.get("tools", "")
         cmd = [
             self._binary,
             "--print",
             "--bare",
+            "--tools", tools,
             "--model", model or self._default_model or "sonnet",
             "--output-format", output_format,
             "--no-session-persistence",
