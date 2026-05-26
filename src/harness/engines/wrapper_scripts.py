@@ -56,13 +56,15 @@ WRAPPER_DEFINITIONS: dict[str, dict[str, str]] = {
         "key_env": "MIMO_API_KEY",
         "description": "MiMo Pay-as-you-go via Claude Code",
     },
-    # Kimi — ready when operator re-acquires a Kimi key.  Wrapper is
-    # installed but will fail-at-runtime if KIMI_API_KEY is unset; this
-    # makes the operator's "I have a new key" workflow a 1-command move.
+    # Kimi — Kimi Code subscription endpoint.  W14-KIMI-VIA-CLAUDE
+    # 2026-05-26: account restored after the 2026-05-25 termination
+    # was rolled back into a friendlier UA-gate redirect.  Operator's
+    # existing KIMI_API_KEY works against api.kimi.com/coding when
+    # Claude Code's legitimate UA passes the allowlist gate.
     "claude-kimi": {
         "engine_key": "kimi-via-cc",
         "key_env": "KIMI_API_KEY",
-        "description": "Kimi via Claude Code (requires new Moonshot key)",
+        "description": "Kimi Code (Moonshot K2.6) via Claude Code",
     },
     # DeepSeek via Claude Code — multimodal silent-drop applies; the
     # operator should see the docstring caveat when using the wrapper.
@@ -141,6 +143,8 @@ exec env \\
   ANTHROPIC_DEFAULT_SONNET_MODEL="{default_model}" \\
   ANTHROPIC_DEFAULT_OPUS_MODEL="{default_model}" \\
   ANTHROPIC_DEFAULT_HAIKU_MODEL="{default_model}" \\
+  CLAUDE_CODE_SUBAGENT_MODEL="{default_model}" \\
+  ENABLE_TOOL_SEARCH="false" \\
   claude --bare "$@"
 """
 
@@ -166,6 +170,8 @@ set "ANTHROPIC_MODEL={default_model}"
 set "ANTHROPIC_DEFAULT_SONNET_MODEL={default_model}"
 set "ANTHROPIC_DEFAULT_OPUS_MODEL={default_model}"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL={default_model}"
+set "CLAUDE_CODE_SUBAGENT_MODEL={default_model}"
+set "ENABLE_TOOL_SEARCH=false"
 
 claude --bare %*
 """

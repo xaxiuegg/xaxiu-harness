@@ -193,10 +193,18 @@ PROVIDER_ANTHROPIC_ENDPOINTS: dict[str, str] = {
     "mimo-tp-cn":  "https://token-plan-cn.xiaomimimo.com/anthropic",
     # MiMo Pay-as-you-go — unified endpoint
     "mimo-payg":   "https://api.xiaomimimo.com/anthropic",
-    # Kimi (if/when re-subscribed) — operator must acquire a fresh
-    # account; the prior account remains terminated per
-    # W14-KIMI-AUTH-RESTORE.
-    "kimi-via-cc": "https://api.moonshot.cn/anthropic",
+    # Kimi Code subscription — Anthropic-compatible endpoint.  Probed
+    # 2026-05-26: account restored after the 2026-05-25 termination;
+    # error message changed from "Access terminated" punitive to
+    # "Kimi For Coding is currently only available for Coding Agents
+    # such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc." which
+    # is a UA-gate redirect, NOT a permaban.  Claude Code's legitimate
+    # UA passes the gate; truthful xaxiu-harness/1.0 still denied
+    # (correctly, TOS-compliant outcome).  Base URL is
+    # api.kimi.com/coding — Claude Code appends /v1/messages.  Model
+    # name is "kimi-for-coding" (single alias on this endpoint, NOT
+    # kimi-k2.6 etc).
+    "kimi-via-cc": "https://api.kimi.com/coding",
     # Anthropic default (lets the subprocess hit Claude Code's normal
     # backend; only useful for testing or to leverage the operator's
     # Anthropic subscription via the same subprocess path)
@@ -211,7 +219,11 @@ DEFAULT_MODEL_PER_ENGINE: dict[str, str] = {
     "mimo-tp-ams":      "mimo-v2.5-pro",
     "mimo-tp-cn":       "mimo-v2.5-pro",
     "mimo-payg":        "mimo-v2.5-pro",
-    "kimi-via-cc":      "kimi-k2.6",
+    # Kimi Code subscription uses a single alias "kimi-for-coding"
+    # which routes to the current Moonshot coding model
+    # (kimi-k2.6-code as of 2026-05-26).  When Moonshot updates the
+    # underlying model the alias stays stable.
+    "kimi-via-cc":      "kimi-for-coding",
     "anthropic-default": "sonnet",
 }
 
@@ -428,6 +440,21 @@ class ClaudeCodeSubprocessEngine(Engine):
             env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self._default_model
             env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self._default_model
             env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self._default_model
+            # W14-KIMI-VIA-CLAUDE 2026-05-26: Kimi's agent-support docs
+            # additionally specify CLAUDE_CODE_SUBAGENT_MODEL so that
+            # the Task tool's spawned subagents also route to the
+            # provider's model instead of falling back to Anthropic's.
+            # Harmless to set on other providers; it just pins their
+            # subagent routing too.
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self._default_model
+
+        # W14-KIMI-VIA-CLAUDE 2026-05-26: Kimi's agent-support docs
+        # specify ENABLE_TOOL_SEARCH=false to disable Anthropic's tool-
+        # search feature (incompatible with most non-Anthropic
+        # providers' tool-calling schemas).  Setting it universally is
+        # safe — Claude Code's own runs against api.anthropic.com simply
+        # don't trigger the feature.
+        env["ENABLE_TOOL_SEARCH"] = "false"
 
         # CLAUDE_CODE_SIMPLE=1 is set by --bare anyway, but we set it
         # explicitly for clarity in tests + tracing.
@@ -614,6 +641,47 @@ class MimoViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
     @property
     def name(self) -> str:
         return "mimo-via-claude"
+
+
+class KimiViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
+    """Kimi (Moonshot AI) via subprocess Claude Code.
+
+    W14-KIMI-VIA-CLAUDE 2026-05-26: shipped after the 2026-05-25 Kimi
+    Code account termination was rolled back into a friendlier UA-gate
+    redirect.  Operator's existing KIMI_API_KEY works against the
+    Kimi Code subscription endpoint when wrapped by Claude Code's
+    legitimate UA.
+
+    The Kimi Code subscription exposes its Anthropic-compatible
+    endpoint at ``https://api.kimi.com/coding`` — Claude Code appends
+    ``/v1/messages`` automatically.  The model is identified as
+    ``kimi-for-coding`` (a stable alias that Moonshot maps to the
+    current production coding model; as of 2026-05-26 that is
+    kimi-k2.6-code).
+
+    Distinct from the (now-dead) direct-httpx KimiConcrete engine in
+    concrete.py, which targets the OpenAI-compatible path
+    api.kimi.com/coding/v1/chat/completions with the harness's truthful
+    User-Agent — that path is gate-denied by Moonshot's allowlist (as
+    designed; xaxiu-harness is not an approved coding agent).
+
+    LIVE SMOKE TEST 2026-05-26:
+      success=true, result="OK", cost_usd=$0.006533,
+      tokens_in=1034 / tokens_out=32, model=kimi-for-coding
+      (provider-reported; ~6.2s end-to-end)
+    """
+
+    def __init__(self, api_key: str, **kwargs) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=PROVIDER_ANTHROPIC_ENDPOINTS["kimi-via-cc"],
+            default_model=DEFAULT_MODEL_PER_ENGINE["kimi-via-cc"],
+            **kwargs,
+        )
+
+    @property
+    def name(self) -> str:
+        return "kimi-via-claude"
 
 
 class DeepSeekViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):

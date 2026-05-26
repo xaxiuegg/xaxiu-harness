@@ -33,6 +33,7 @@ from harness.engines.claude_code_subprocess import (
     ClaudeCodeSubprocessEngine,
     DEFAULT_MODEL_PER_ENGINE,
     DeepSeekViaClaudeCodeEngine,
+    KimiViaClaudeCodeEngine,
     MimoViaClaudeCodeEngine,
     PROVIDER_ANTHROPIC_ENDPOINTS,
     _engine_name_for_mimo_key,
@@ -669,7 +670,9 @@ class TestEnvPurge:
 
 
 class TestModelAliases:
-    """The full ANTHROPIC_DEFAULT_*_MODEL alias suite from hardening V1."""
+    """The full ANTHROPIC_DEFAULT_*_MODEL alias suite from hardening V1
+    plus the W14-KIMI-VIA-CLAUDE additions (CLAUDE_CODE_SUBAGENT_MODEL +
+    ENABLE_TOOL_SEARCH)."""
 
     def test_all_four_aliases_set_to_default_model(self) -> None:
         eng = _make_engine(
@@ -692,6 +695,128 @@ class TestModelAliases:
         assert "ANTHROPIC_DEFAULT_SONNET_MODEL" not in env
         assert "ANTHROPIC_DEFAULT_OPUS_MODEL" not in env
         assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" not in env
+
+    def test_claude_code_subagent_model_set(self) -> None:
+        """W14-KIMI-VIA-CLAUDE: CLAUDE_CODE_SUBAGENT_MODEL must point
+        at the same provider model so Task-tool subagents route correctly.
+        """
+        eng = _make_engine(
+            api_key="x", base_url="https://x",
+            default_model="kimi-for-coding",
+        )
+        env = eng._build_env()
+        assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == "kimi-for-coding"
+
+    def test_claude_code_subagent_model_omitted_when_no_default(self) -> None:
+        eng = _make_engine(
+            api_key="x", base_url="https://x", default_model="",
+        )
+        env = eng._build_env()
+        assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
+
+    def test_enable_tool_search_always_false(self) -> None:
+        """W14-KIMI-VIA-CLAUDE: ENABLE_TOOL_SEARCH=false set always
+        (Kimi docs require it; harmless on other providers)."""
+        # With model set
+        eng = _make_engine(
+            api_key="x", base_url="https://x", default_model="m",
+        )
+        assert eng._build_env()["ENABLE_TOOL_SEARCH"] == "false"
+        # Without model — still set (it's not gated on default_model)
+        eng2 = _make_engine(
+            api_key="x", base_url="https://x", default_model="",
+        )
+        assert eng2._build_env()["ENABLE_TOOL_SEARCH"] == "false"
+
+
+# ---------------------------------------------------------------------------
+# W14-KIMI-VIA-CLAUDE: Kimi via subprocess Claude Code
+# ---------------------------------------------------------------------------
+
+
+class TestKimiViaClaudeCodeEngine:
+    """Kimi Code subscription via Claude Code's legitimate UA.
+    Account restored 2026-05-26 after the 2026-05-25 termination
+    was rolled back to a friendlier UA-gate redirect."""
+
+    def test_endpoint_resolves_to_kimi_code(self) -> None:
+        eng = KimiViaClaudeCodeEngine(
+            api_key="sk-test-kimi", verify_binary=False,
+        )
+        assert eng._base_url == "https://api.kimi.com/coding"
+
+    def test_default_model_is_kimi_for_coding(self) -> None:
+        eng = KimiViaClaudeCodeEngine(
+            api_key="sk-test-kimi", verify_binary=False,
+        )
+        # Kimi Code uses the alias "kimi-for-coding"; Moonshot maps it
+        # to the current production coding model (kimi-k2.6-code today)
+        assert eng._default_model == "kimi-for-coding"
+
+    def test_engine_name(self) -> None:
+        eng = KimiViaClaudeCodeEngine(
+            api_key="sk-x", verify_binary=False,
+        )
+        assert eng.name == "kimi-via-claude"
+
+    def test_env_includes_all_required_vars(self) -> None:
+        """The Kimi agent-support docs specify the full env-var set —
+        ANTHROPIC_BASE_URL + AUTH_TOKEN + MODEL + 4 alias overrides +
+        CLAUDE_CODE_SUBAGENT_MODEL + ENABLE_TOOL_SEARCH."""
+        eng = KimiViaClaudeCodeEngine(
+            api_key="sk-kimi-real-key", verify_binary=False,
+        )
+        env = eng._build_env()
+        assert env["ANTHROPIC_BASE_URL"] == "https://api.kimi.com/coding"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-kimi-real-key"
+        assert env["ANTHROPIC_API_KEY"] == "sk-kimi-real-key"
+        assert env["ANTHROPIC_MODEL"] == "kimi-for-coding"
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "kimi-for-coding"
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "kimi-for-coding"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "kimi-for-coding"
+        assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == "kimi-for-coding"
+        assert env["ENABLE_TOOL_SEARCH"] == "false"
+
+    def test_dispatch_mocked_success(self) -> None:
+        eng = KimiViaClaudeCodeEngine(
+            api_key="sk-x", verify_binary=False,
+        )
+        with patch(
+            "harness.engines.claude_code_subprocess.subprocess.run",
+            return_value=_make_subprocess_result(
+                stdout=_make_success_json(text="kimi-ok"),
+            ),
+        ):
+            resp = eng.dispatch("hi", "kimi-for-coding", {})
+        assert resp.success is True
+        assert resp.text == "kimi-ok"
+
+    def test_factory_returns_kimi_via_claude(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("KIMI_API_KEY", "sk-test-kimi-from-factory")
+        from harness.secrets import resolve as resolve_module
+        monkeypatch.setattr(
+            resolve_module, "resolve_key",
+            lambda env_var, prefer_dpapi=True: "sk-test-kimi-from-factory",
+        )
+        from harness.engines.concrete import get_engine
+        eng = get_engine("kimi-via-claude")
+        assert eng.name == "kimi-via-claude"
+        assert "api.kimi.com/coding" in eng._base_url
+
+    def test_factory_raises_without_key(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("KIMI_API_KEY", raising=False)
+        from harness.secrets import resolve as resolve_module
+        monkeypatch.setattr(
+            resolve_module, "resolve_key",
+            lambda env_var, prefer_dpapi=True: None,
+        )
+        from harness.engines.concrete import get_engine
+        with pytest.raises(RuntimeError, match="kimi-via-claude"):
+            get_engine("kimi-via-claude")
 
 
 # ---------------------------------------------------------------------------
