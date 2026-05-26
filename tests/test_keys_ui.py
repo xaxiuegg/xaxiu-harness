@@ -211,6 +211,46 @@ class TestHtmlPage:
         # the form is local-only
         assert "127.0.0.1" in HTML_PAGE
 
+    def test_html_has_no_doubled_braces(self) -> None:
+        # W14-KEYS-UI-RENDER-FIX 2026-05-26 regression guard.
+        # Prior version had `{{`/`}}` left over from a draft that
+        # intended str.format() but actually used str.replace().
+        # The doubled braces broke CSS parsing in the browser, so
+        # the page rendered with no styling and no JS execution.
+        # Single braces are correct for replace().
+        assert "{{" not in HTML_PAGE, (
+            "doubled `{{` in HTML template — CSS/JS will break in browser"
+        )
+        assert "}}" not in HTML_PAGE, (
+            "doubled `}}` in HTML template — CSS/JS will break in browser"
+        )
+
+    def test_html_css_block_is_valid_shaped(self) -> None:
+        # Sanity-check that key CSS rule openings still appear in
+        # the canonical single-brace form after replace-fix.
+        assert "* { box-sizing: border-box; }" in HTML_PAGE
+        assert "body {" in HTML_PAGE
+        assert ".row {" in HTML_PAGE
+
+    def test_html_js_template_literal_token_is_single_braced(self) -> None:
+        # The JS uses `${TOKEN}` interpolation; if doubled to
+        # `${{TOKEN}}` the URL becomes `${object}` and the API
+        # returns 403, so no rows render.
+        assert "${TOKEN}" in HTML_PAGE
+        assert "${{TOKEN}}" not in HTML_PAGE
+
+    def test_rendered_html_has_token_substituted(self) -> None:
+        # End-to-end: simulate the replace() the handler does and
+        # confirm the served body has the token in the JS const and
+        # no leftover __TOKEN__ marker.
+        token = "test-token-abc123"
+        body = HTML_PAGE.replace("__TOKEN__", token)
+        assert "__TOKEN__" not in body
+        assert f'const TOKEN = "{token}";' in body
+        # And critically: the CSS still has single braces post-replace
+        assert "{{" not in body
+        assert "}}" not in body
+
 
 # ---------------------------------------------------------------------------
 # CLI

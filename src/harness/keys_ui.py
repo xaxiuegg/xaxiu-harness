@@ -191,6 +191,13 @@ def _build_status() -> list[dict]:
 # ---------------------------------------------------------------------------
 # HTML
 # ---------------------------------------------------------------------------
+#
+# NOTE: This template uses SINGLE braces in CSS and JS.  We bind the
+# session token via ``str.replace("__TOKEN__", token)`` -- NOT
+# ``str.format(...)`` -- so braces do NOT need doubling.  Prior version
+# (commit 9dde951) had doubled braces left over from a format()
+# draft; that broke CSS parsing in the browser.  W14-KEYS-UI-RENDER-FIX
+# 2026-05-26.
 
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -199,8 +206,8 @@ HTML_PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <title>xaxiu-harness key setup</title>
 <style>
-  * {{ box-sizing: border-box; }}
-  body {{
+  * { box-sizing: border-box; }
+  body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
                  Roboto, Oxygen, Ubuntu, sans-serif;
     background: #0d1117;
@@ -209,42 +216,42 @@ HTML_PAGE = """<!DOCTYPE html>
     padding: 32px;
     max-width: 1100px;
     margin: auto;
-  }}
-  h1 {{ font-size: 22px; margin-bottom: 4px; }}
-  .subtitle {{ color: #8b949e; font-size: 13px; margin-bottom: 24px; }}
-  .row {{
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  .row {
     background: #161b22;
     border: 1px solid #30363d;
     border-radius: 6px;
     padding: 14px 18px;
     margin-bottom: 12px;
-  }}
-  .row-head {{
+  }
+  .row-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
-  }}
-  .name {{ font-size: 15px; font-weight: 600; color: #f0f6fc; }}
-  .source {{ font-size: 11px; padding: 2px 8px; border-radius: 4px; }}
-  .source-env {{ background: #1f6feb; color: white; }}
-  .source-dotenv {{ background: #6e4ad9; color: white; }}
-  .source-missing {{ background: #6e7681; color: white; }}
-  .purpose {{
+  }
+  .name { font-size: 15px; font-weight: 600; color: #f0f6fc; }
+  .source { font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+  .source-env { background: #1f6feb; color: white; }
+  .source-dotenv { background: #6e4ad9; color: white; }
+  .source-missing { background: #6e7681; color: white; }
+  .purpose {
     font-size: 12px; color: #8b949e; margin-bottom: 8px;
-  }}
-  .key-input-row {{
+  }
+  .key-input-row {
     display: flex;
     align-items: center;
     gap: 8px;
-  }}
-  .env-label {{
+  }
+  .env-label {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
     color: #58a6ff;
     min-width: 200px;
-  }}
-  input[type="password"], input[type="text"] {{
+  }
+  input[type="password"], input[type="text"] {
     flex: 1;
     background: #0d1117;
     border: 1px solid #30363d;
@@ -253,13 +260,13 @@ HTML_PAGE = """<!DOCTYPE html>
     padding: 8px 10px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 13px;
-  }}
-  input:focus {{
+  }
+  input:focus {
     outline: none;
     border-color: #1f6feb;
     box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.3);
-  }}
-  button {{
+  }
+  button {
     background: #21262d;
     border: 1px solid #30363d;
     color: #c9d1d9;
@@ -267,41 +274,41 @@ HTML_PAGE = """<!DOCTYPE html>
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
-  }}
-  button:hover {{ background: #30363d; }}
-  button.primary {{
+  }
+  button:hover { background: #30363d; }
+  button.primary {
     background: #238636; border-color: #2ea043; color: white;
-  }}
-  button.primary:hover {{ background: #2ea043; }}
-  button.test {{
+  }
+  button.primary:hover { background: #2ea043; }
+  button.test {
     background: #1f6feb; border-color: #388bfd; color: white;
-  }}
-  button.test:hover {{ background: #388bfd; }}
-  .status {{
+  }
+  button.test:hover { background: #388bfd; }
+  .status {
     font-size: 12px; min-width: 100px;
-  }}
-  .status-up    {{ color: #3fb950; }}
-  .status-down  {{ color: #f85149; }}
-  .status-test  {{ color: #d29922; }}
-  .toolbar {{
+  }
+  .status-up    { color: #3fb950; }
+  .status-down  { color: #f85149; }
+  .status-test  { color: #d29922; }
+  .toolbar {
     margin-top: 24px;
     display: flex;
     gap: 12px;
     justify-content: flex-end;
-  }}
-  .footer {{
+  }
+  .footer {
     color: #8b949e;
     font-size: 12px;
     margin-top: 16px;
     line-height: 1.6;
-  }}
-  .footer code {{
+  }
+  .footer code {
     background: #161b22;
     padding: 2px 6px;
     border-radius: 3px;
     font-size: 11px;
-  }}
-  .toast {{
+  }
+  .toast {
     position: fixed;
     bottom: 24px;
     right: 24px;
@@ -310,9 +317,9 @@ HTML_PAGE = """<!DOCTYPE html>
     font-size: 13px;
     color: white;
     display: none;
-  }}
-  .toast.success {{ background: #238636; display: block; }}
-  .toast.error   {{ background: #da3633; display: block; }}
+  }
+  .toast.success { background: #238636; display: block; }
+  .toast.error   { background: #da3633; display: block; }
 </style>
 </head>
 <body>
@@ -346,7 +353,7 @@ HTML_PAGE = """<!DOCTYPE html>
   </p>
   <ul>
     <li>Linux/Mac: <code>set -a; source .env; set +a</code></li>
-    <li>Windows PowerShell: <code>Get-Content .env | ForEach-Object {{ $name, $value = $_.Split('=', 2); [Environment]::SetEnvironmentVariable($name, $value, [EnvironmentVariableTarget]::User) }}</code></li>
+    <li>Windows PowerShell: <code>Get-Content .env | ForEach-Object { $name, $value = $_.Split('=', 2); [Environment]::SetEnvironmentVariable($name, $value, [EnvironmentVariableTarget]::User) }</code></li>
   </ul>
 </div>
 
@@ -355,16 +362,16 @@ HTML_PAGE = """<!DOCTYPE html>
 <script>
 const TOKEN = "__TOKEN__";
 
-async function loadStatus() {{
-  const r = await fetch(`/api/status?token=${{TOKEN}}`);
+async function loadStatus() {
+  const r = await fetch(`/api/status?token=${TOKEN}`);
   const data = await r.json();
   renderRows(data);
-}}
+}
 
-function renderRows(status) {{
+function renderRows(status) {
   const container = document.getElementById("rows");
   container.innerHTML = "";
-  for (const item of status) {{
+  for (const item of status) {
     const row = document.createElement("div");
     row.className = "row";
     const sourceClass = "source-" + item.source;
@@ -374,95 +381,95 @@ function renderRows(status) {{
       "not set";
     row.innerHTML = `
       <div class="row-head">
-        <div class="name">${{item.display}}</div>
-        <div class="source ${{sourceClass}}">${{sourceLabel}}</div>
+        <div class="name">${item.display}</div>
+        <div class="source ${sourceClass}">${sourceLabel}</div>
       </div>
-      <div class="purpose">${{item.purpose}}</div>
+      <div class="purpose">${item.purpose}</div>
       <div class="key-input-row">
-        <div class="env-label">${{item.env}}</div>
-        <input type="password" id="key-${{item.env}}"
-               placeholder="${{item.has_value ? '(current: ' + item.masked + ')' : 'paste key here'}}"
+        <div class="env-label">${item.env}</div>
+        <input type="password" id="key-${item.env}"
+               placeholder="${item.has_value ? '(current: ' + item.masked + ')' : 'paste key here'}"
                autocomplete="off">
-        ${{item.engine_probe ? `<button class="test" onclick="testKey('${{item.env}}', '${{item.engine_probe}}')">Test</button>` : ''}}
-        <span class="status" id="status-${{item.env}}"></span>
+        ${item.engine_probe ? `<button class="test" onclick="testKey('${item.env}', '${item.engine_probe}')">Test</button>` : ''}
+        <span class="status" id="status-${item.env}"></span>
       </div>
     `;
     container.appendChild(row);
-  }}
-}}
+  }
+}
 
-async function testKey(envVar, engineProbe) {{
+async function testKey(envVar, engineProbe) {
   const input = document.getElementById("key-" + envVar);
   const statusEl = document.getElementById("status-" + envVar);
   statusEl.textContent = "Testing...";
   statusEl.className = "status status-test";
-  const body = JSON.stringify({{
+  const body = JSON.stringify({
     env_var: envVar,
     engine_probe: engineProbe,
     new_value: input.value || null,
-  }});
-  try {{
-    const r = await fetch(`/api/test?token=${{TOKEN}}`, {{
+  });
+  try {
+    const r = await fetch(`/api/test?token=${TOKEN}`, {
       method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
+      headers: { "Content-Type": "application/json" },
       body: body,
-    }});
+    });
     const data = await r.json();
-    if (data.up) {{
+    if (data.up) {
       statusEl.textContent = "OK (" + (data.category || "up") + ")";
       statusEl.className = "status status-up";
-    }} else {{
+    } else {
       statusEl.textContent = data.category || "down";
       statusEl.className = "status status-down";
       statusEl.title = data.error || "";
-    }}
-  }} catch (e) {{
+    }
+  } catch (e) {
     statusEl.textContent = "probe failed";
     statusEl.className = "status status-down";
     statusEl.title = String(e);
-  }}
-}}
+  }
+}
 
-async function saveAll() {{
-  const updates = {{}};
-  for (const input of document.querySelectorAll('input[type="password"]')) {{
+async function saveAll() {
+  const updates = {};
+  for (const input of document.querySelectorAll('input[type="password"]')) {
     const envVar = input.id.replace("key-", "");
-    if (input.value) {{
+    if (input.value) {
       updates[envVar] = input.value;
-    }}
-  }}
-  if (Object.keys(updates).length === 0) {{
+    }
+  }
+  if (Object.keys(updates).length === 0) {
     showToast("Nothing to save — all fields empty.", "error");
     return;
-  }}
-  try {{
-    const r = await fetch(`/api/save?token=${{TOKEN}}`, {{
+  }
+  try {
+    const r = await fetch(`/api/save?token=${TOKEN}`, {
       method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ updates: updates }}),
-    }});
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates: updates }),
+    });
     const data = await r.json();
-    if (data.saved) {{
+    if (data.saved) {
       showToast(
         "Saved " + Object.keys(updates).length + " key(s) to " + data.env_path,
         "success",
       );
       // Reload status so the form reflects the new state
       setTimeout(loadStatus, 200);
-    }} else {{
+    } else {
       showToast("Save failed: " + (data.error || "unknown"), "error");
-    }}
-  }} catch (e) {{
+    }
+  } catch (e) {
     showToast("Save error: " + String(e), "error");
-  }}
-}}
+  }
+}
 
-function showToast(message, kind) {{
+function showToast(message, kind) {
   const el = document.getElementById("toast");
   el.textContent = message;
   el.className = "toast " + kind;
-  setTimeout(() => {{ el.className = "toast"; }}, 4000);
-}}
+  setTimeout(() => { el.className = "toast"; }, 4000);
+}
 
 loadStatus();
 </script>
@@ -488,7 +495,7 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         logger.debug("keys-ui: " + fmt, *args)
 
-    def _send_json(self, payload: dict, status: int = 200) -> None:
+    def _send_json(self, payload, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
