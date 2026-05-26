@@ -2534,7 +2534,60 @@ def keys_probe_all(fmt: str, providers: tuple[str, ...]) -> None:
         label = r.get("label", "") or ""
         click.echo(f"  {r['provider']:<20} {slot:<6} {alias:<6} "
                    f"{cat_styled:<28} {label}")
+
+    # W14-KEYS-POOL-HARDENING 2026-05-26: auto-prune ledger so it
+    # doesn't grow unbounded under cron/CI cadence.  Each (alias)
+    # keeps the most recent 50 records.
+    try:
+        from harness.keys import prune_old_records
+        summary = prune_old_records(keep_per_alias=50)
+        if summary.get("dropped", 0) > 0:
+            click.echo()
+            click.echo(click.style(
+                f"  (auto-pruned {summary['dropped']} old health records; "
+                f"kept {summary['after']} most-recent per alias)",
+                fg="white", dim=True,
+            ), err=True)
+    except Exception:
+        pass
+
     sys.exit(1 if any_down else 0)
+
+
+@keys_group.group(name="health")
+def keys_health_group() -> None:
+    """W14-KEYS-POOL-HARDENING 2026-05-26: health-ledger maintenance."""
+
+
+@keys_health_group.command(name="prune")
+@click.option("--keep-per-alias", type=int, default=50, show_default=True,
+              help="Keep at most N most-recent records per (provider, "
+                   "alias).  Older entries are dropped atomically.")
+def keys_health_prune(keep_per_alias: int) -> None:
+    """W14-KEYS-POOL-HARDENING 2026-05-26: compact coord/key_health.jsonl.
+
+    Keeps the most-recent ``--keep-per-alias`` records per (env_prefix,
+    alias) pair.  Atomic rewrite under file lock.
+
+    Cross-platform: uses msvcrt locking on Windows, fcntl on POSIX.
+    Safe to run while probe-all or dispatch is also writing.
+
+    Auto-invoked as a side effect of `harness keys probe-all`.
+    """
+    from harness.keys import prune_old_records
+    summary = prune_old_records(keep_per_alias=keep_per_alias)
+    before = summary["before"]
+    after = summary["after"]
+    dropped = summary["dropped"]
+    aliases = summary["aliases_seen"]
+    if before == 0:
+        click.echo("no health records to prune (ledger empty or missing)")
+    else:
+        click.echo(f"  before: {before:>5} records across {aliases} alias(es)")
+        click.echo(f"  after:  {after:>5} records "
+                   f"(keep-per-alias={keep_per_alias})")
+        click.echo(f"  dropped:{dropped:>5}")
+    sys.exit(0)
 
 
 @keys_group.group(name="policy")

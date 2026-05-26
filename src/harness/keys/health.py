@@ -125,7 +125,13 @@ def record_outcome(
     source: str = "dispatch",
     details: str = "",
 ) -> None:
-    """Append a health record to the ledger.  Thread-safe.
+    """Append a health record to the ledger.  Thread-safe + cross-process.
+
+    W14-KEYS-POOL-HARDENING 2026-05-26: now uses file-lock for
+    cross-process safety on Windows + POSIX (panel-audit finding;
+    convergent risk flagged by Kimi + DeepSeek).  Within a single
+    process the existing threading.Lock still guards.  Across
+    processes, the sentinel-file lock prevents interleaved appends.
 
     Never raises; logs a warning if the write fails.  Callers
     (dispatcher, probe loop) shouldn't crash because of telemetry.
@@ -145,9 +151,11 @@ def record_outcome(
     path = _ledger_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        from harness.keys._lock import file_lock, lock_path_for
         with _write_lock:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line)
+            with file_lock(lock_path_for(path)):
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(line)
     except OSError as exc:
         logger.warning(
             "keys.health: ledger write failed (%s); record dropped",
@@ -268,40 +276,115 @@ def reset_alias_history(
 ) -> int:
     """Remove all history for a specific (prefix, alias).  Returns the
     number of records dropped.  Used by ``harness keys forget`` and
-    by tests.  Atomic — rewrites the file via tmp+replace.
+    by tests.  Atomic — rewrites the file via tmp+replace under lock.
     """
     p = path or _ledger_path()
     if not p.exists():
         return 0
+    from harness.keys._lock import file_lock, lock_path_for
     kept = []
     dropped = 0
     try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if (row.get("env_prefix") == env_prefix
-                    and row.get("alias") == alias):
-                dropped += 1
-                continue
-            kept.append(line)
-    except OSError:
-        return 0
-    tmp = p.with_suffix(".tmp")
-    try:
         with _write_lock:
-            tmp.write_text(
-                "\n".join(kept) + ("\n" if kept else ""),
-                encoding="utf-8",
-            )
-            tmp.replace(p)
+            with file_lock(lock_path_for(p)):
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if (row.get("env_prefix") == env_prefix
+                            and row.get("alias") == alias):
+                        dropped += 1
+                        continue
+                    kept.append(line)
+                tmp = p.with_suffix(".tmp")
+                tmp.write_text(
+                    "\n".join(kept) + ("\n" if kept else ""),
+                    encoding="utf-8",
+                )
+                tmp.replace(p)
     except OSError as exc:
         logger.warning(
             "keys.health: reset_alias_history rewrite failed (%s)", exc,
         )
         return 0
     return dropped
+
+
+def prune_old_records(
+    *,
+    keep_per_alias: int = 50,
+    path: Optional[Path] = None,
+) -> dict:
+    """Keep only the newest ``keep_per_alias`` records per
+    (env_prefix, alias).  Atomic rewrite under lock.
+
+    Returns a dict with ``{"before": N, "after": N, "dropped": N,
+    "aliases_seen": K}``.  Used by ``harness keys health prune`` and
+    auto-invoked by ``harness keys probe-all``.
+
+    W14-KEYS-POOL-HARDENING 2026-05-26: addresses the audit-panel
+    finding (both Kimi + DeepSeek) that the JSONL ledger grows
+    unbounded.  At daily probe-all cadence with 5 keys that's
+    ~1800 records/year — modest.  But CI/cron-driven probes can
+    accumulate hundreds of records/day; pruning prevents
+    monotonic disk growth.
+    """
+    p = path or _ledger_path()
+    if not p.exists():
+        return {"before": 0, "after": 0, "dropped": 0, "aliases_seen": 0}
+
+    from harness.keys._lock import file_lock, lock_path_for
+    summary = {"before": 0, "after": 0, "dropped": 0, "aliases_seen": 0}
+    try:
+        with _write_lock:
+            with file_lock(lock_path_for(p)):
+                # Read + parse all records
+                lines = p.read_text(encoding="utf-8").splitlines()
+                records: list[tuple[str, dict]] = []
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    records.append((line, row))
+                summary["before"] = len(records)
+
+                # Group by (prefix, alias); newest last
+                by_key: dict[tuple[str, str], list[tuple[str, dict]]] = {}
+                for raw, row in records:
+                    key = (
+                        row.get("env_prefix", ""),
+                        row.get("alias", ""),
+                    )
+                    by_key.setdefault(key, []).append((raw, row))
+                summary["aliases_seen"] = len(by_key)
+
+                # Trim each group to last N (preserving file order
+                # within the group)
+                kept_records: list[str] = []
+                for key, group in by_key.items():
+                    trimmed = group[-keep_per_alias:]
+                    kept_records.extend(line for line, _ in trimmed)
+                summary["after"] = len(kept_records)
+                summary["dropped"] = (
+                    summary["before"] - summary["after"]
+                )
+
+                # Atomic write under the same lock
+                tmp = p.with_suffix(".tmp")
+                tmp.write_text(
+                    "\n".join(kept_records)
+                    + ("\n" if kept_records else ""),
+                    encoding="utf-8",
+                )
+                tmp.replace(p)
+    except OSError as exc:
+        logger.warning("keys.health: prune failed (%s)", exc)
+    return summary

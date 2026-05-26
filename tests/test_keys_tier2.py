@@ -17,11 +17,13 @@ from harness.keys import (
     is_alias_healthy,
     list_strategies,
     pick_next_key,
+    prune_old_records,
     record_outcome,
     reset_alias_history,
     set_strategy,
     unhealthy_aliases,
 )
+from harness.keys import _lock as lock_mod
 from harness.keys import health as health_mod
 from harness.keys import policy as policy_mod
 from harness.keys.resolve import reset_rotation_counter
@@ -30,12 +32,17 @@ from harness.keys.resolve import reset_rotation_counter
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Point health ledger + policy file at tmp_path so tests don't
-    # touch the real coord/key_health.jsonl or .harness/key_policy.json
+    # touch the real coord/key_health.jsonl or coord/key_policy.json.
     monkeypatch.setattr(
         health_mod, "_ledger_path", lambda: tmp_path / "key_health.jsonl",
     )
-    monkeypatch.setattr(
-        policy_mod, "_policy_path", lambda: tmp_path / "key_policy.json",
+    # W14-KEYS-POOL-HARDENING 2026-05-26: use HARNESS_KEY_POLICY_PATH
+    # env var (which the real _policy_path() honors) instead of
+    # monkeypatching _policy_path - so the env-var-override test still
+    # exercises the real implementation.
+    monkeypatch.setenv(
+        "HARNESS_KEY_POLICY_PATH",
+        str(tmp_path / "key_policy.json"),
     )
     for prefix in ("KIMI_API_KEY", "MIMO_API_KEY", "DEEPSEEK_API_KEY"):
         monkeypatch.delenv(prefix, raising=False)
@@ -383,3 +390,179 @@ class TestProbeAllCli:
         kimi = [r for r in data if r["env_prefix"] == "KIMI_API_KEY"]
         assert len(kimi) >= 1
         assert kimi[0]["up"] is True
+
+
+# ---------------------------------------------------------------------------
+# W14-KEYS-POOL-HARDENING (P1)
+# ---------------------------------------------------------------------------
+
+
+class TestFileLock:
+    """W14-KEYS-POOL-HARDENING: cross-platform file lock helper."""
+
+    def test_lock_acquires_and_releases(self, tmp_path: Path) -> None:
+        # A second open of the same lock from the same process should
+        # be fine because we re-enter the context within the same thread
+        # but a separate file_lock call uses a NEW fd
+        lock = tmp_path / "test.lock"
+        with lock_mod.file_lock(lock):
+            assert lock.exists()
+        # After the context, the file still exists (sentinel) but lock
+        # is released — we can re-acquire
+        with lock_mod.file_lock(lock):
+            assert lock.exists()
+
+    def test_lock_path_for_data_file(self, tmp_path: Path) -> None:
+        data = tmp_path / "key_health.jsonl"
+        lock = lock_mod.lock_path_for(data)
+        assert lock.name == "key_health.jsonl.lock"
+        assert lock.parent == tmp_path
+
+    def test_lock_creates_parent_dir(self, tmp_path: Path) -> None:
+        lock = tmp_path / "nested" / "deeply" / "test.lock"
+        with lock_mod.file_lock(lock):
+            assert lock.exists()
+            assert lock.parent.is_dir()
+
+
+class TestPruneOldRecords:
+    """W14-KEYS-POOL-HARDENING: log compaction for unbounded ledger growth."""
+
+    def test_prune_no_file(self, tmp_path: Path,
+                           monkeypatch: pytest.MonkeyPatch) -> None:
+        # Repoint ledger to tmp; no file exists
+        monkeypatch.setattr(
+            health_mod, "_ledger_path",
+            lambda: tmp_path / "key_health.jsonl",
+        )
+        summary = prune_old_records()
+        assert summary["before"] == 0
+        assert summary["after"] == 0
+        assert summary["dropped"] == 0
+
+    def test_prune_keeps_last_n_per_alias(self) -> None:
+        # Insert 100 records for k1, 100 for k2, then prune to 5 per alias
+        for i in range(100):
+            record_outcome(
+                "KIMI_API_KEY", "k1", "KIMI_API_KEY",
+                "up" if i % 2 == 0 else "transient",
+                source="dispatch",
+                details=f"event {i}",
+            )
+            record_outcome(
+                "KIMI_API_KEY", "k2", "KIMI_API_KEY_2",
+                "up",
+                source="dispatch",
+                details=f"event {i}",
+            )
+        summary = prune_old_records(keep_per_alias=5)
+        assert summary["before"] == 200
+        assert summary["after"] == 10  # 5 per alias × 2 aliases
+        assert summary["dropped"] == 190
+        assert summary["aliases_seen"] == 2
+
+    def test_prune_preserves_newest(self) -> None:
+        # The pruned records should be the OLDEST; newest survive
+        for i in range(20):
+            record_outcome(
+                "KIMI_API_KEY", "k1", "KIMI_API_KEY",
+                "up",
+                source="dispatch",
+                details=f"event_{i:02d}",
+            )
+        prune_old_records(keep_per_alias=3)
+        # Read what's left
+        summary = alias_status_summary("KIMI_API_KEY")
+        # The latest record should be the last one inserted ("event_19")
+        assert "event_19" in summary["k1"]["details"]
+
+    def test_prune_isolates_per_prefix(self) -> None:
+        # 10 records for KIMI / k1 and 10 for MIMO / k1; prune to 2
+        for i in range(10):
+            record_outcome("KIMI_API_KEY", "k1", "KIMI_API_KEY",
+                           "up", source="dispatch", details=f"k_{i}")
+            record_outcome("MIMO_API_KEY", "k1", "MIMO_API_KEY",
+                           "up", source="dispatch", details=f"m_{i}")
+        summary = prune_old_records(keep_per_alias=2)
+        # 4 records total: 2 per (prefix, alias) pair, 2 prefixes
+        assert summary["after"] == 4
+        assert summary["aliases_seen"] == 2  # (KIMI, k1) + (MIMO, k1)
+
+
+class TestPolicyMigration:
+    """W14-KEYS-POOL-HARDENING: policy file moved from .harness/ → coord/."""
+
+    def test_env_var_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The autouse fixture already set HARNESS_KEY_POLICY_PATH; here
+        # we just override it again to a different value.
+        target = tmp_path / "custom_policy.json"
+        monkeypatch.setenv("HARNESS_KEY_POLICY_PATH", str(target))
+        assert policy_mod._policy_path() == target
+
+    def _setup_fake_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> Path:
+        """Create a fake repo structure where parents[3] of the
+        mocked policy.py file is tmp_path, then return that root."""
+        # Clear the env var override the autouse fixture set so
+        # _policy_path() falls through to the parents[3] code path.
+        monkeypatch.delenv("HARNESS_KEY_POLICY_PATH", raising=False)
+        fake_keys_dir = tmp_path / "src" / "harness" / "keys"
+        fake_keys_dir.mkdir(parents=True)
+        fake_file = fake_keys_dir / "policy.py"
+        fake_file.write_text("# fake", encoding="utf-8")
+        monkeypatch.setattr(policy_mod, "__file__", str(fake_file))
+        return tmp_path
+
+    def test_legacy_migration(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If only legacy .harness/key_policy.json exists, it gets
+        migrated to coord/key_policy.json on first access."""
+        root = self._setup_fake_repo(tmp_path, monkeypatch)
+        legacy = root / ".harness" / "key_policy.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text('{"KIMI_API_KEY": "priority"}', encoding="utf-8")
+
+        new_path = policy_mod._policy_path()
+        assert new_path == root / "coord" / "key_policy.json"
+        assert new_path.exists()
+        assert not legacy.exists()  # migrated away
+
+    def test_no_migration_when_new_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Both files exist; legacy should NOT clobber new
+        root = self._setup_fake_repo(tmp_path, monkeypatch)
+        legacy = root / ".harness" / "key_policy.json"
+        new = root / "coord" / "key_policy.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        new.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text('{"KIMI_API_KEY": "priority"}', encoding="utf-8")
+        new.write_text('{"MIMO_API_KEY": "rotation"}', encoding="utf-8")
+
+        result_path = policy_mod._policy_path()
+        assert result_path == new
+        # Both files still exist - no auto-migration when target present
+        assert legacy.exists()
+        assert new.exists()
+
+
+class TestPruneCli:
+    def test_prune_cli_help(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["keys", "health", "prune", "--help"],
+        )
+        assert result.exit_code == 0
+        assert "keep-per-alias" in result.output
+
+    def test_prune_cli_runs(self) -> None:
+        # No records → "no health records" message
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["keys", "health", "prune", "--keep-per-alias", "10"],
+        )
+        assert result.exit_code == 0
