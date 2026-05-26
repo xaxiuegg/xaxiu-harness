@@ -2391,20 +2391,224 @@ def keys_list(fmt: str) -> None:
         import json as _json
         click.echo(_json.dumps(status, indent=2))
         sys.exit(0)
-    click.echo(f"{'provider':<22} {'env var':<22} {'source':<8}  "
-               f"key (masked)")
-    click.echo("-" * 80)
+    click.echo(f"{'provider':<22} {'env var':<22} {'source':<10}  "
+               f"key (masked)               health")
+    click.echo("-" * 100)
+    # Lazy-import per-key health so the CLI still works if Tier 2
+    # modules are missing for any reason
+    try:
+        from harness.keys import alias_status_summary
+        health_by_provider: dict[str, dict] = {}
+    except ImportError:
+        alias_status_summary = None
+        health_by_provider = {}
     for item in status:
         source_label = item["source"]
         if source_label == "missing":
             source_styled = click.style(source_label, fg="red")
         elif source_label == "env":
             source_styled = click.style(source_label, fg="blue")
+        elif source_label == "env-legacy":
+            source_styled = click.style(source_label, fg="yellow")
         else:
             source_styled = click.style(source_label, fg="magenta")
         masked = item["masked"] or "(not set)"
+        # Lookup per-key health if available
+        health_str = ""
+        if alias_status_summary and item.get("slot"):
+            # Determine the env_prefix by stripping any trailing _N
+            base = item["env"]
+            n = item["slot"]
+            prefix = base.replace(f"_{n}", "") if base.endswith(
+                f"_{n}",
+            ) else base
+            if prefix not in health_by_provider:
+                health_by_provider[prefix] = alias_status_summary(prefix)
+            alias = f"k{n}"
+            h = health_by_provider[prefix].get(alias)
+            if h:
+                cat = h["category"]
+                if h["healthy"]:
+                    health_str = click.style(cat, fg="green")
+                else:
+                    health_str = click.style(cat, fg="red")
+            elif item["has_value"]:
+                health_str = click.style("untested", fg="white", dim=True)
         click.echo(f"  {item['display']:<20} {item['env']:<22} "
-                   f"{source_styled:<17} {masked}")
+                   f"{source_styled:<19} {masked:<27} {health_str}")
+    sys.exit(0)
+
+
+@keys_group.command(name="probe-all")
+@click.option("--format", "fmt",
+              type=click.Choice(["pretty", "json"]), default="pretty",
+              help="Output format.")
+@click.option("--provider", "providers", multiple=True,
+              help="Limit to specific providers (env_prefix, e.g. "
+                   "KIMI_API_KEY).  Default: all.")
+def keys_probe_all(fmt: str, providers: tuple[str, ...]) -> None:
+    """W14-KEYS-POOL-TIER2: live-probe every populated slot.
+
+    For each (provider, slot) with a configured key, runs a small
+    probe via ``probe_engine_live`` and records the outcome to
+    ``coord/key_health.jsonl``.  Returns a table of results that
+    the operator can use to identify dead/quota-exceeded keys.
+
+    Cost: one ~5-token round-trip per populated key.  At PAYG rates
+    this is well under $0.01 for a full sweep.
+    """
+    from harness.cli_helpers import probe_engine_live
+    from harness.keys import discover_pool, record_outcome
+    from harness.keys_ui import KEY_PROVIDERS
+
+    filter_set = set(providers) if providers else None
+    results = []
+    for spec in KEY_PROVIDERS:
+        prefix = spec["env"]
+        if filter_set and prefix not in filter_set:
+            continue
+        engine_probe = spec.get("engine_probe", "")
+        if not engine_probe:
+            continue  # wrapper-only providers have no live probe
+        pool = discover_pool(prefix)
+        if not pool:
+            results.append({
+                "provider": spec["display"],
+                "env_prefix": prefix,
+                "slot": None,
+                "alias": None,
+                "category": "no-keys",
+                "up": False,
+                "error": "",
+            })
+            continue
+        for entry in pool:
+            # Override the engine's primary env var temporarily
+            # (the engine reads <PREFIX>, so we point it at this slot)
+            prior = os.environ.get(prefix)
+            os.environ[prefix] = entry.value
+            try:
+                category, err = probe_engine_live(engine_probe, log=False)
+                up = category == "up"
+                record_outcome(
+                    prefix, entry.alias, entry.env_var,
+                    category, source="probe", details=err or "",
+                )
+                results.append({
+                    "provider": spec["display"],
+                    "env_prefix": prefix,
+                    "slot": entry.slot,
+                    "alias": entry.alias,
+                    "env_var": entry.env_var,
+                    "label": entry.label,
+                    "category": category,
+                    "up": up,
+                    "error": err or "",
+                })
+            finally:
+                if prior is None:
+                    os.environ.pop(prefix, None)
+                else:
+                    os.environ[prefix] = prior
+
+    if fmt == "json":
+        import json as _json
+        click.echo(_json.dumps(results, indent=2))
+        sys.exit(0)
+
+    click.echo(f"{'provider':<22} {'slot':<6} {'alias':<6} {'category':<18} "
+               f"label")
+    click.echo("-" * 90)
+    any_down = False
+    for r in results:
+        cat = r["category"]
+        if r["up"]:
+            cat_styled = click.style(cat, fg="green")
+        elif cat == "no-keys":
+            cat_styled = click.style(cat, fg="white", dim=True)
+        else:
+            cat_styled = click.style(cat, fg="red")
+            any_down = True
+        slot = str(r["slot"]) if r["slot"] is not None else "—"
+        alias = r["alias"] or "—"
+        label = r.get("label", "") or ""
+        click.echo(f"  {r['provider']:<20} {slot:<6} {alias:<6} "
+                   f"{cat_styled:<28} {label}")
+    sys.exit(1 if any_down else 0)
+
+
+@keys_group.group(name="policy")
+def keys_policy_group() -> None:
+    """W14-KEYS-POOL-TIER2: per-provider key-selection strategy."""
+
+
+@keys_policy_group.command(name="get")
+@click.argument("env_prefix", required=False)
+def keys_policy_get(env_prefix: str) -> None:
+    """Show the current strategy.  With no arg, show all providers."""
+    from harness.keys import (
+        DEFAULT_STRATEGY, get_strategy, list_strategies,
+    )
+    from harness.keys_ui import KEY_PROVIDERS
+    if env_prefix:
+        click.echo(get_strategy(env_prefix))
+        sys.exit(0)
+    all_set = list_strategies()
+    click.echo(f"{'env_prefix':<25} strategy")
+    click.echo("-" * 55)
+    for spec in KEY_PROVIDERS:
+        strat = all_set.get(spec["env"], DEFAULT_STRATEGY)
+        is_default = spec["env"] not in all_set
+        suffix = "  (default)" if is_default else ""
+        click.echo(f"  {spec['env']:<23} {strat}{suffix}")
+    sys.exit(0)
+
+
+@keys_policy_group.command(name="set")
+@click.argument("env_prefix")
+@click.argument("strategy",
+                type=click.Choice(["rotation", "priority",
+                                   "failover-only"]))
+def keys_policy_set(env_prefix: str, strategy: str) -> None:
+    """Set the strategy for a provider.
+
+    ENV_PREFIX must be a known provider (e.g. KIMI_API_KEY).
+    STRATEGY must be one of rotation / priority / failover-only.
+    """
+    from harness.keys import set_strategy
+    from harness.keys_ui import KNOWN_ENV_VARS
+    if env_prefix not in KNOWN_ENV_VARS:
+        click.echo(
+            click.style(
+                f"ERROR: unknown env_prefix {env_prefix!r}.  Known: "
+                f"{sorted(KNOWN_ENV_VARS)}", fg="red",
+            ),
+            err=True,
+        )
+        sys.exit(1)
+    try:
+        set_strategy(env_prefix, strategy)
+    except ValueError as exc:
+        click.echo(click.style(f"ERROR: {exc}", fg="red"), err=True)
+        sys.exit(1)
+    click.echo(f"set {env_prefix} → {strategy}")
+    sys.exit(0)
+
+
+@keys_group.command(name="forget")
+@click.argument("env_prefix")
+@click.argument("alias")
+def keys_forget(env_prefix: str, alias: str) -> None:
+    """W14-KEYS-POOL-TIER2: forget all health history for an alias.
+
+    Use after manually restoring a key that was quarantined.
+    Example::
+
+        harness keys forget KIMI_API_KEY k2
+    """
+    from harness.keys import reset_alias_history
+    n = reset_alias_history(env_prefix, alias)
+    click.echo(f"dropped {n} record(s) for {env_prefix}/{alias}")
     sys.exit(0)
 
 

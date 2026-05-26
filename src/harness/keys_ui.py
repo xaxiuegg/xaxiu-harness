@@ -366,6 +366,13 @@ def _build_status() -> dict:
     without clicking +Add).  Capped at ``KEY_MAX_SLOTS``.
     """
     from harness.keys import discover_pool
+    try:
+        from harness.keys import alias_status_summary, get_strategy
+        _have_tier2 = True
+    except ImportError:
+        alias_status_summary = None
+        get_strategy = None
+        _have_tier2 = False
 
     env_file = _resolve_env_path()
     file_values = _read_env_file(env_file)
@@ -444,11 +451,40 @@ def _build_status() -> dict:
                     "has_value": False,
                     "label": "",
                 })
+        # Decorate each slot with its per-key health (if Tier 2 wired)
+        if _have_tier2:
+            try:
+                health_by_alias = alias_status_summary(prefix)
+            except Exception:
+                health_by_alias = {}
+            for s in slots:
+                alias = f"k{s['slot']}"
+                h = health_by_alias.get(alias)
+                if h:
+                    s["health"] = {
+                        "category": h["category"],
+                        "healthy": h["healthy"],
+                        "ts": h["ts"],
+                    }
+                else:
+                    s["health"] = None
+        else:
+            for s in slots:
+                s["health"] = None
+
+        strategy = "rotation"
+        if _have_tier2:
+            try:
+                strategy = get_strategy(prefix)
+            except Exception:
+                pass
+
         providers.append({
             "env_prefix": prefix,
             "display": spec["display"],
             "purpose": spec["purpose"],
             "engine_probe": spec.get("engine_probe", ""),
+            "strategy": strategy,
             "slots": slots,
         })
     return {
@@ -518,12 +554,47 @@ HTML_PAGE = """<!DOCTYPE html>
     margin-bottom: 8px;
   }
   .name { font-size: 15px; font-weight: 600; color: #f0f6fc; }
+  .head-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
   .slot-summary {
     font-size: 11px;
     padding: 2px 8px;
     border-radius: 4px;
     background: #21262d;
     color: #8b949e;
+  }
+  .strategy-select {
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-family: inherit;
+  }
+  .strategy-select:focus {
+    outline: none;
+    border-color: #1f6feb;
+  }
+  .health-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .health-up { background: #1a4d2a; color: #3fb950; }
+  .health-fail { background: #5c1414; color: #f85149; }
+  .health-untested {
+    background: #21262d; color: #8b949e;
+  }
+  .key-label {
+    font-size: 11px;
+    color: #d29922;
+    margin-left: 4px;
+    font-style: italic;
   }
   .source { font-size: 10px; padding: 1px 6px; border-radius: 3px; }
   .source-env { background: #1f6feb; color: white; }
@@ -748,6 +819,27 @@ function buildProviderRow(provider) {
   name.textContent = provider.display;
   head.appendChild(name);
 
+  const headRight = document.createElement("div");
+  headRight.className = "head-right";
+
+  // W14-KEYS-POOL-TIER2: per-provider failover strategy selector
+  if (provider.slots.filter(s => s.has_value).length >= 2) {
+    const strategySel = document.createElement("select");
+    strategySel.className = "strategy-select";
+    strategySel.title = "Selection strategy for this provider's key pool";
+    for (const opt of ["rotation", "priority", "failover-only"]) {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      if (provider.strategy === opt) o.selected = true;
+      strategySel.appendChild(o);
+    }
+    strategySel.addEventListener("change", () =>
+      setStrategy(provider.env_prefix, strategySel.value),
+    );
+    headRight.appendChild(strategySel);
+  }
+
   // Slot summary: how many populated out of MAX_SLOTS
   const populated = provider.slots.filter(s => s.has_value).length;
   const summary = document.createElement("div");
@@ -755,7 +847,8 @@ function buildProviderRow(provider) {
   summary.textContent = populated > 0
     ? `${populated} key${populated > 1 ? 's' : ''} configured`
     : 'no keys configured';
-  head.appendChild(summary);
+  headRight.appendChild(summary);
+  head.appendChild(headRight);
 
   const purpose = document.createElement("div");
   purpose.className = "purpose";
@@ -816,6 +909,15 @@ function buildSlotRow(provider, slot) {
   envLabel.textContent = slot.env_var;
   inputRow.appendChild(envLabel);
 
+  // W14-KEYS-POOL-TIER2: optional operator label
+  if (slot.label) {
+    const labelEl = document.createElement("span");
+    labelEl.className = "key-label";
+    labelEl.textContent = "(" + slot.label + ")";
+    labelEl.title = "operator label from " + slot.env_var + "_LABEL_" + slot.slot;
+    envLabel.appendChild(labelEl);
+  }
+
   // Source badge per slot
   const sourceBadge = document.createElement("div");
   sourceBadge.className = "source source-" + slot.source;
@@ -826,6 +928,23 @@ function buildSlotRow(provider, slot) {
     slot.source === "dpapi" ? "dpapi" :
     "—";
   inputRow.appendChild(sourceBadge);
+
+  // W14-KEYS-POOL-TIER2: per-key health badge
+  if (slot.has_value) {
+    const healthBadge = document.createElement("div");
+    if (slot.health) {
+      healthBadge.className = "health-badge " + (
+        slot.health.healthy ? "health-up" : "health-fail"
+      );
+      healthBadge.textContent = slot.health.category;
+      healthBadge.title = "last seen: " + slot.health.ts;
+    } else {
+      healthBadge.className = "health-badge health-untested";
+      healthBadge.textContent = "untested";
+      healthBadge.title = "click Test or run harness keys probe-all";
+    }
+    inputRow.appendChild(healthBadge);
+  }
 
   const input = document.createElement("input");
   input.type = "password";
@@ -938,6 +1057,25 @@ async function saveAll() {
     }
   } catch (e) {
     showToast("Save error: " + String(e), "error");
+  }
+}
+
+async function setStrategy(envPrefix, strategy) {
+  try {
+    const r = await fetch(`/api/policy?token=${TOKEN}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env_prefix: envPrefix, strategy: strategy }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      showToast("Strategy: " + envPrefix + " → " + strategy, "success");
+    } else {
+      showToast("Set strategy failed: " +
+        (data.error || "unknown"), "error");
+    }
+  } catch (e) {
+    showToast("Set strategy error: " + String(e), "error");
   }
 }
 
@@ -1098,7 +1236,35 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_save(payload)
             return
 
+        if parsed.path == "/api/policy":
+            self._handle_policy(payload)
+            return
+
         self._send_error_json("not found", 404)
+
+    def _handle_policy(self, payload: dict) -> None:
+        """W14-KEYS-POOL-TIER2: set per-provider failover strategy."""
+        env_prefix = payload.get("env_prefix", "")
+        strategy = payload.get("strategy", "")
+        if env_prefix not in KNOWN_ENV_VARS:
+            self._send_error_json(
+                f"unknown env_prefix: {env_prefix!r}", 400,
+            )
+            return
+        try:
+            from harness.keys import set_strategy
+            set_strategy(env_prefix, strategy)
+        except ValueError as exc:
+            self._send_error_json(str(exc), 400)
+            return
+        except Exception as exc:
+            self._send_error_json(f"set_strategy failed: {exc}", 500)
+            return
+        self._send_json({
+            "saved": True,
+            "env_prefix": env_prefix,
+            "strategy": strategy,
+        })
 
     def _handle_test(self, payload: dict) -> None:
         env_var = payload.get("env_var", "")
@@ -1129,6 +1295,33 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
                 engine_probe, log=False,
             )
             up = category == "up"
+            # W14-KEYS-POOL-TIER2: record outcome to the per-key
+            # health ledger when we know which (prefix, slot) this is.
+            try:
+                from harness.keys.health import record_outcome
+                # env_var is either bare PREFIX (slot 1 legacy) or
+                # PREFIX_<n> (pool slot).  Determine prefix + alias.
+                prefix = env_var
+                alias = "k1"
+                for known in KNOWN_ENV_VARS:
+                    if env_var == known:
+                        prefix = known
+                        alias = "k1"
+                        break
+                    for n in range(1, KEY_MAX_SLOTS + 1):
+                        if env_var == f"{known}_{n}":
+                            prefix = known
+                            alias = f"k{n}"
+                            break
+                    else:
+                        continue
+                    break
+                record_outcome(
+                    prefix, alias, env_var, category,
+                    source="probe", details=err or "",
+                )
+            except Exception:
+                pass
             self._send_json({
                 "up": up,
                 "category": category,

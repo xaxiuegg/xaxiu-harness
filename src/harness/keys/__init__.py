@@ -6,6 +6,22 @@ Re-exports the resolver public surface so callers can write:
 
 instead of digging into the submodule.
 """
+from harness.keys.health import (
+    HealthRecord,
+    alias_status_summary,
+    is_alias_healthy,
+    latest_per_alias,
+    record_outcome,
+    reset_alias_history,
+    unhealthy_aliases,
+)
+from harness.keys.policy import (
+    DEFAULT_STRATEGY,
+    VALID_STRATEGIES,
+    get_strategy,
+    list_strategies,
+    set_strategy,
+)
 from harness.keys.resolve import (
     KeyEntry,
     discover_pool,
@@ -16,10 +32,22 @@ from harness.keys.resolve import (
 )
 
 __all__ = [
+    "DEFAULT_STRATEGY",
+    "HealthRecord",
     "KeyEntry",
+    "VALID_STRATEGIES",
+    "alias_status_summary",
     "discover_pool",
+    "get_strategy",
+    "is_alias_healthy",
+    "latest_per_alias",
     "list_provider_keys",
+    "list_strategies",
     "mask_value",
     "pick_next_key",
+    "record_outcome",
+    "reset_alias_history",
     "resolve_keys",
+    "set_strategy",
+    "unhealthy_aliases",
 ]

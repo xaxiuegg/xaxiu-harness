@@ -154,12 +154,15 @@ def discover_pool(
     if not env_prefix:
         return []
     entries: list[KeyEntry] = []
+    slot1_from_indexed = False
 
     # Pass 1: indexed slots <PREFIX>_1, _2, _3, ...
     for n in range(1, max_slots + 1):
         name = f"{env_prefix}_{n}"
         value, source = _env_or_dpapi(name)
         if value:
+            if n == 1:
+                slot1_from_indexed = True
             label_name = f"{env_prefix}_LABEL_{n}"
             label = os.environ.get(label_name) or ""
             entries.append(KeyEntry(
@@ -171,21 +174,28 @@ def discover_pool(
                 label=label,
             ))
 
-    # Pass 2: legacy singular fallback when no indexed keys found
-    if not entries:
+    # Pass 2: legacy singular fallback.  Bare <PREFIX> populates slot 1
+    # whenever <PREFIX>_1 itself is not set — even when other indexed
+    # slots (_2, _3, ...) exist.  This keeps the operator's existing
+    # legacy key visible when they start adding pool slots, instead of
+    # silently shadowing it (W14-KEYS-POOL-TIER2 UX fix 2026-05-26).
+    if not slot1_from_indexed:
         value, source = _env_or_dpapi(env_prefix)
         if value:
+            # Slot 1's label can still come from <PREFIX>_LABEL_1
+            label = os.environ.get(f"{env_prefix}_LABEL_1") or ""
             entries.append(KeyEntry(
                 slot=1,
                 alias="k1",
                 env_var=env_prefix,
                 value=value,
-                # Tag the source so callers can detect legacy mode +
-                # nudge the operator to rename to <PREFIX>_1
                 source="env-legacy" if source == "env" else source,
-                label="",
+                label=label,
             ))
 
+    # Re-sort by slot so the legacy slot 1 appears before any indexed
+    # slot 2+
+    entries.sort(key=lambda e: e.slot)
     return entries
 
 
@@ -273,38 +283,65 @@ def resolve_keys(env_prefix: str) -> dict[str, str]:
 def pick_next_key(
     env_prefix: str,
     *,
-    strategy: str = "rotation",
+    strategy: Optional[str] = None,
     exclude_aliases: Optional[set[str]] = None,
+    honor_health: bool = True,
 ) -> Optional[KeyEntry]:
     """Pick one key from the pool per ``strategy``.
 
     Returns ``None`` when no eligible keys exist.
 
+    Parameters
+    ----------
+    strategy
+        ``"rotation"`` (default if no policy set), ``"priority"``, or
+        ``"failover-only"``.  If ``None``, reads from per-provider
+        policy file (W14-KEYS-POOL-TIER2).
+    exclude_aliases
+        Aliases the caller has already tried this dispatch.  The retry
+        loop should append the alias of any failed attempt before
+        re-calling.
+    honor_health
+        When True (default), also exclude aliases currently considered
+        unhealthy per ``harness.keys.health``.  Set False in tests or
+        when the operator wants to bypass quarantine.
+
     Strategies
     ----------
     rotation
-        Round-robin over all populated slots.  Counter is module-level
-        and per-prefix; reset by restart.  Thread-safe.
+        Round-robin over all populated AND healthy slots.  Counter
+        is module-level and per-prefix; reset by restart.  Thread-safe.
     priority
-        Always return slot 1 unless it's in ``exclude_aliases`` —
-        then slot 2, and so on.
+        Lowest-slot first.  ``priority`` and ``failover-only`` differ
+        only in semantics — both behave identically when callers
+        drive retry by appending to ``exclude_aliases``.  The
+        semantic distinction is documented for Tier 2 dispatchers.
     failover-only
-        Slot 1 always unless excluded; never slots 2+ unless slot 1
-        is excluded.
+        Same effective behavior as priority for this function; the
+        difference is policy intent (failover-only says "don't
+        normally use anything but k1").
     """
     pool = discover_pool(env_prefix)
     if not pool:
         return None
-    exclude = exclude_aliases or set()
+    if strategy is None:
+        try:
+            from harness.keys.policy import get_strategy
+            strategy = get_strategy(env_prefix)
+        except Exception:
+            strategy = "rotation"
+    exclude = set(exclude_aliases or set())
+    if honor_health:
+        try:
+            from harness.keys.health import unhealthy_aliases
+            exclude |= unhealthy_aliases(env_prefix)
+        except Exception:
+            pass
     eligible = [e for e in pool if e.alias not in exclude]
     if not eligible:
         return None
 
     if strategy == "priority" or strategy == "failover-only":
-        # Lowest-slot first; both strategies behave the same when
-        # caller drives retry by appending failed alias to
-        # exclude_aliases on each attempt.  The user-facing
-        # distinction matters when Tier 2 health is wired in.
         return eligible[0]
 
     # rotation (default)

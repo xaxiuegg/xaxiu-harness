@@ -18,7 +18,9 @@ from harness.keys.resolve import reset_rotation_counter
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clean_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """Each test starts with a clean slate for the providers we test."""
     for prefix in ("KIMI_API_KEY", "MIMO_API_KEY", "DEEPSEEK_API_KEY",
                    "ANTHROPIC_API_KEY", "FAKE_TEST_KEY"):
@@ -27,6 +29,17 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.delenv(f"{prefix}_{n}", raising=False)
             monkeypatch.delenv(f"{prefix}_LABEL_{n}", raising=False)
     reset_rotation_counter()
+    # W14-KEYS-POOL-TIER2: pick_next_key now consults the health
+    # ledger; redirect it to a tmp path so resolver tests don't see
+    # real-world health data.
+    from harness.keys import health as health_mod
+    from harness.keys import policy as policy_mod
+    monkeypatch.setattr(
+        health_mod, "_ledger_path", lambda: tmp_path / "key_health.jsonl",
+    )
+    monkeypatch.setattr(
+        policy_mod, "_policy_path", lambda: tmp_path / "key_policy.json",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,19 +98,40 @@ class TestDiscoverPool:
         assert [e.value for e in pool] == ["sk-a", "sk-b", "sk-c"]
         assert [e.alias for e in pool] == ["k1", "k2", "k3"]
 
-    def test_indexed_shadows_legacy(
+    def test_indexed_1_shadows_legacy(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """If any *_N is set, the bare PREFIX is NOT used as slot 1."""
+        """If <PREFIX>_1 is set, bare <PREFIX> is NOT used for slot 1."""
+        monkeypatch.setenv("KIMI_API_KEY", "sk-legacy")
+        monkeypatch.setenv("KIMI_API_KEY_1", "sk-canonical")
+        pool = discover_pool("KIMI_API_KEY")
+        assert len(pool) == 1
+        assert pool[0].slot == 1
+        assert pool[0].value == "sk-canonical"
+        assert pool[0].source == "env"  # not "env-legacy"
+        # The legacy value is dropped (it lost to the canonical _1)
+        assert "sk-legacy" not in [e.value for e in pool]
+
+    def test_legacy_fills_slot_1_when_indexed_2_set(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """W14-KEYS-POOL-TIER2 UX fix: legacy bare <PREFIX> fills slot 1
+        even when _2, _3, ... exist, as long as _1 itself is not set.
+
+        Operators who add _2 to their existing legacy KIMI_API_KEY
+        should see both keys in the pool — the legacy one as slot 1
+        and the new one as slot 2.
+        """
         monkeypatch.setenv("KIMI_API_KEY", "sk-legacy")
         monkeypatch.setenv("KIMI_API_KEY_2", "sk-slot2")
         pool = discover_pool("KIMI_API_KEY")
-        # slot 1 missing, slot 2 present → no slot 1 entry
-        assert len(pool) == 1
-        assert pool[0].slot == 2
-        assert pool[0].value == "sk-slot2"
-        # The legacy value is not silently demoted to slot 1
-        assert "sk-legacy" not in [e.value for e in pool]
+        assert len(pool) == 2
+        assert pool[0].slot == 1
+        assert pool[0].value == "sk-legacy"
+        assert pool[0].source == "env-legacy"
+        assert pool[1].slot == 2
+        assert pool[1].value == "sk-slot2"
+        assert pool[1].source == "env"
 
     def test_gaps_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Slot 1 missing + slot 3 present → just slot 3 returned."""
