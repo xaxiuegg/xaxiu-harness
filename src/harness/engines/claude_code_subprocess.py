@@ -42,8 +42,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 import time
+from pathlib import Path
 from typing import Optional
 
 from harness.engines.base import Engine, EngineResponse
@@ -98,6 +100,37 @@ def _resolve_binary() -> str:
     (resolved via PATH at exec time).
     """
     return os.environ.get("HARNESS_CLAUDE_CODE_BINARY") or _DEFAULT_BINARY
+
+
+def _verify_binary_available(binary: str) -> tuple[bool, Optional[str]]:
+    """W14-PATTERN-B-HARDENING-V1 2026-05-26: pre-flight check that the
+    ``claude`` binary exists and is callable.
+
+    Uses ``shutil.which`` for the existence check — does NOT invoke the
+    binary (too expensive for routine init).  When the operator passes
+    an absolute or relative path containing ``/`` or ``\\``, the path is
+    checked directly via ``Path.exists``.
+
+    Returns ``(ok, error_message_or_none)``.  Callers use the error
+    message verbatim when surfacing dispatch failures.
+    """
+    if "/" in binary or "\\" in binary:
+        if not Path(binary).exists():
+            return False, (
+                f"claude binary not found at {binary!r}. "
+                f"Install via 'npm install -g @anthropic-ai/claude-code' "
+                f"or correct HARNESS_CLAUDE_CODE_BINARY."
+            )
+        return True, None
+
+    resolved = shutil.which(binary)
+    if resolved is None:
+        return False, (
+            f"claude binary {binary!r} not found in PATH. "
+            f"Install via 'npm install -g @anthropic-ai/claude-code' "
+            f"or set HARNESS_CLAUDE_CODE_BINARY to the full path."
+        )
+    return True, None
 
 
 def _resolve_mimo_tp_region() -> str:
@@ -164,6 +197,7 @@ class ClaudeCodeSubprocessEngine(Engine):
         binary: Optional[str] = None,
         max_budget_usd: Optional[float] = None,
         timeout_s: Optional[int] = None,
+        verify_binary: bool = True,
     ) -> None:
         super().__init__(api_key=api_key)
         self._base_url = base_url
@@ -177,6 +211,18 @@ class ClaudeCodeSubprocessEngine(Engine):
             timeout_s if timeout_s is not None
             else self._DEFAULT_TIMEOUT_S
         )
+        # W14-PATTERN-B-HARDENING-V1: pre-flight binary existence check.
+        # ok=True means the binary resolves; ok=False stashes a
+        # diagnostic error string surfaced on dispatch.  ``verify_binary
+        # =False`` lets tests skip the check when running with mocked
+        # subprocess.
+        if verify_binary:
+            ok, err = _verify_binary_available(self._binary)
+            self._binary_ok = ok
+            self._binary_error = err
+        else:
+            self._binary_ok = True
+            self._binary_error = None
 
     @property
     def name(self) -> str:
@@ -211,27 +257,55 @@ class ClaudeCodeSubprocessEngine(Engine):
         return cmd
 
     def _build_env(self) -> dict[str, str]:
-        """Construct the env dict for the subprocess.  Sets both
-        ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN so providers that
-        require either form (MiMo uses TOKEN, Anthropic-default uses
-        KEY) both work.
+        """Construct the env dict for the subprocess.
+
+        W14-PATTERN-B-HARDENING-V1 2026-05-26: explicit purge of ALL
+        ``ANTHROPIC_*`` env vars from the parent-process snapshot BEFORE
+        setting our intended values.  Without this, operators who use
+        Claude Code interactively (or had it configured earlier in the
+        same shell) leak ``ANTHROPIC_DEFAULT_SONNET_MODEL`` etc. into
+        the subprocess and silently miss-route.  Convergent panel
+        finding from DeepSeek-A + DeepSeek-R + MiMo-A.
+
+        Also sets the full model-alias suite — Claude Code internally
+        references ``sonnet`` / ``opus`` / ``haiku`` for routing; without
+        the aliases pointing at the provider's actual model, Claude
+        Code falls back unpredictably.  Convergent panel finding from
+        DeepSeek-A + MiMo-A.
         """
         env = dict(os.environ)
-        # Strip OAuth + alt-provider env vars that could conflict
-        # with our explicit redirection (per MiMo's setup docs).
-        for var in (
-            "CLAUDE_CODE_USE_BEDROCK",
-            "CLAUDE_CODE_USE_VERTEX",
-        ):
-            env.pop(var, None)
 
+        # Purge ALL Anthropic-namespaced + provider-conflict env vars
+        # from the parent snapshot before we set our own.  The dict
+        # comprehension snapshot the keys first so we can iterate
+        # safely while mutating.
+        keys_to_purge = [
+            k for k in list(env.keys())
+            if k.startswith("ANTHROPIC_")
+            or k in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
+        ]
+        for k in keys_to_purge:
+            env.pop(k, None)
+
+        # Now set OUR provider-routed values
         env["ANTHROPIC_API_KEY"] = self._api_key
         env["ANTHROPIC_AUTH_TOKEN"] = self._api_key
         if self._base_url:
             env["ANTHROPIC_BASE_URL"] = self._base_url
-        else:
-            # No base_url means use Claude Code's built-in default
-            env.pop("ANTHROPIC_BASE_URL", None)
+        # No base_url means use Claude Code's built-in default;
+        # ANTHROPIC_BASE_URL stays absent (already purged above).
+
+        # W14-PATTERN-B-HARDENING-V1: set the full model-alias suite.
+        # Claude Code internally references sonnet/opus/haiku model
+        # names; without these aliases pointing at the provider's
+        # actual model, internal routing fails or falls back to
+        # Anthropic's default.  Set ANTHROPIC_MODEL too for callers
+        # that omit ``--model`` on the command line.
+        if self._default_model:
+            env["ANTHROPIC_MODEL"] = self._default_model
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self._default_model
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self._default_model
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self._default_model
 
         # CLAUDE_CODE_SIMPLE=1 is set by --bare anyway, but we set it
         # explicitly for clarity in tests + tracing.
@@ -252,6 +326,19 @@ class ClaudeCodeSubprocessEngine(Engine):
                 latency_ms=0,
                 error=("No API key configured for the subprocess engine; "
                        "set the provider's key env var"),
+            )
+
+        # W14-PATTERN-B-HARDENING-V1: surface binary-missing diagnostic
+        # with an actionable installation hint instead of a bare
+        # FileNotFoundError.
+        if not self._binary_ok:
+            return EngineResponse(
+                success=False,
+                text="",
+                latency_ms=0,
+                error=self._binary_error or (
+                    f"claude binary {self._binary!r} pre-flight check failed"
+                ),
             )
 
         cmd = self._build_command(model, extra)

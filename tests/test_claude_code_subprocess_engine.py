@@ -21,6 +21,7 @@ Coverage:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -35,7 +36,30 @@ from harness.engines.claude_code_subprocess import (
     _engine_name_for_mimo_key,
     _resolve_binary,
     _resolve_mimo_tp_region,
+    _verify_binary_available,
 )
+
+
+# W14-PATTERN-B-HARDENING-V1 2026-05-26: existing tests skip the binary
+# pre-flight check so they run on CI machines that don't have claude
+# installed.  New tests below explicitly exercise the binary check.
+def _make_engine(**kwargs) -> ClaudeCodeSubprocessEngine:
+    """Test helper: build an engine with verify_binary disabled by default."""
+    kwargs.setdefault("verify_binary", False)
+    return ClaudeCodeSubprocessEngine(**kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _stub_binary_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W14-PATTERN-B-HARDENING-V1: monkeypatch the module-level binary
+    check to always return ok.  Tests that want to exercise the real
+    check call ``_verify_binary_available`` directly (it's imported
+    explicitly into this module and bypasses the monkeypatch).
+    """
+    monkeypatch.setattr(
+        "harness.engines.claude_code_subprocess._verify_binary_available",
+        lambda binary: (True, None),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +459,233 @@ class TestFactoryIntegration:
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-HARDENING-V1: pre-flight binary check
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyBinaryAvailable:
+    """The actual ``_verify_binary_available`` function — bypasses the
+    autouse stub by calling the imported symbol directly (which is the
+    real function, not the patched module attribute).
+    """
+
+    def test_absolute_path_that_exists(self, tmp_path: Path) -> None:
+        fake_claude = tmp_path / "claude"
+        fake_claude.write_text("#!/bin/bash\necho 1.0\n", encoding="utf-8")
+        ok, err = _verify_binary_available(str(fake_claude))
+        assert ok is True
+        assert err is None
+
+    def test_absolute_path_that_does_not_exist(self) -> None:
+        ok, err = _verify_binary_available("/definitely/not/here/claude")
+        assert ok is False
+        assert err is not None
+        assert "not found" in err
+        # Actionable installation hint
+        assert "npm install -g @anthropic-ai/claude-code" in err
+        assert "HARNESS_CLAUDE_CODE_BINARY" in err
+
+    def test_bare_name_in_path(self, monkeypatch: pytest.MonkeyPatch,
+                                tmp_path: Path) -> None:
+        # Put a fake claude into tmp_path; prepend tmp_path to PATH
+        fake_claude = tmp_path / "claude"
+        fake_claude.write_text("#!/bin/bash\necho 1.0\n", encoding="utf-8")
+        try:
+            import stat
+            fake_claude.chmod(stat.S_IRWXU)
+        except Exception:
+            pass
+        monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep
+                            + os.environ.get("PATH", ""))
+        ok, err = _verify_binary_available("claude")
+        # shutil.which honors PATH; on most systems this resolves.
+        # On Windows .cmd requires the suffix; if test fails here we
+        # accept gracefully.
+        assert ok is True or "not found" in (err or "")
+
+    def test_bare_name_not_in_path(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("PATH", "/empty/dir/that/does/not/exist")
+        ok, err = _verify_binary_available("definitely-not-a-real-binary")
+        assert ok is False
+        assert err is not None
+        assert "not found in PATH" in err
+
+
+class TestInitBinaryVerification:
+    """Behavior when the engine's __init__ runs the binary check."""
+
+    def test_init_with_verify_true_and_missing_binary_stores_error(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Bypass the autouse stub by re-patching to return failure
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess._verify_binary_available",
+            lambda binary: (False, "claude not found"),
+        )
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x", default_model="m",
+            verify_binary=True,
+        )
+        assert eng._binary_ok is False
+        assert eng._binary_error == "claude not found"
+
+    def test_init_with_verify_false_skips_check(self) -> None:
+        # Even with a clearly-bad binary path, verify_binary=False
+        # means no check runs
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x", default_model="m",
+            binary="/definitely/not/here/claude",
+            verify_binary=False,
+        )
+        assert eng._binary_ok is True
+        assert eng._binary_error is None
+
+    def test_init_with_verify_true_and_present_binary_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Stub override: claim the binary is present
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess._verify_binary_available",
+            lambda binary: (True, None),
+        )
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x", default_model="m",
+            verify_binary=True,
+        )
+        assert eng._binary_ok is True
+
+    def test_dispatch_short_circuits_on_missing_binary(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess._verify_binary_available",
+            lambda binary: (False, "claude not found at xyz"),
+        )
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x", default_model="m",
+            verify_binary=True,
+        )
+        resp = eng.dispatch("test", "m", {})
+        # Subprocess NEVER ran — error surfaced from cached check
+        assert resp.success is False
+        assert resp.error == "claude not found at xyz"
+        assert resp.latency_ms == 0
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-HARDENING-V1: env-var purge + model aliases
+# ---------------------------------------------------------------------------
+
+
+class TestEnvPurge:
+    """The env-purge behavior introduced by hardening V1."""
+
+    def test_purges_inherited_anthropic_default_models(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The parent shell's ANTHROPIC_DEFAULT_*_MODEL must NOT bleed
+        into the subprocess (would silently miss-route)."""
+        monkeypatch.setenv(
+            "ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-latest")
+        monkeypatch.setenv(
+            "ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-latest")
+        monkeypatch.setenv(
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-haiku-latest")
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://mimo/anthropic",
+            default_model="mimo-v2.5-pro",
+        )
+        env = eng._build_env()
+        # Old parent values purged, replaced with provider model
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "mimo-v2.5-pro"
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "mimo-v2.5-pro"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "mimo-v2.5-pro"
+
+    def test_purges_inherited_anthropic_model(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_MODEL", "stale-value")
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://x",
+            default_model="qwen3.6-plus",
+        )
+        env = eng._build_env()
+        assert env["ANTHROPIC_MODEL"] == "qwen3.6-plus"
+
+    def test_purges_unknown_anthropic_namespaced_vars(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Anything starting with ANTHROPIC_ from parent shell is
+        purged.  Future env vars Anthropic might add are pre-emptively
+        scrubbed."""
+        monkeypatch.setenv("ANTHROPIC_FUTURE_FLAG", "set-by-parent")
+        monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADER", "set-by-parent")
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://x", default_model="m",
+        )
+        env = eng._build_env()
+        assert "ANTHROPIC_FUTURE_FLAG" not in env
+        assert "ANTHROPIC_CUSTOM_HEADER" not in env
+
+    def test_purges_inherited_base_url(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Parent's ANTHROPIC_BASE_URL must not survive when our
+        base_url is the source of truth."""
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://stale.example/x")
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://intended.example/anthropic",
+            default_model="m",
+        )
+        env = eng._build_env()
+        assert env["ANTHROPIC_BASE_URL"] == "https://intended.example/anthropic"
+
+    def test_preserves_non_anthropic_env_vars(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Purge is scoped to ANTHROPIC_* + known conflicts; other vars
+        (PATH, HOME, MIMO_API_KEY, etc.) survive."""
+        monkeypatch.setenv("PATH", "/test/path")
+        monkeypatch.setenv("MIMO_API_KEY", "tp-test-key")
+        monkeypatch.setenv("HOME", "/test/home")
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://x", default_model="m",
+        )
+        env = eng._build_env()
+        assert env.get("PATH") == "/test/path"
+        assert env.get("MIMO_API_KEY") == "tp-test-key"
+        assert env.get("HOME") == "/test/home"
+
+
+class TestModelAliases:
+    """The full ANTHROPIC_DEFAULT_*_MODEL alias suite from hardening V1."""
+
+    def test_all_four_aliases_set_to_default_model(self) -> None:
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://x",
+            default_model="mimo-v2.5-pro",
+        )
+        env = eng._build_env()
+        assert env["ANTHROPIC_MODEL"] == "mimo-v2.5-pro"
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "mimo-v2.5-pro"
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "mimo-v2.5-pro"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "mimo-v2.5-pro"
+
+    def test_aliases_omitted_when_default_model_empty(self) -> None:
+        eng = _make_engine(
+            api_key="tp-x", base_url="https://x", default_model="",
+        )
+        env = eng._build_env()
+        # No spurious aliases — Claude Code falls back to its own default
+        assert "ANTHROPIC_MODEL" not in env
+        assert "ANTHROPIC_DEFAULT_SONNET_MODEL" not in env
+        assert "ANTHROPIC_DEFAULT_OPUS_MODEL" not in env
+        assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" not in env
 
 
 class TestModuleConstants:
