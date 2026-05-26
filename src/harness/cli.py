@@ -4512,13 +4512,114 @@ def budget_by_run(since: str | None, since_days: int | None, top: int) -> None:
 @budget_group.command(name="set-cap")
 @click.argument("amount_usd", type=float)
 def budget_set_cap(amount_usd: float) -> None:
-    """Write monthly cap to coord/dev_loop/budget_cap.json."""
-    DEFAULT_CAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DEFAULT_CAP_PATH.write_text(
-        json.dumps({"monthly_cap_usd": amount_usd}, indent=2),
-        encoding="utf-8",
-    )
+    """Write monthly cap to coord/dev_loop/budget_cap.json.
+
+    W14-BUDGET-METER-PER-ENGINE 2026-05-25: preserves any existing
+    per-engine caps + alert threshold; only the global cap is updated.
+    """
+    from harness.budget import read_caps_config, write_caps_config
+    # Use the cli-module DEFAULT_CAP_PATH so tests that monkeypatch
+    # ``harness.cli.DEFAULT_CAP_PATH`` continue to redirect writes.
+    config = read_caps_config(cap_path=DEFAULT_CAP_PATH)
+    config["monthly_cap_usd"] = float(amount_usd)
+    write_caps_config(config, cap_path=DEFAULT_CAP_PATH)
     click.echo(f"monthly cap set to ${amount_usd:.2f}")
+    sys.exit(0)
+
+
+@budget_group.command(name="set-engine-cap")
+@click.argument("engine", type=str)
+@click.argument("amount_usd", type=float)
+def budget_set_engine_cap(engine: str, amount_usd: float) -> None:
+    """W14-BUDGET-METER-PER-ENGINE: set a per-engine monthly cap.
+
+    Examples:
+      harness budget set-engine-cap deepseek 30
+      harness budget set-engine-cap mimo 15
+      harness budget set-engine-cap qwen 50
+
+    Pass 0 to remove a cap entirely (engine becomes unbounded).
+    """
+    from harness.budget import set_engine_cap
+    set_engine_cap(engine, float(amount_usd), cap_path=DEFAULT_CAP_PATH)
+    if amount_usd <= 0.0:
+        click.echo(f"engine cap removed for {engine}")
+    else:
+        click.echo(f"engine cap for {engine} set to ${amount_usd:.2f}")
+    sys.exit(0)
+
+
+@budget_group.command(name="caps")
+@click.option("--format", "fmt",
+              type=click.Choice(["pretty", "json"]), default="pretty",
+              help="Output format.  pretty for terminal, json for scripts.")
+def budget_caps(fmt: str) -> None:
+    """W14-BUDGET-METER-PER-ENGINE: show per-engine spend vs cap.
+
+    Surfaces this-month spend, configured cap, percentage used, and an
+    alert indicator (>=80% by default) per engine.  An engine appears
+    here if it has either a cap configured OR any spend recorded this
+    month.
+
+    Exit code 0 always (read-only command).
+    """
+    from harness.budget import (
+        all_engines_status, read_caps_config, check_cap,
+    )
+    # Use the cli-module DEFAULT_CAP_PATH for monkeypatch-aware reads
+    config = read_caps_config(cap_path=DEFAULT_CAP_PATH)
+    rows = all_engines_status(caps_config=config)
+    within, spent, global_cap = check_cap()
+
+    if fmt == "json":
+        import json as _json
+        click.echo(_json.dumps({
+            "global": {
+                "monthly_cap_usd": global_cap,
+                "spent_usd": spent,
+                "within_cap": within,
+            },
+            "alert_threshold_pct": config["alert_threshold_pct"],
+            "engines": [r.model_dump() for r in rows],
+        }, indent=2))
+        sys.exit(0)
+
+    # Pretty terminal output with color-coded status
+    if global_cap > 0:
+        global_pct = (spent / global_cap) * 100.0
+        global_status = (
+            click.style("OVER",   fg="red",    bold=True) if not within else
+            click.style("ALERT",  fg="yellow", bold=True) if global_pct >= config["alert_threshold_pct"] else
+            click.style("OK",     fg="green")
+        )
+        click.echo(f"Global cap:  ${spent:.4f} / ${global_cap:.2f} "
+                   f"({global_pct:.1f}%)  [{global_status}]")
+    else:
+        click.echo(f"Global cap:  not configured  (spent so far: ${spent:.4f})")
+    click.echo(f"Alert threshold: {config['alert_threshold_pct']}%")
+    click.echo()
+    if not rows:
+        click.echo("(no per-engine caps configured, no engine spend this month)")
+        sys.exit(0)
+    click.echo(f"{'engine':<14} {'spent':>10} {'cap':>10} {'%used':>8}  status")
+    click.echo("-" * 56)
+    for r in rows:
+        if r.cap_usd <= 0:
+            status_disp = click.style("uncapped", fg="cyan")
+            pct_disp = "  -  "
+        elif not r.within_cap:
+            status_disp = click.style("OVER", fg="red", bold=True)
+            pct_disp = f"{r.pct_used:.1f}%"
+        elif r.alert_threshold_reached:
+            status_disp = click.style("ALERT", fg="yellow", bold=True)
+            pct_disp = f"{r.pct_used:.1f}%"
+        else:
+            status_disp = click.style("OK", fg="green")
+            pct_disp = f"{r.pct_used:.1f}%"
+        click.echo(
+            f"{r.engine:<14} ${r.spent_usd:>8.4f} ${r.cap_usd:>8.2f} "
+            f"{pct_disp:>8}  {status_disp}"
+        )
     sys.exit(0)
 
 

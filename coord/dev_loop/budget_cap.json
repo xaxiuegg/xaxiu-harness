@@ -1,3 +1,9 @@
 {
-  "monthly_cap_usd": 42.5
+  "monthly_cap_usd": 42.5,
+  "per_engine_caps_usd": {
+    "deepseek": 30.0,
+    "mimo": 15.0,
+    "qwen": 50.0
+  },
+  "alert_threshold_pct": 80
 }

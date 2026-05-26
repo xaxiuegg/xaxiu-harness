@@ -295,6 +295,290 @@ def check_cap(
     return (spent < monthly_cap_usd, spent, monthly_cap_usd)
 
 
+# ---------------------------------------------------------------------------
+# W14-BUDGET-METER-PER-ENGINE 2026-05-25
+#
+# Per-engine monthly caps on top of the existing global monthly_cap_usd.
+# Schema (backward-compat: old files without per_engine_caps_usd still work):
+#
+#   {
+#     "monthly_cap_usd": 195.0,
+#     "per_engine_caps_usd": {
+#       "deepseek": 30.0,
+#       "mimo": 15.0,
+#       "qwen": 50.0
+#     },
+#     "alert_threshold_pct": 80
+#   }
+#
+# Operator commit (2026-05-25): $100 Claude Code direct + $15 MiMo TP +
+# $30 DeepSeek PAYG + $50 Qwen 3.6 Plus PAYG = $195/mo, with the harness
+# enforcing the per-engine slice ($15/$30/$50 visible here; Claude
+# subscription is direct + not harness-mediated).
+# ---------------------------------------------------------------------------
+
+# Default alert threshold (pct).  80% means an observer flag fires at 80%
+# of cap, giving the operator headroom to reroute before hitting refusal.
+DEFAULT_ALERT_THRESHOLD_PCT: Final = 80
+
+
+class EngineCapStatus(BaseModel):
+    """Per-engine cap status for one engine over the current month."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    spent_usd: float = Field(ge=0.0)
+    cap_usd: float = Field(ge=0.0)
+    pct_used: float = Field(ge=0.0)  # spent / cap * 100, 0 if cap=0
+    within_cap: bool
+    alert_threshold_reached: bool
+    # When alert_threshold_pct is e.g. 80, alert_threshold_reached=True
+    # if spent >= 80% of cap.
+
+
+def read_caps_config(
+    cap_path: Path | None = None,
+) -> dict:
+    """Read the (possibly-extended) cap config.
+
+    Returns a dict with three keys:
+      - monthly_cap_usd: float (global cap, 0.0 if absent)
+      - per_engine_caps_usd: dict[str, float] (empty dict if absent)
+      - alert_threshold_pct: int (80 if absent)
+
+    Backward-compatible with the v1 single-cap schema (just
+    {"monthly_cap_usd": N}) — extra keys default to empty/default.
+    """
+    path = cap_path or DEFAULT_CAP_PATH
+    if not path.exists():
+        return {
+            "monthly_cap_usd": 0.0,
+            "per_engine_caps_usd": {},
+            "alert_threshold_pct": DEFAULT_ALERT_THRESHOLD_PCT,
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {
+            "monthly_cap_usd": 0.0,
+            "per_engine_caps_usd": {},
+            "alert_threshold_pct": DEFAULT_ALERT_THRESHOLD_PCT,
+        }
+    if not isinstance(data, dict):
+        return {
+            "monthly_cap_usd": 0.0,
+            "per_engine_caps_usd": {},
+            "alert_threshold_pct": DEFAULT_ALERT_THRESHOLD_PCT,
+        }
+    try:
+        global_cap = float(data.get("monthly_cap_usd", 0.0))
+    except (ValueError, TypeError):
+        global_cap = 0.0
+    raw_per_engine = data.get("per_engine_caps_usd", {})
+    per_engine: dict[str, float] = {}
+    if isinstance(raw_per_engine, dict):
+        for k, v in raw_per_engine.items():
+            try:
+                per_engine[str(k)] = float(v)
+            except (ValueError, TypeError):
+                continue
+    try:
+        alert_pct = int(data.get("alert_threshold_pct",
+                                  DEFAULT_ALERT_THRESHOLD_PCT))
+    except (ValueError, TypeError):
+        alert_pct = DEFAULT_ALERT_THRESHOLD_PCT
+    if alert_pct < 0:
+        alert_pct = 0
+    if alert_pct > 100:
+        alert_pct = 100
+    return {
+        "monthly_cap_usd": global_cap,
+        "per_engine_caps_usd": per_engine,
+        "alert_threshold_pct": alert_pct,
+    }
+
+
+def write_caps_config(
+    config: dict,
+    cap_path: Path | None = None,
+) -> None:
+    """Persist the cap config dict to JSON.  Schema validation is best-effort —
+    we serialize whatever's in the dict using the same keys that
+    ``read_caps_config`` recognizes.
+    """
+    path = cap_path or DEFAULT_CAP_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe = {
+        "monthly_cap_usd": float(config.get("monthly_cap_usd", 0.0)),
+        "per_engine_caps_usd": {
+            str(k): float(v)
+            for k, v in (config.get("per_engine_caps_usd") or {}).items()
+        },
+        "alert_threshold_pct": int(config.get(
+            "alert_threshold_pct", DEFAULT_ALERT_THRESHOLD_PCT,
+        )),
+    }
+    path.write_text(json.dumps(safe, indent=2) + "\n", encoding="utf-8")
+
+
+def set_engine_cap(
+    engine: str,
+    amount_usd: float,
+    cap_path: Path | None = None,
+) -> None:
+    """Update one engine's cap.  Preserves all other caps + global cap."""
+    config = read_caps_config(cap_path)
+    if amount_usd <= 0.0:
+        # Allow removing a cap by setting it to 0
+        config["per_engine_caps_usd"].pop(engine, None)
+    else:
+        config["per_engine_caps_usd"][engine] = float(amount_usd)
+    write_caps_config(config, cap_path)
+
+
+def _spent_this_month_by_engine(
+    ledger_path: Path | None = None,
+) -> dict[str, float]:
+    """Sum USD spent per engine across this calendar month (UTC)."""
+    now = datetime.now(timezone.utc)
+    month_prefix = now.strftime("%Y-%m")
+    entries = read_ledger(ledger_path)
+    out: dict[str, float] = {}
+    for e in entries:
+        if not e.timestamp.startswith(month_prefix):
+            continue
+        # Normalize to the same canonical key the pricing table uses,
+        # so caps for "deepseek" apply whether the dispatch logged
+        # "swarm/deepseek-v4-flash" or "deepseek".
+        canonical = _normalize_engine(e.engine)
+        # Strip MiMo subscription tag — the operator caps the engine,
+        # not the pricing variant.  "mimo-sub" and "mimo" share a cap.
+        if canonical.endswith("-sub"):
+            canonical = canonical[: -len("-sub")]
+        if canonical.endswith("-pro"):
+            # Operator caps go on the engine family, not pro vs std
+            canonical = canonical[: -len("-pro")]
+        if canonical.endswith("-long"):
+            canonical = canonical[: -len("-long")]
+        out[canonical] = round(out.get(canonical, 0.0) + e.cost_usd, 6)
+    return out
+
+
+def check_engine_cap(
+    engine: str,
+    *,
+    ledger_path: Path | None = None,
+    caps_config: dict | None = None,
+) -> EngineCapStatus:
+    """Return the cap status for one engine over the current month.
+
+    ``engine`` is the canonical engine key (e.g. "deepseek", "mimo",
+    "qwen", "kimi", "anthropic", "gemini").  Variants like
+    "deepseek-v4-flash", "mimo-v2.5-pro", "swarm/kimi" are folded onto
+    their canonical key via ``_normalize_engine``.
+    """
+    config = caps_config if caps_config is not None else read_caps_config()
+    per_engine = config.get("per_engine_caps_usd", {})
+    alert_pct_threshold = int(config.get(
+        "alert_threshold_pct", DEFAULT_ALERT_THRESHOLD_PCT,
+    ))
+
+    canonical = _normalize_engine(engine)
+    if canonical.endswith("-sub"):
+        canonical = canonical[: -len("-sub")]
+    if canonical.endswith("-pro"):
+        canonical = canonical[: -len("-pro")]
+    if canonical.endswith("-long"):
+        canonical = canonical[: -len("-long")]
+    cap_usd = float(per_engine.get(canonical, 0.0))
+
+    by_engine = _spent_this_month_by_engine(ledger_path)
+    spent = float(by_engine.get(canonical, 0.0))
+
+    if cap_usd <= 0.0:
+        # No cap configured for this engine — always within, no alert
+        return EngineCapStatus(
+            engine=canonical,
+            spent_usd=round(spent, 6),
+            cap_usd=0.0,
+            pct_used=0.0,
+            within_cap=True,
+            alert_threshold_reached=False,
+        )
+
+    pct_used = (spent / cap_usd) * 100.0 if cap_usd > 0 else 0.0
+    return EngineCapStatus(
+        engine=canonical,
+        spent_usd=round(spent, 6),
+        cap_usd=round(cap_usd, 6),
+        pct_used=round(pct_used, 2),
+        within_cap=spent < cap_usd,
+        alert_threshold_reached=pct_used >= alert_pct_threshold,
+    )
+
+
+def all_engines_status(
+    *,
+    ledger_path: Path | None = None,
+    caps_config: dict | None = None,
+) -> list[EngineCapStatus]:
+    """Return cap status for every engine that has either a cap configured
+    or any spend recorded this month.  Sorted by engine name.
+    """
+    config = caps_config if caps_config is not None else read_caps_config()
+    per_engine = config.get("per_engine_caps_usd", {})
+    by_engine = _spent_this_month_by_engine(ledger_path)
+    engines = sorted(set(per_engine.keys()) | set(by_engine.keys()))
+    return [
+        check_engine_cap(
+            eng, ledger_path=ledger_path, caps_config=config,
+        )
+        for eng in engines
+    ]
+
+
+class CapExceededError(RuntimeError):
+    """Raised when ``enforce_engine_cap`` is called for an over-cap engine.
+
+    The error message names the engine, current spend, and cap so the
+    operator immediately sees the gap.  Categorized as the
+    ``quota-exceeded`` bucket in ``cli_helpers.categorize_engine_failure``
+    when surfaced to dispatch callers.
+    """
+
+    def __init__(self, status: EngineCapStatus) -> None:
+        self.status = status
+        super().__init__(
+            f"engine cap exceeded for {status.engine!r}: "
+            f"spent ${status.spent_usd:.4f} of ${status.cap_usd:.2f} "
+            f"({status.pct_used:.1f}% used)"
+        )
+
+
+def enforce_engine_cap(
+    engine: str,
+    *,
+    ledger_path: Path | None = None,
+    caps_config: dict | None = None,
+) -> EngineCapStatus:
+    """Check the cap and raise ``CapExceededError`` if over.
+
+    Returns the ``EngineCapStatus`` on success (within-cap path), so
+    callers can inspect ``alert_threshold_reached`` to emit warnings
+    without a separate query.
+
+    Opt-in by design — only raises when a cap is configured.  If
+    ``per_engine_caps_usd[engine]`` is unset or zero, treats as
+    no-cap and returns within_cap=True.
+    """
+    status = check_engine_cap(
+        engine, ledger_path=ledger_path, caps_config=caps_config,
+    )
+    if not status.within_cap:
+        raise CapExceededError(status)
+    return status
+
+
 def export_daily_csv(target_dir: Path | None = None, *, date: str | None = None) -> Path:
     """Write a daily CSV roll-up of the budget ledger.
 
