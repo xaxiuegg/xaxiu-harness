@@ -63,3 +63,13 @@ tmp_panic/
 
 # Claude Code stop-hook timestamp — per-machine, written by hook on session stop
 .claude/.stop-hook-last-fire
+
+# Playwright MCP screenshot/snapshot artifacts from visual-verify runs.
+# Per the operator's "always screenshot + test after finishing" workflow
+# (2026-05-26), Claude drives Playwright to verify UI changes; the
+# resulting PNGs / yml snapshots / console logs live alongside the
+# repo but should never be committed.
+.playwright-mcp/
+keys-ui-fixed.png
+*-screenshot.png
+page-*.png
