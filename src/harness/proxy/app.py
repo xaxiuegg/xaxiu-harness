@@ -32,41 +32,21 @@ def _state_path(path: Path | None = None) -> Path:
 def resolve_keys(env_prefix: str = "KIMI_API_KEY") -> dict[str, str]:
     """Discover API keys from environment and DPAPI fallback.
 
+    Delegates to ``harness.keys.resolve_keys`` (W14-KEYS-POOL
+    2026-05-26) so the resolution logic is shared with the Pattern B
+    engines and the keys UI.  Returns the same ``{alias: value}`` dict
+    shape as before for backward compatibility with proxy callers.
+
     Resolution order (per alias):
       1. ``<env_prefix>_<n>`` env var (e.g. KIMI_API_KEY_1)
       2. DPAPI store under the same name
-      3. Legacy singular fallback — if k1 is still missing AND the bare
-         ``<env_prefix>`` (no suffix) env var or DPAPI entry is populated,
-         use it as k1.  This lets a single-key operator run v2 in
-         degraded 6-slot mode without re-storing the key under _1.
+      3. Legacy singular fallback — if no indexed keys AND the bare
+         ``<env_prefix>`` is populated, use it as k1.
 
-    Empty-string values are treated as missing (DPAPI patch 2026-05-21).
+    Empty-string values are treated as missing.
     """
-    keys: dict[str, str] = {}
-    for n in range(1, 5):
-        alias = f"k{n}"
-        value = os.environ.get(f"{env_prefix}_{n}") or None
-        if not value and decrypt_secret is not None:
-            try:
-                value = decrypt_secret(f"{env_prefix}_{n}")
-            except Exception:
-                value = None
-        if value:
-            keys[alias] = value
-
-    # Legacy single-key fallback — populate k1 from bare env_prefix if no
-    # indexed keys were resolved.  Operator can rotate to multi-key later.
-    if not keys:
-        legacy = os.environ.get(env_prefix) or None
-        if not legacy and decrypt_secret is not None:
-            try:
-                legacy = decrypt_secret(env_prefix)
-            except Exception:
-                legacy = None
-        if legacy:
-            keys["k1"] = legacy
-
-    return keys
+    from harness.keys import resolve_keys as _generic
+    return _generic(env_prefix)
 
 
 def _init_state(keys: dict[str, str]) -> ProxyState:

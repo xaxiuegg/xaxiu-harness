@@ -234,6 +234,12 @@ class TestResolveEnvPath:
 
 
 class TestBuildStatus:
+    """W14-KEYS-POOL 2026-05-26: payload is now multi-slot per provider.
+
+    Helper: tests look up a provider's slot-1 via _slot1_of() to keep
+    assertions concise.
+    """
+
     def _patch_envpath(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -243,69 +249,165 @@ class TestBuildStatus:
             lambda: tmp_path / ".env",
         )
 
+    def _clean_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for spec in KEY_PROVIDERS:
+            for n in range(1, 6):
+                monkeypatch.delenv(f"{spec['env']}_{n}", raising=False)
+                monkeypatch.delenv(f"{spec['env']}_LABEL_{n}", raising=False)
+            monkeypatch.delenv(spec["env"], raising=False)
+
+    def _slot1_of(self, providers: list[dict], prefix: str) -> dict:
+        prov = next(p for p in providers if p["env_prefix"] == prefix)
+        return prov["slots"][0]
+
     def test_payload_shape(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._patch_envpath(tmp_path, monkeypatch)
-        for spec in KEY_PROVIDERS:
-            monkeypatch.delenv(spec["env"], raising=False)
+        self._clean_all(monkeypatch)
         payload = _build_status()
         assert "providers" in payload
         assert "env_path" in payload
+        assert "max_slots" in payload
         assert isinstance(payload["providers"], list)
         assert isinstance(payload["env_path"], str)
+        assert payload["max_slots"] == 4
 
     def test_returns_entry_per_provider(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._patch_envpath(tmp_path, monkeypatch)
-        for spec in KEY_PROVIDERS:
-            monkeypatch.delenv(spec["env"], raising=False)
+        self._clean_all(monkeypatch)
         providers = _build_status()["providers"]
         assert len(providers) == len(KEY_PROVIDERS)
         for item in providers:
-            assert "env" in item
+            assert "env_prefix" in item
             assert "display" in item
-            assert "source" in item
-            assert "masked" in item
-            assert "has_value" in item
+            assert "purpose" in item
+            assert "slots" in item
+            assert isinstance(item["slots"], list)
+            # Always at least slot 1 rendered for the "paste key here" UX
+            assert len(item["slots"]) >= 1
+            slot1 = item["slots"][0]
+            assert slot1["slot"] == 1
+            for key in ("env_var", "source", "masked", "has_value", "label"):
+                assert key in slot1
 
     def test_env_source_when_set_in_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._patch_envpath(tmp_path, monkeypatch)
+        self._clean_all(monkeypatch)
         monkeypatch.setenv("KIMI_API_KEY", "sk-test-from-env-1234567890")
         providers = _build_status()["providers"]
-        kimi = next(s for s in providers if s["env"] == "KIMI_API_KEY")
-        assert kimi["source"] == "env"
-        assert kimi["has_value"] is True
-        assert "sk-test-from-env" not in kimi["masked"]
-        assert kimi["masked"].startswith("sk-t")
+        slot = self._slot1_of(providers, "KIMI_API_KEY")
+        # Legacy singular env var → source="env-legacy"
+        assert slot["source"] == "env-legacy"
+        assert slot["has_value"] is True
+        assert "sk-test-from-env" not in slot["masked"]
+        assert slot["masked"].startswith("sk-t")
+
+    def test_indexed_env_var_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # KIMI_API_KEY_1 (the canonical pool form) → source="env"
+        self._patch_envpath(tmp_path, monkeypatch)
+        self._clean_all(monkeypatch)
+        monkeypatch.setenv("KIMI_API_KEY_1", "sk-canonical-pool-form")
+        providers = _build_status()["providers"]
+        slot = self._slot1_of(providers, "KIMI_API_KEY")
+        assert slot["source"] == "env"
+        assert slot["has_value"] is True
+        assert slot["env_var"] == "KIMI_API_KEY_1"
 
     def test_dotenv_source_when_in_dotenv_only(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._patch_envpath(tmp_path, monkeypatch)
-        for spec in KEY_PROVIDERS:
-            monkeypatch.delenv(spec["env"], raising=False)
+        self._clean_all(monkeypatch)
         (tmp_path / ".env").write_text(
             "MIMO_API_KEY='tp-test-from-dotenv-abc'\n", encoding="utf-8",
         )
         providers = _build_status()["providers"]
-        mimo = next(s for s in providers if s["env"] == "MIMO_API_KEY")
-        assert mimo["source"] == "dotenv"
-        assert mimo["has_value"] is True
+        slot = self._slot1_of(providers, "MIMO_API_KEY")
+        assert slot["source"] == "dotenv"
+        assert slot["has_value"] is True
 
     def test_missing_when_neither(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._patch_envpath(tmp_path, monkeypatch)
-        for spec in KEY_PROVIDERS:
-            monkeypatch.delenv(spec["env"], raising=False)
+        self._clean_all(monkeypatch)
         providers = _build_status()["providers"]
-        for item in providers:
-            assert item["source"] == "missing"
-            assert item["has_value"] is False
+        for prov in providers:
+            # Each provider shows at least slot 1, all empty
+            assert prov["slots"][0]["source"] == "missing"
+            assert prov["slots"][0]["has_value"] is False
+
+
+class TestBuildStatusMultiKey:
+    """W14-KEYS-POOL 2026-05-26: multi-slot rendering behaviors."""
+
+    def _patch_envpath(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            keys_ui_mod, "_resolve_env_path", lambda: tmp_path / ".env",
+        )
+
+    def _clean_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for spec in KEY_PROVIDERS:
+            for n in range(1, 6):
+                monkeypatch.delenv(f"{spec['env']}_{n}", raising=False)
+                monkeypatch.delenv(f"{spec['env']}_LABEL_{n}", raising=False)
+            monkeypatch.delenv(spec["env"], raising=False)
+
+    def test_two_slots_renders_both_plus_empty_third(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._patch_envpath(tmp_path, monkeypatch)
+        self._clean_all(monkeypatch)
+        monkeypatch.setenv("KIMI_API_KEY_1", "sk-1")
+        monkeypatch.setenv("KIMI_API_KEY_2", "sk-2")
+        providers = _build_status()["providers"]
+        kimi = next(p for p in providers if p["env_prefix"] == "KIMI_API_KEY")
+        # Populated slots + 1 empty trailing for "Add" affordance
+        assert len(kimi["slots"]) == 3
+        assert kimi["slots"][0]["has_value"] is True
+        assert kimi["slots"][1]["has_value"] is True
+        assert kimi["slots"][2]["has_value"] is False
+        assert kimi["slots"][2]["env_var"] == "KIMI_API_KEY_3"
+
+    def test_full_pool_no_extra_empty_slot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._patch_envpath(tmp_path, monkeypatch)
+        self._clean_all(monkeypatch)
+        for n in range(1, 5):
+            monkeypatch.setenv(f"KIMI_API_KEY_{n}", f"sk-{n}")
+        providers = _build_status()["providers"]
+        kimi = next(p for p in providers if p["env_prefix"] == "KIMI_API_KEY")
+        # 4 populated slots, no trailing empty (we hit max_slots)
+        assert len(kimi["slots"]) == 4
+        for slot in kimi["slots"]:
+            assert slot["has_value"] is True
+
+    def test_dotenv_indexed_slots_render(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._patch_envpath(tmp_path, monkeypatch)
+        self._clean_all(monkeypatch)
+        (tmp_path / ".env").write_text(
+            "MIMO_API_KEY_1='tp-primary'\n"
+            "MIMO_API_KEY_2='tp-backup'\n",
+            encoding="utf-8",
+        )
+        providers = _build_status()["providers"]
+        mimo = next(p for p in providers if p["env_prefix"] == "MIMO_API_KEY")
+        assert mimo["slots"][0]["has_value"] is True
+        assert mimo["slots"][0]["source"] == "dotenv"
+        assert mimo["slots"][1]["has_value"] is True
+        assert mimo["slots"][1]["source"] == "dotenv"
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +578,11 @@ class TestServerLifecycle:
             ) as r:
                 data = json.loads(r.read().decode("utf-8"))
                 assert "providers" in data
+                assert "max_slots" in data
+                # Providers shape is now multi-slot
                 assert any(
-                    d["env"] == "KIMI_API_KEY" for d in data["providers"]
+                    p["env_prefix"] == "KIMI_API_KEY"
+                    for p in data["providers"]
                 )
 
             try:
@@ -677,6 +782,68 @@ class TestSecurityRegression:
         assert KNOWN_ENV_VARS == frozenset(
             spec["env"] for spec in KEY_PROVIDERS
         )
+
+    def test_save_accepts_pool_slot_env_vars(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # W14-KEYS-POOL: KIMI_API_KEY_2 (pool slot) is allowed
+        with _HarnessContext(tmp_path, monkeypatch) as ctx:
+            status, body = self._post(
+                ctx, "/api/save",
+                {"updates": {"KIMI_API_KEY_2": "sk-slot-2-value"}},
+            )
+            assert status == 200
+            env_file = tmp_path / ".env"
+            assert env_file.exists()
+            text = env_file.read_text(encoding="utf-8")
+            assert "KIMI_API_KEY_2='sk-slot-2-value'" in text
+
+    def test_save_rejects_slot_above_max(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # W14-KEYS-POOL: KIMI_API_KEY_99 is not in the allowlist
+        with _HarnessContext(tmp_path, monkeypatch) as ctx:
+            status, _ = self._post(
+                ctx, "/api/save",
+                {"updates": {"KIMI_API_KEY_99": "sk-shouldnt-land"}},
+            )
+            assert status == 400
+
+    def test_save_with_empty_value_deletes_from_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # First populate the slot, then send empty to delete
+        with _HarnessContext(tmp_path, monkeypatch) as ctx:
+            s1, _ = self._post(
+                ctx, "/api/save",
+                {"updates": {"KIMI_API_KEY_2": "sk-temp"}},
+            )
+            assert s1 == 200
+            s2, _ = self._post(
+                ctx, "/api/save",
+                {"updates": {"KIMI_API_KEY_2": ""}},
+            )
+            assert s2 == 200
+            text = (tmp_path / ".env").read_text(encoding="utf-8")
+            assert "KIMI_API_KEY_2" not in text
+            # os.environ should also be pop'd (deletion semantics)
+            assert os.environ.get("KIMI_API_KEY_2") is None
+
+    def test_save_accepts_label_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # W14-KEYS-POOL: KIMI_API_KEY_LABEL_1 (label) is allowed
+        with _HarnessContext(tmp_path, monkeypatch) as ctx:
+            status, _ = self._post(
+                ctx, "/api/save",
+                {"updates": {
+                    "KIMI_API_KEY_1": "sk-primary",
+                    "KIMI_API_KEY_LABEL_1": "production",
+                }},
+            )
+            assert status == 200
+            text = (tmp_path / ".env").read_text(encoding="utf-8")
+            assert "KIMI_API_KEY_LABEL_1='production'" in text
 
     def test_large_post_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

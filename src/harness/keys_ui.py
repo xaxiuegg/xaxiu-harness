@@ -118,7 +118,38 @@ KEY_PROVIDERS: list[dict[str, str]] = [
 # 400 on /api/test and /api/save so callers cannot write
 # PATH / LD_PRELOAD / PYTHONPATH and trick the operator's next
 # shell into running attacker code.
+#
+# W14-KEYS-POOL 2026-05-26: also accepts pool-slot variants
+# (e.g. KIMI_API_KEY_2, KIMI_API_KEY_3) via _is_allowed_env_var()
+# without enlarging this frozenset.  The set remains the singular
+# baseline used by tests.
 KNOWN_ENV_VARS: frozenset[str] = frozenset(s["env"] for s in KEY_PROVIDERS)
+
+
+# Max slots per provider (matches harness.keys.resolve.DEFAULT_MAX_SLOTS)
+KEY_MAX_SLOTS: int = 4
+
+
+def _is_allowed_env_var(name: str) -> bool:
+    """True iff ``name`` is a key env var the UI may write.
+
+    Accepts both the singular form (e.g. ``KIMI_API_KEY``) and the
+    pool-slot variants (``KIMI_API_KEY_1`` ... ``KIMI_API_KEY_4``).
+    Label env vars (Tier 2) accepted as ``KIMI_API_KEY_LABEL_1`` ...
+    Anything else — including ``PATH``, ``LD_PRELOAD``, environment-
+    variable-spoofing attempts — returns False.
+    """
+    if not name or not isinstance(name, str):
+        return False
+    if name in KNOWN_ENV_VARS:
+        return True
+    for prefix in KNOWN_ENV_VARS:
+        for n in range(1, KEY_MAX_SLOTS + 1):
+            if name == f"{prefix}_{n}":
+                return True
+            if name == f"{prefix}_LABEL_{n}":
+                return True
+    return False
 
 
 # Security headers applied to every response.  CSP allows inline
@@ -156,14 +187,17 @@ def _mask(value: str) -> str:
 
 
 def _validate_env_var(env_var: str) -> Optional[str]:
-    """Return None if ``env_var`` is in the allowlist, else an error message.
+    """Return None if ``env_var`` is allowed (singular or pool slot or
+    label), else an error message.
 
     W14-KEYS-UI-SECURITY-PATCH 2026-05-26.  Closes the
     arbitrary-env-var-write CSRF path through /api/test and /api/save.
+    W14-KEYS-POOL 2026-05-26.  Accepts pool slots and labels via
+    ``_is_allowed_env_var``.
     """
     if not env_var:
         return "env_var is required"
-    if env_var not in KNOWN_ENV_VARS:
+    if not _is_allowed_env_var(env_var):
         return f"unknown env_var (not in provider allowlist): {env_var!r}"
     return None
 
@@ -297,37 +331,130 @@ def _current_value(env_var: str, env_file: Path) -> str:
 def _build_status() -> dict:
     """Build the UI's /api/status payload.
 
-    Returns a dict with ``providers`` (per-provider rows) and
-    ``env_path`` (the absolute path where Save will write).
+    W14-KEYS-POOL 2026-05-26: now returns multi-slot per provider.
+
+    Returns
+    -------
+    dict
+        Shape::
+
+            {
+              "providers": [
+                {
+                  "env_prefix": "KIMI_API_KEY",
+                  "display": "Kimi (Moonshot)",
+                  "purpose": "...",
+                  "engine_probe": "kimi-via-claude",
+                  "slots": [
+                    {"slot": 1, "env_var": "KIMI_API_KEY",
+                     "source": "env" | "env-legacy" | "dotenv"
+                               | "dpapi" | "missing",
+                     "masked": "sk-a***Ab12",
+                     "has_value": true | false,
+                     "label": ""},
+                    ...
+                  ]
+                },
+                ...
+              ],
+              "env_path": "/abs/path/to/.env",
+              "max_slots": 4
+            }
+
+    For each provider, slots include all populated slots plus one
+    trailing empty slot (so the operator can add another key
+    without clicking +Add).  Capped at ``KEY_MAX_SLOTS``.
     """
+    from harness.keys import discover_pool
+
     env_file = _resolve_env_path()
     file_values = _read_env_file(env_file)
     providers = []
     for spec in KEY_PROVIDERS:
-        env_var = spec["env"]
-        env_val = os.environ.get(env_var, "")
-        file_val = file_values.get(env_var, "")
-        if env_val:
-            source = "env"
-            value = env_val
-        elif file_val:
-            source = "dotenv"
-            value = file_val
-        else:
-            source = "missing"
-            value = ""
+        prefix = spec["env"]
+        # Discover all populated slots from os.environ + DPAPI
+        env_pool = discover_pool(prefix, max_slots=KEY_MAX_SLOTS)
+        env_by_slot = {e.slot: e for e in env_pool}
+
+        # Also scan the .env file (which doesn't go through
+        # os.environ until the operator sources it)
+        file_by_slot: dict[int, str] = {}
+        if prefix in file_values:
+            # Legacy singular value in .env  → treat as slot 1
+            # unless an indexed slot also exists in .env
+            file_by_slot[1] = file_values[prefix]
+        for n in range(1, KEY_MAX_SLOTS + 1):
+            indexed = f"{prefix}_{n}"
+            if indexed in file_values:
+                file_by_slot[n] = file_values[indexed]
+
+        # Merge: env wins over dotenv; pad with at least one empty
+        # trailing slot for "Add another" affordance
+        all_slots = set(env_by_slot.keys()) | set(file_by_slot.keys())
+        highest = max(all_slots, default=0)
+        show_max = min(KEY_MAX_SLOTS, max(highest + 1, 1)) \
+            if highest >= 1 else 1
+
+        slots = []
+        for n in range(1, show_max + 1):
+            entry = env_by_slot.get(n)
+            file_val = file_by_slot.get(n, "")
+            if entry:
+                slots.append({
+                    "slot": n,
+                    "env_var": entry.env_var,
+                    "source": entry.source,
+                    "masked": entry.masked,
+                    "has_value": True,
+                    "label": entry.label,
+                })
+            elif file_val:
+                # Found in .env only
+                env_var_name = f"{prefix}_{n}" if n > 1 else prefix
+                # But if file used the indexed form, surface that
+                indexed_name = f"{prefix}_{n}"
+                if n == 1 and (prefix in file_values
+                               and indexed_name not in file_values):
+                    env_var_name = prefix
+                else:
+                    env_var_name = indexed_name
+                slots.append({
+                    "slot": n,
+                    "env_var": env_var_name,
+                    "source": "dotenv",
+                    "masked": _mask(file_val),
+                    "has_value": True,
+                    "label": "",
+                })
+            else:
+                # Empty slot — prefer indexed form (push operators
+                # toward canonical pool layout), but fall back to
+                # the bare prefix for slot 1 when nothing's set
+                # anywhere so the UI doesn't surprise the operator
+                # who only has the legacy form
+                if n == 1 and not all_slots:
+                    env_var_name = prefix
+                else:
+                    env_var_name = f"{prefix}_{n}"
+                slots.append({
+                    "slot": n,
+                    "env_var": env_var_name,
+                    "source": "missing",
+                    "masked": "",
+                    "has_value": False,
+                    "label": "",
+                })
         providers.append({
-            "env": env_var,
+            "env_prefix": prefix,
             "display": spec["display"],
             "purpose": spec["purpose"],
-            "masked": _mask(value),
-            "source": source,
-            "has_value": bool(value),
             "engine_probe": spec.get("engine_probe", ""),
+            "slots": slots,
         })
     return {
         "providers": providers,
         "env_path": str(env_file.resolve()),
+        "max_slots": KEY_MAX_SLOTS,
     }
 
 
@@ -391,23 +518,65 @@ HTML_PAGE = """<!DOCTYPE html>
     margin-bottom: 8px;
   }
   .name { font-size: 15px; font-weight: 600; color: #f0f6fc; }
-  .source { font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+  .slot-summary {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #21262d;
+    color: #8b949e;
+  }
+  .source { font-size: 10px; padding: 1px 6px; border-radius: 3px; }
   .source-env { background: #1f6feb; color: white; }
+  .source-env-legacy { background: #6e4ad9; color: white; }
   .source-dotenv { background: #6e4ad9; color: white; }
+  .source-dpapi { background: #1f6feb; color: white; }
   .source-missing { background: #6e7681; color: white; }
   .purpose {
     font-size: 12px; color: #8b949e; margin-bottom: 8px;
   }
+  .slot-list { }
   .key-input-row {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-bottom: 6px;
+  }
+  .slot-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #8b949e;
+    min-width: 32px;
+    text-align: right;
   }
   .env-label {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
     color: #58a6ff;
-    min-width: 200px;
+    min-width: 170px;
+  }
+  .add-slot-btn {
+    margin-top: 4px;
+    background: transparent;
+    color: #58a6ff;
+    border: 1px dashed #30363d;
+    padding: 4px 12px;
+    font-size: 11px;
+  }
+  .add-slot-btn:hover {
+    background: #161b22;
+    border-color: #58a6ff;
+  }
+  .remove-slot-btn {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 4px 8px;
+    font-size: 11px;
+    min-width: 26px;
+  }
+  .remove-slot-btn:hover {
+    color: #f85149;
+    border-color: #f85149;
   }
   input[type="password"], input[type="text"] {
     flex: 1;
@@ -544,78 +713,161 @@ async function loadStatus() {
   const codeEl = document.createElement("code");
   codeEl.textContent = data.env_path;
   envPathEl.appendChild(codeEl);
-  renderRows(data.providers);
+  renderRows(data.providers, data.max_slots);
 }
 
 // W14-KEYS-UI-SECURITY-PATCH: use createElement + textContent for
 // all status-driven content.  No innerHTML interpolation of values
 // derived from .env / masked keys / provider metadata.
-function renderRows(status) {
+// W14-KEYS-POOL: each provider renders 1-N slot rows; "+ Add" reveals
+// another slot up to MAX_SLOTS.  Save sends all slot inputs at once.
+let MAX_SLOTS = 4;
+
+function renderRows(status, maxSlots) {
+  if (typeof maxSlots === "number") {
+    MAX_SLOTS = maxSlots;
+  }
   const container = document.getElementById("rows");
   container.textContent = "";
-  for (const item of status) {
-    container.appendChild(buildRow(item));
+  for (const provider of status) {
+    container.appendChild(buildProviderRow(provider));
   }
 }
 
-function buildRow(item) {
+function buildProviderRow(provider) {
   const row = document.createElement("div");
   row.className = "row";
+  row.dataset.envPrefix = provider.env_prefix;
+  // Track which slot count is rendered so +Add knows where to insert
+  row.dataset.shownSlots = String(provider.slots.length);
 
   const head = document.createElement("div");
   head.className = "row-head";
   const name = document.createElement("div");
   name.className = "name";
-  name.textContent = item.display;
-  const source = document.createElement("div");
-  source.className = "source source-" + item.source;
-  source.textContent =
-    item.source === "env" ? "shell env" :
-    item.source === "dotenv" ? ".env file" :
-    "not set";
+  name.textContent = provider.display;
   head.appendChild(name);
-  head.appendChild(source);
+
+  // Slot summary: how many populated out of MAX_SLOTS
+  const populated = provider.slots.filter(s => s.has_value).length;
+  const summary = document.createElement("div");
+  summary.className = "slot-summary";
+  summary.textContent = populated > 0
+    ? `${populated} key${populated > 1 ? 's' : ''} configured`
+    : 'no keys configured';
+  head.appendChild(summary);
 
   const purpose = document.createElement("div");
   purpose.className = "purpose";
-  purpose.textContent = item.purpose;
+  purpose.textContent = provider.purpose;
 
+  const slotList = document.createElement("div");
+  slotList.className = "slot-list";
+  slotList.dataset.envPrefix = provider.env_prefix;
+  for (const slot of provider.slots) {
+    slotList.appendChild(buildSlotRow(provider, slot));
+  }
+
+  row.appendChild(head);
+  row.appendChild(purpose);
+  row.appendChild(slotList);
+
+  // "+ Add another key" button — visible until we hit MAX_SLOTS
+  if (provider.slots.length < MAX_SLOTS) {
+    const addBtn = document.createElement("button");
+    addBtn.className = "add-slot-btn";
+    addBtn.textContent = "+ Add another key";
+    addBtn.addEventListener("click", () => {
+      const nextSlot = parseInt(row.dataset.shownSlots, 10) + 1;
+      if (nextSlot > MAX_SLOTS) return;
+      const newSlot = {
+        slot: nextSlot,
+        env_var: provider.env_prefix + "_" + nextSlot,
+        source: "missing",
+        masked: "",
+        has_value: false,
+        label: "",
+      };
+      slotList.appendChild(buildSlotRow(provider, newSlot));
+      row.dataset.shownSlots = String(nextSlot);
+      if (nextSlot >= MAX_SLOTS) {
+        addBtn.style.display = "none";
+      }
+    });
+    row.appendChild(addBtn);
+  }
+
+  return row;
+}
+
+function buildSlotRow(provider, slot) {
   const inputRow = document.createElement("div");
   inputRow.className = "key-input-row";
+  inputRow.dataset.slot = String(slot.slot);
+
+  // Slot index badge (k1 / k2 / k3)
+  const slotBadge = document.createElement("div");
+  slotBadge.className = "slot-badge";
+  slotBadge.textContent = "k" + slot.slot;
+  inputRow.appendChild(slotBadge);
 
   const envLabel = document.createElement("div");
   envLabel.className = "env-label";
-  envLabel.textContent = item.env;
+  envLabel.textContent = slot.env_var;
   inputRow.appendChild(envLabel);
+
+  // Source badge per slot
+  const sourceBadge = document.createElement("div");
+  sourceBadge.className = "source source-" + slot.source;
+  sourceBadge.textContent =
+    slot.source === "env" ? "shell" :
+    slot.source === "env-legacy" ? "legacy" :
+    slot.source === "dotenv" ? ".env" :
+    slot.source === "dpapi" ? "dpapi" :
+    "—";
+  inputRow.appendChild(sourceBadge);
 
   const input = document.createElement("input");
   input.type = "password";
-  input.id = "key-" + item.env;
+  input.id = "key-" + slot.env_var;
+  input.dataset.envVar = slot.env_var;
   input.autocomplete = "off";
-  input.placeholder = item.has_value
-    ? "(current: " + item.masked + ")"
+  input.placeholder = slot.has_value
+    ? "(current: " + slot.masked + ")"
     : "paste key here";
   inputRow.appendChild(input);
 
-  if (item.engine_probe) {
+  if (provider.engine_probe) {
     const testBtn = document.createElement("button");
     testBtn.className = "test";
     testBtn.textContent = "Test";
     testBtn.addEventListener("click", () =>
-      testKey(item.env, item.engine_probe),
+      testKey(slot.env_var, provider.engine_probe),
     );
     inputRow.appendChild(testBtn);
   }
 
+  // Remove button for slots > 1 (slot 1 is always the primary)
+  if (slot.slot > 1) {
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "remove-slot-btn";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Clear this slot";
+    removeBtn.addEventListener("click", () => {
+      input.value = "";
+      // Mark for explicit delete on save by setting dataset flag
+      input.dataset.delete = "1";
+      inputRow.style.opacity = "0.4";
+    });
+    inputRow.appendChild(removeBtn);
+  }
+
   const statusEl = document.createElement("span");
   statusEl.className = "status";
-  statusEl.id = "status-" + item.env;
+  statusEl.id = "status-" + slot.env_var;
   inputRow.appendChild(statusEl);
 
-  row.appendChild(head);
-  row.appendChild(purpose);
-  row.appendChild(inputRow);
-  return row;
+  return inputRow;
 }
 
 async function testKey(envVar, engineProbe) {
@@ -653,8 +905,12 @@ async function testKey(envVar, engineProbe) {
 async function saveAll() {
   const updates = {};
   for (const input of document.querySelectorAll('input[type="password"]')) {
-    const envVar = input.id.replace("key-", "");
-    if (input.value) {
+    const envVar = input.dataset.envVar || input.id.replace("key-", "");
+    // W14-KEYS-POOL: empty value with delete-flag is an EXPLICIT
+    // deletion request; otherwise empty = leave existing alone.
+    if (input.dataset.delete === "1") {
+      updates[envVar] = "";  // explicit delete signal
+    } else if (input.value) {
       updates[envVar] = input.value;
     }
   }
@@ -890,17 +1146,20 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
         if not isinstance(updates, dict) or not updates:
             self._send_error_json("updates must be a non-empty dict", 400)
             return
-        # P0-1: every key must be in the allowlist
+        # P0-1: every key must be in the allowlist (singular OR pool slot OR label)
         for k in updates:
             err = _validate_env_var(k)
             if err:
                 self._send_error_json(err, 400)
                 return
-        # P0-3: every value must pass content-validation
+        # P0-3: every value must pass content-validation (empty allowed
+        # for delete semantics — _write_env_file drops empty values)
         for k, v in updates.items():
             if not isinstance(v, str):
                 self._send_error_json(f"value for {k} must be a string", 400)
                 return
+            if v == "":
+                continue  # delete intent — skip content validation
             v_err = _validate_value(v)
             if v_err:
                 self._send_error_json(f"{k}: {v_err}", 400)
@@ -914,8 +1173,12 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
         # Also reflect in current process env so the operator's
         # next harness CLI invocation in the same shell session sees
         # the new values without needing to source .env manually.
+        # Empty string ⇒ pop the env var (deletion semantics).
         for k, v in updates.items():
-            os.environ[k] = v
+            if v == "":
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         self._send_json({
             "saved": True,
             "env_path": str(env_path.resolve()),
@@ -1006,7 +1269,29 @@ def serve_key_ui(
 
 
 def list_key_status() -> list[dict]:
-    """Return the current key-status list for ``harness keys list``.
-    Same shape as the old UI /api/status response (just the providers
-    list) — the keys-ui-list CLI doesn't need the env_path field."""
-    return _build_status()["providers"]
+    """Return a flat per-slot status list for ``harness keys list``.
+
+    Each entry: ``{env, display, purpose, masked, source, has_value,
+    engine_probe, slot, label}``.  The slot field disambiguates pool
+    entries.  Slot-1 entries surface the legacy singular env var name
+    when no indexed slots exist; otherwise the indexed form is shown.
+
+    Backward-compat with the pre-pool CLI: callers that don't care
+    about multi-key see slot=1 rows that match the old shape.
+    """
+    status = _build_status()
+    flat = []
+    for provider in status["providers"]:
+        for slot in provider["slots"]:
+            flat.append({
+                "env": slot["env_var"],
+                "display": provider["display"],
+                "purpose": provider["purpose"],
+                "masked": slot["masked"],
+                "source": slot["source"],
+                "has_value": slot["has_value"],
+                "engine_probe": provider.get("engine_probe", ""),
+                "slot": slot["slot"],
+                "label": slot.get("label", ""),
+            })
+    return flat
