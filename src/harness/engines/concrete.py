@@ -732,6 +732,25 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
     if name_lower == "mock":
         return MockEngine()
 
+    # W14-PATTERN-B-CLAUDE-CODE-SUBPROCESS 2026-05-25: special-case
+    # engines dispatch via the local ``claude`` CLI binary as a
+    # subprocess.  They reuse provider keys (MIMO_API_KEY,
+    # KIMI_API_KEY) but route through Claude Code's legitimate UA
+    # against the provider's Anthropic-API-compat endpoint.  No
+    # spoofing — TOS-compliant access to provider allowlists.
+    if name_lower == "mimo-via-claude":
+        from harness.engines.claude_code_subprocess import (
+            MimoViaClaudeCodeEngine,
+        )
+        from harness.secrets.resolve import resolve_key
+        api_key = resolve_key("MIMO_API_KEY", prefer_dpapi=prefer_dpapi)
+        if not api_key:
+            raise RuntimeError(
+                "No API key for mimo-via-claude. Set MIMO_API_KEY "
+                "(same key the direct-httpx 'mimo' engine uses)."
+            )
+        return MimoViaClaudeCodeEngine(api_key=api_key)
+
     if name_lower not in _ENV_VAR_MAP:
         raise RuntimeError(
             f"Unknown engine '{name}'. Supported: {list(_ENV_VAR_MAP.keys())}"
