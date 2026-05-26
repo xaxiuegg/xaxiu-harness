@@ -3423,6 +3423,28 @@ def engines(subcmd: str | None, list_: bool, health: bool, shallow: bool,
         list_ = True
     elif subcmd == "health":
         health = True
+    elif subcmd == "fallback-policy":
+        # W14-DISPATCH-HEALTH-AWARE-FALLBACK: show the effective fallback
+        # order with skip reasons (no-key / terminated / over-cap).
+        from harness.engines.routing import describe_fallback_policy
+        import json as _json
+        policy = describe_fallback_policy()
+        click.echo(f"Filter enabled: {not policy['filter_disabled']}")
+        click.echo(f"All production engines: "
+                   f"{', '.join(policy['all_engines'])}")
+        click.echo()
+        if policy['eligible']:
+            click.echo("Eligible for dispatch (priority order):")
+            for eng in policy['eligible']:
+                click.echo(f"  ✓ {eng}")
+        else:
+            click.echo("(no engines eligible — check API keys + budget caps)")
+        if policy['skipped']:
+            click.echo()
+            click.echo("Skipped engines:")
+            for eng, reason in sorted(policy['skipped'].items()):
+                click.echo(f"  ✗ {eng}: {reason}")
+        sys.exit(0)
     elif subcmd == "failures":
         from harness.cli_helpers import read_failure_summary
         summary = read_failure_summary(

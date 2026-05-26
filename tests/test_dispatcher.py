@@ -30,6 +30,22 @@ from harness.state.files import ActiveDispatch, EngineHealth, StateFileCorruptEr
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
+@pytest.fixture(autouse=True)
+def _disable_w14_health_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable W14-DISPATCH-HEALTH-AWARE-FALLBACK filtering for this file.
+
+    The pre-W14 dispatcher tests assume strict priority resolution and
+    deterministic fallback ordering across all 5 production engines.
+    The W14 filter (no-key / terminated / over-cap skipping) layers on
+    top of that selection.  Disabling here preserves the existing test
+    intent; the W14 behavior has dedicated coverage in
+    tests/test_dispatch_health_aware_fallback.py and the
+    test_pick_initial_engine_health_aware test below opts back in.
+    """
+    monkeypatch.setenv("HARNESS_DISPATCH_SKIP_HEALTH_FILTER", "1")
+
+
 @pytest.fixture
 def minimal_adapter() -> AdapterConfig:
     """Return a minimal AdapterConfig with no routing rules."""
@@ -262,13 +278,41 @@ def test_pick_initial_engine_routing_rule_avoid_skip(minimal_adapter: AdapterCon
     assert result[0] == "kimi"
 
 
-def test_pick_initial_engine_global_priority(minimal_adapter: AdapterConfig) -> None:
+def test_pick_initial_engine_global_priority(
+    minimal_adapter: AdapterConfig,
+) -> None:
+    """Priority-only test.  W14-DISPATCH-HEALTH-AWARE-FALLBACK is
+    disabled file-wide via the ``_disable_w14_health_filter`` autouse
+    fixture; the dedicated W14 promotion test below opts back in.
+    """
     health = {
         "kimi": EngineHealth(priority="HIGH"),
         "deepseek": EngineHealth(priority="NORMAL"),
     }
     result = _pick_initial_engine(minimal_adapter, health, "foo.txt", None)
     assert result[0] == "kimi"
+
+
+def test_pick_initial_engine_health_aware(
+    minimal_adapter: AdapterConfig,
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W14-DISPATCH-HEALTH-AWARE-FALLBACK 2026-05-25: when the highest-
+    priority engine has no key configured, the next-priority engine
+    that DOES have a key should be picked instead.  Pre-W14 would
+    burn a dispatch on "no api key"; W14 promotes deepseek directly.
+    """
+    monkeypatch.delenv("HARNESS_DISPATCH_SKIP_HEALTH_FILTER", raising=False)
+    monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.chdir(tmp_path)  # no probe log present in tmp_path
+    health = {
+        "kimi": EngineHealth(priority="HIGH"),
+        "deepseek": EngineHealth(priority="NORMAL"),
+    }
+    result = _pick_initial_engine(minimal_adapter, health, "foo.txt", None)
+    # kimi filtered (no key), deepseek picked despite lower priority
+    assert result[0] == "deepseek"
 
 
 # ---------------------------------------------------------------------------

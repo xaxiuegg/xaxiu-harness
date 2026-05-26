@@ -406,13 +406,23 @@ def _pick_initial_engine(
     # 4. Default by global priority
     eligible = _eligible_engines(health, exclude=set())
     if eligible:
-        # M-1 fix: audit default-priority selection (no routing rule matched).
+        # W14-DISPATCH-HEALTH-AWARE-FALLBACK 2026-05-25: prefer the
+        # first priority-ranked engine that ALSO passes the health
+        # filter (key present, not terminated, within budget cap).
+        # Falls through to the priority-only winner if all are
+        # filtered out — operator still gets a starting engine.
+        from harness.engines.routing import filter_eligible_engines
+        priority_order = [name for name, _prio in eligible]
+        healthy_first, _skip_reasons = filter_eligible_engines(
+            priority_order,
+        )
+        chosen = healthy_first[0] if healthy_first else priority_order[0]
         _audit_routing_change(
             "priority_change",
-            eligible[0][0],
+            chosen,
             new_value="default-priority-selected",
         )
-        return eligible[0][0], None, {}
+        return chosen, None, {}
 
     return _production_backends()[0], None, {}
 
@@ -972,7 +982,19 @@ def dispatch_packet(
                 error=f"force_engine_failed_no_fallback: {response.error}",
                 dispatch_id=dispatch_id,
             )
-        remaining = [n for n in _production_backends() if n not in tried]
+        # W14-DISPATCH-HEALTH-AWARE-FALLBACK 2026-05-25: filter the
+        # fallback chain to skip engines that are no-key / terminated /
+        # over-budget.  Opt-out via HARNESS_DISPATCH_SKIP_HEALTH_FILTER=1.
+        from harness.engines.routing import filter_eligible_engines
+        _raw_remaining = [n for n in _production_backends() if n not in tried]
+        remaining, _skip_reasons = filter_eligible_engines(_raw_remaining)
+        if _skip_reasons:
+            # Log each skip so the operator can see why a route was avoided
+            for _eng, _reason in _skip_reasons.items():
+                logger.info(
+                    "dispatch fallback skip: engine=%r reason=%r",
+                    _eng, _reason,
+                )
         if not remaining:
             try:
                 state_db.update_dispatch_status(
