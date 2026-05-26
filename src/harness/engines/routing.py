@@ -197,17 +197,28 @@ def describe_fallback_policy(
     health_probe_log_path: Path | None = None,
     budget_ledger_path: Path | None = None,
     budget_caps_config: dict | None = None,
+    engine_health: dict | None = None,
 ) -> dict:
     """Return a structured description of the current routing policy.
 
     Used by ``harness engines fallback-policy`` (CLI verb) and any
     callers that want a JSON-serializable snapshot.
 
+    The ``eligible`` list is sorted by **runtime priority order**
+    (matches what ``_pick_initial_engine`` would actually pick), with
+    ties broken by ``SUPPORTED_BACKENDS`` constant order.  Each entry
+    in ``eligible_with_priority`` carries the engine's priority label
+    so the operator can see WHY one is ranked above another.
+
     Returns:
       {
         "filter_disabled": bool,
         "all_engines": [...],
-        "eligible": [...],
+        "eligible": [...],                  # priority-sorted names
+        "eligible_with_priority": [         # priority-sorted + labels
+          {"engine": "deepseek", "priority": "NORMAL"},
+          ...
+        ],
         "skipped": {engine: reason, ...},
       }
     """
@@ -215,16 +226,45 @@ def describe_fallback_policy(
         from harness._constants import SUPPORTED_BACKENDS
         engines = [b for b in SUPPORTED_BACKENDS if b != "mock"]
 
-    eligible, reasons = filter_eligible_engines(
+    # Resolve current priorities from on-disk engine_health (matches
+    # dispatcher runtime).  Stable sort: NORMAL ties preserve input
+    # order from SUPPORTED_BACKENDS.
+    if engine_health is None:
+        try:
+            from harness.state import files as _state_files
+            engine_health = _state_files.read_engine_health()
+        except Exception:
+            engine_health = {}
+
+    _priority_rank = {"HIGH": 0, "NORMAL": 1, "AVOID": 2}
+
+    def _engine_priority(name: str) -> str:
+        h = engine_health.get(name) if engine_health else None
+        return h.priority if h else "NORMAL"
+
+    # Priority-sort BEFORE filtering so the eligible list reflects
+    # what the dispatcher would actually pick first.
+    priority_sorted_engines = sorted(
         engines,
+        key=lambda e: _priority_rank.get(_engine_priority(e), 1),
+    )
+
+    eligible, reasons = filter_eligible_engines(
+        priority_sorted_engines,
         health_probe_log_path=health_probe_log_path,
         budget_ledger_path=budget_ledger_path,
         budget_caps_config=budget_caps_config,
     )
 
+    eligible_with_priority = [
+        {"engine": e, "priority": _engine_priority(e)}
+        for e in eligible
+    ]
+
     return {
         "filter_disabled": _filter_disabled(),
         "all_engines": list(engines),
         "eligible": eligible,
+        "eligible_with_priority": eligible_with_priority,
         "skipped": reasons,
     }

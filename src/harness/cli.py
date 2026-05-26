@@ -3425,18 +3425,30 @@ def engines(subcmd: str | None, list_: bool, health: bool, shallow: bool,
         health = True
     elif subcmd == "fallback-policy":
         # W14-DISPATCH-HEALTH-AWARE-FALLBACK: show the effective fallback
-        # order with skip reasons (no-key / terminated / over-cap).
+        # order (priority-sorted, matches dispatcher runtime) with skip
+        # reasons (no-key / terminated / over-cap).
         from harness.engines.routing import describe_fallback_policy
-        import json as _json
         policy = describe_fallback_policy()
         click.echo(f"Filter enabled: {not policy['filter_disabled']}")
         click.echo(f"All production engines: "
                    f"{', '.join(policy['all_engines'])}")
         click.echo()
-        if policy['eligible']:
-            click.echo("Eligible for dispatch (priority order):")
-            for eng in policy['eligible']:
-                click.echo(f"  ✓ {eng}")
+        if policy['eligible_with_priority']:
+            click.echo("Eligible for dispatch (priority-sorted, tie = "
+                       "SUPPORTED_BACKENDS order):")
+            for entry in policy['eligible_with_priority']:
+                # Mark non-NORMAL priorities to make explicit decisions visible
+                if entry['priority'] == "HIGH":
+                    badge = click.style("HIGH", fg="green", bold=True)
+                elif entry['priority'] == "AVOID":
+                    badge = click.style("AVOID", fg="yellow")
+                else:
+                    badge = "NORMAL"
+                click.echo(f"  ✓ {entry['engine']:<10}  priority={badge}")
+            click.echo()
+            click.echo("(All-NORMAL ties resolve by SUPPORTED_BACKENDS "
+                       "order; use 'harness priority <engine> HIGH' to "
+                       "bump an engine above the tie.)")
         else:
             click.echo("(no engines eligible — check API keys + budget caps)")
         if policy['skipped']:
