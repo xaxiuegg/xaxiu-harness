@@ -70,6 +70,6 @@ tmp_panic/
 # resulting PNGs / yml snapshots / console logs live alongside the
 # repo but should never be committed.
 .playwright-mcp/
-keys-ui-fixed.png
+keys-ui-*.png
 *-screenshot.png
 page-*.png

@@ -16,8 +16,27 @@ Design:
     cli_helpers.probe_engine_live (~5-token throwaway call)
   - Server self-shuts-down after Save OR after 10 min idle
 
+Security model (W14-KEYS-UI-SECURITY-PATCH 2026-05-26):
+  - Loopback bind only; never 0.0.0.0
+  - 256-bit URL-safe random token; required on every endpoint
+  - Origin header validated on POSTs (CSRF defense)
+  - env_var allowlist on /api/test and /api/save (no arbitrary
+    os.environ writes; can't be coerced into setting PATH/LD_PRELOAD)
+  - Value validation: rejects newlines / NUL / single-quote so that
+    `set -a; source .env` (which the footer recommends) cannot
+    execute attacker-controlled shell expansion
+  - .env values written as single-quoted strings (bash-safe)
+  - Atomic .env write with tmp file 0600-permed BEFORE content lands
+  - DOM rendering via createElement + textContent (no XSS from masked
+    key contents reaching innerHTML)
+  - Security headers on every response: X-Frame-Options DENY,
+    CSP locked-down, Referrer-Policy no-referrer,
+    X-Content-Type-Options nosniff
+  - Token redacted from BaseHTTPRequestHandler log_message output
+  - env_path resolves to harness repo root, not arbitrary cwd
+
 NOT exposed:
-  - No support for non-loopback binds (security)
+  - No support for non-loopback binds
   - No persistence of the token after server exits
   - No multi-user auth — single-operator local tool
 
@@ -94,6 +113,34 @@ KEY_PROVIDERS: list[dict[str, str]] = [
 ]
 
 
+# W14-KEYS-UI-SECURITY-PATCH: allowlist of env vars the UI is
+# permitted to write.  Anything not in this set is rejected with
+# 400 on /api/test and /api/save so callers cannot write
+# PATH / LD_PRELOAD / PYTHONPATH and trick the operator's next
+# shell into running attacker code.
+KNOWN_ENV_VARS: frozenset[str] = frozenset(s["env"] for s in KEY_PROVIDERS)
+
+
+# Security headers applied to every response.  CSP allows inline
+# style + script because the page is fully self-contained.
+# `default-src 'none'` denies everything else; `connect-src 'self'`
+# is needed for the fetch() calls to /api/*.
+_SECURITY_HEADERS: dict[str, str] = {
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "script-src 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+}
+
+
 def _mask(value: str) -> str:
     """Return a masked excerpt safe for display (first 4 + last 4)."""
     if not value:
@@ -103,10 +150,70 @@ def _mask(value: str) -> str:
     return f"{value[:4]}{'*' * (len(value) - 8)}{value[-4:]}"
 
 
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_env_var(env_var: str) -> Optional[str]:
+    """Return None if ``env_var`` is in the allowlist, else an error message.
+
+    W14-KEYS-UI-SECURITY-PATCH 2026-05-26.  Closes the
+    arbitrary-env-var-write CSRF path through /api/test and /api/save.
+    """
+    if not env_var:
+        return "env_var is required"
+    if env_var not in KNOWN_ENV_VARS:
+        return f"unknown env_var (not in provider allowlist): {env_var!r}"
+    return None
+
+
+def _validate_value(value: str) -> Optional[str]:
+    """Return None if ``value`` is safe to store in .env, else an error.
+
+    Rejects characters that would corrupt the .env format or enable
+    shell expansion on `source .env` (which the UI footer recommends).
+    """
+    if value is None:
+        return "value is required"
+    if "\n" in value or "\r" in value:
+        return "value must not contain newline characters"
+    if "\x00" in value:
+        return "value must not contain NUL bytes"
+    if "'" in value:
+        # Single-quote-wrapped .env values can't safely escape a literal '
+        # without breaking POSIX sh source semantics.  Reject and ask
+        # the operator to re-check the paste — real API keys never
+        # contain single quotes.
+        return "value must not contain single-quote characters"
+    if len(value) > 4096:
+        return "value too long (max 4096 chars)"
+    return None
+
+
+def _resolve_env_path() -> Path:
+    """Return the canonical .env path for this harness checkout.
+
+    W14-KEYS-UI-SECURITY-PATCH: prior version used Path.cwd(), which
+    meant keys saved into whatever directory the operator launched
+    the server from — not necessarily the repo.  We now anchor to
+    the package location and walk up to the repo root (where
+    pyproject.toml lives).  Falls back to cwd if the walk fails.
+    """
+    try:
+        # this file is src/harness/keys_ui.py — repo root is 3 levels up
+        candidate = Path(__file__).resolve().parents[2]
+        if (candidate / "pyproject.toml").exists():
+            return candidate / ".env"
+    except (IndexError, OSError):
+        pass
+    return Path.cwd() / ".env"
+
+
 def _read_env_file(env_path: Path) -> dict[str, str]:
     """Read a POSIX-style .env file into a dict.  Quietly returns
-    empty dict when missing or unreadable.  Lines like ``KEY=value``;
-    KEY=value comments after # not supported (Python's dotenv-style)."""
+    empty dict when missing or unreadable.  Accepts both
+    ``KEY=value`` and ``KEY='value'`` (single-quoted) lines."""
     out: dict[str, str] = {}
     if not env_path.exists():
         return out
@@ -119,7 +226,10 @@ def _read_env_file(env_path: Path) -> dict[str, str]:
                 continue
             k, _, v = line.partition("=")
             k = k.strip()
-            v = v.strip().strip('"').strip("'")
+            v = v.strip()
+            # Strip a balanced wrapping single or double quote
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+                v = v[1:-1]
             if k:
                 out[k] = v
     except OSError:
@@ -130,19 +240,48 @@ def _read_env_file(env_path: Path) -> dict[str, str]:
 def _write_env_file(env_path: Path, updates: dict[str, str]) -> None:
     """Merge ``updates`` into ``env_path`` (POSIX-style .env).  Preserves
     existing keys not in ``updates``.  Atomic write (tmp + replace).
-    Sets file mode 0600 on POSIX."""
+    Sets mode 0600 on the tmp file BEFORE content lands so a crash
+    mid-write doesn't leave plaintext keys readable by group/other."""
     current = _read_env_file(env_path)
     current.update(updates)
-    lines = [f"{k}={v}" for k, v in current.items() if v]
+    # Single-quote every value so bash `set -a; source .env` does NOT
+    # perform $-expansion / backtick expansion / arithmetic expansion.
+    # _validate_value() above already rejected any value containing
+    # a literal single-quote, so this wrapping is bash-safe.
+    lines = [f"{k}='{v}'" for k, v in current.items() if v]
     body = "\n".join(lines) + "\n"
     env_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = env_path.with_suffix(".tmp")
+    # Touch the tmp file empty, chmod it, THEN write — this ensures
+    # the 0600 mode is in place before any plaintext lands.
+    tmp.touch()
+    try:
+        tmp.chmod(0o600)
+    except (NotImplementedError, OSError):
+        pass
     tmp.write_text(body, encoding="utf-8")
     tmp.replace(env_path)
     try:
         env_path.chmod(0o600)
     except (NotImplementedError, OSError):
         pass
+
+
+def _cleanup_stale_tmp(env_path: Path) -> None:
+    """Remove a leftover .env.tmp from a prior crashed write.
+
+    Best-effort; logs but does not raise.  Called at server startup.
+    """
+    tmp = env_path.with_suffix(".tmp")
+    if tmp.exists():
+        try:
+            tmp.unlink()
+            logger.info("keys-ui: removed stale .env.tmp at %s", tmp)
+        except OSError as exc:
+            logger.warning(
+                "keys-ui: could not remove stale .env.tmp at %s: %s",
+                tmp, exc,
+            )
 
 
 def _current_value(env_var: str, env_file: Path) -> str:
@@ -155,14 +294,15 @@ def _current_value(env_var: str, env_file: Path) -> str:
     return file_values.get(env_var, "")
 
 
-def _build_status() -> list[dict]:
-    """Build the per-provider status list for the UI.  Each entry has
-    ``env``, ``display``, ``purpose``, ``masked``, ``source`` (env /
-    dotenv / missing), and ``engine_probe`` (or "" if not probable).
+def _build_status() -> dict:
+    """Build the UI's /api/status payload.
+
+    Returns a dict with ``providers`` (per-provider rows) and
+    ``env_path`` (the absolute path where Save will write).
     """
-    env_file = Path.cwd() / ".env"
+    env_file = _resolve_env_path()
     file_values = _read_env_file(env_file)
-    out = []
+    providers = []
     for spec in KEY_PROVIDERS:
         env_var = spec["env"]
         env_val = os.environ.get(env_var, "")
@@ -176,7 +316,7 @@ def _build_status() -> list[dict]:
         else:
             source = "missing"
             value = ""
-        out.append({
+        providers.append({
             "env": env_var,
             "display": spec["display"],
             "purpose": spec["purpose"],
@@ -185,7 +325,10 @@ def _build_status() -> list[dict]:
             "has_value": bool(value),
             "engine_probe": spec.get("engine_probe", ""),
         })
-    return out
+    return {
+        "providers": providers,
+        "env_path": str(env_file.resolve()),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +337,12 @@ def _build_status() -> list[dict]:
 #
 # NOTE: This template uses SINGLE braces in CSS and JS.  We bind the
 # session token via ``str.replace("__TOKEN__", token)`` -- NOT
-# ``str.format(...)`` -- so braces do NOT need doubling.  Prior version
-# (commit 9dde951) had doubled braces left over from a format()
-# draft; that broke CSS parsing in the browser.  W14-KEYS-UI-RENDER-FIX
-# 2026-05-26.
+# ``str.format(...)`` -- so braces do NOT need doubling.
+#
+# All status-driven row content is built via document.createElement
+# + textContent (NOT innerHTML template literals).  This eliminates
+# the XSS surface that masked-key contents would otherwise have if
+# the operator pasted a key containing HTML metacharacters.
 
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -219,6 +364,19 @@ HTML_PAGE = """<!DOCTYPE html>
   }
   h1 { font-size: 22px; margin-bottom: 4px; }
   .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  .env-path-info {
+    color: #8b949e;
+    font-size: 12px;
+    margin-bottom: 24px;
+    padding: 8px 12px;
+    background: #161b22;
+    border-left: 3px solid #1f6feb;
+    border-radius: 3px;
+  }
+  .env-path-info code {
+    color: #58a6ff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
   .row {
     background: #161b22;
     border: 1px solid #30363d;
@@ -331,11 +489,15 @@ HTML_PAGE = """<!DOCTYPE html>
   done to shut down this server.
 </div>
 
+<div class="env-path-info" id="env-path-info">
+  Loading target .env path&hellip;
+</div>
+
 <div id="rows"></div>
 
 <div class="toolbar">
   <button onclick="window.close()">Close</button>
-  <button class="primary" onclick="saveAll()">Save all to .env</button>
+  <button class="primary" id="save-all-btn">Save all to .env</button>
 </div>
 
 <div class="footer">
@@ -353,8 +515,14 @@ HTML_PAGE = """<!DOCTYPE html>
   </p>
   <ul>
     <li>Linux/Mac: <code>set -a; source .env; set +a</code></li>
-    <li>Windows PowerShell: <code>Get-Content .env | ForEach-Object { $name, $value = $_.Split('=', 2); [Environment]::SetEnvironmentVariable($name, $value, [EnvironmentVariableTarget]::User) }</code></li>
+    <li>Windows PowerShell: <code>Get-Content .env | ForEach-Object { $name, $value = $_.Split('=', 2); [Environment]::SetEnvironmentVariable($name, $value.Trim(\"'\"), [EnvironmentVariableTarget]::User) }</code></li>
   </ul>
+  <p>
+    <strong>Security:</strong>
+    Values are saved single-quoted to neutralize shell expansion.
+    Keys containing newlines or single-quotes are rejected.  Server
+    binds 127.0.0.1 only, idle-shuts after 10&nbsp;min, token-gated.
+  </p>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -364,38 +532,90 @@ const TOKEN = "__TOKEN__";
 
 async function loadStatus() {
   const r = await fetch(`/api/status?token=${TOKEN}`);
+  if (!r.ok) {
+    showToast("Failed to load status: HTTP " + r.status, "error");
+    return;
+  }
   const data = await r.json();
-  renderRows(data);
+  // Show resolved .env path so operator knows where keys will save
+  const envPathEl = document.getElementById("env-path-info");
+  envPathEl.textContent = "";
+  envPathEl.appendChild(document.createTextNode("Keys will save to: "));
+  const codeEl = document.createElement("code");
+  codeEl.textContent = data.env_path;
+  envPathEl.appendChild(codeEl);
+  renderRows(data.providers);
 }
 
+// W14-KEYS-UI-SECURITY-PATCH: use createElement + textContent for
+// all status-driven content.  No innerHTML interpolation of values
+// derived from .env / masked keys / provider metadata.
 function renderRows(status) {
   const container = document.getElementById("rows");
-  container.innerHTML = "";
+  container.textContent = "";
   for (const item of status) {
-    const row = document.createElement("div");
-    row.className = "row";
-    const sourceClass = "source-" + item.source;
-    const sourceLabel =
-      item.source === "env" ? "shell env" :
-      item.source === "dotenv" ? ".env file" :
-      "not set";
-    row.innerHTML = `
-      <div class="row-head">
-        <div class="name">${item.display}</div>
-        <div class="source ${sourceClass}">${sourceLabel}</div>
-      </div>
-      <div class="purpose">${item.purpose}</div>
-      <div class="key-input-row">
-        <div class="env-label">${item.env}</div>
-        <input type="password" id="key-${item.env}"
-               placeholder="${item.has_value ? '(current: ' + item.masked + ')' : 'paste key here'}"
-               autocomplete="off">
-        ${item.engine_probe ? `<button class="test" onclick="testKey('${item.env}', '${item.engine_probe}')">Test</button>` : ''}
-        <span class="status" id="status-${item.env}"></span>
-      </div>
-    `;
-    container.appendChild(row);
+    container.appendChild(buildRow(item));
   }
+}
+
+function buildRow(item) {
+  const row = document.createElement("div");
+  row.className = "row";
+
+  const head = document.createElement("div");
+  head.className = "row-head";
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = item.display;
+  const source = document.createElement("div");
+  source.className = "source source-" + item.source;
+  source.textContent =
+    item.source === "env" ? "shell env" :
+    item.source === "dotenv" ? ".env file" :
+    "not set";
+  head.appendChild(name);
+  head.appendChild(source);
+
+  const purpose = document.createElement("div");
+  purpose.className = "purpose";
+  purpose.textContent = item.purpose;
+
+  const inputRow = document.createElement("div");
+  inputRow.className = "key-input-row";
+
+  const envLabel = document.createElement("div");
+  envLabel.className = "env-label";
+  envLabel.textContent = item.env;
+  inputRow.appendChild(envLabel);
+
+  const input = document.createElement("input");
+  input.type = "password";
+  input.id = "key-" + item.env;
+  input.autocomplete = "off";
+  input.placeholder = item.has_value
+    ? "(current: " + item.masked + ")"
+    : "paste key here";
+  inputRow.appendChild(input);
+
+  if (item.engine_probe) {
+    const testBtn = document.createElement("button");
+    testBtn.className = "test";
+    testBtn.textContent = "Test";
+    testBtn.addEventListener("click", () =>
+      testKey(item.env, item.engine_probe),
+    );
+    inputRow.appendChild(testBtn);
+  }
+
+  const statusEl = document.createElement("span");
+  statusEl.className = "status";
+  statusEl.id = "status-" + item.env;
+  inputRow.appendChild(statusEl);
+
+  row.appendChild(head);
+  row.appendChild(purpose);
+  row.appendChild(inputRow);
+  return row;
 }
 
 async function testKey(envVar, engineProbe) {
@@ -449,7 +669,7 @@ async function saveAll() {
       body: JSON.stringify({ updates: updates }),
     });
     const data = await r.json();
-    if (data.saved) {
+    if (r.ok && data.saved) {
       showToast(
         "Saved " + Object.keys(updates).length + " key(s) to " + data.env_path,
         "success",
@@ -457,7 +677,8 @@ async function saveAll() {
       // Reload status so the form reflects the new state
       setTimeout(loadStatus, 200);
     } else {
-      showToast("Save failed: " + (data.error || "unknown"), "error");
+      const detail = (data && (data.error || data.detail)) || "unknown";
+      showToast("Save failed: " + detail, "error");
     }
   } catch (e) {
     showToast("Save error: " + String(e), "error");
@@ -471,6 +692,7 @@ function showToast(message, kind) {
   setTimeout(() => { el.className = "toast"; }, 4000);
 }
 
+document.getElementById("save-all-btn").addEventListener("click", saveAll);
 loadStatus();
 </script>
 
@@ -491,15 +713,32 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
 
     server_version = "harness-keys-ui/1.0"
 
-    # Suppress the default request logging — we use our own logger
+    # W14-KEYS-UI-SECURITY-PATCH: never log the token in URL access lines
     def log_message(self, fmt: str, *args) -> None:
-        logger.debug("keys-ui: " + fmt, *args)
+        try:
+            redacted = []
+            for a in args:
+                s = str(a)
+                if "token=" in s:
+                    # Strip token=... from query strings
+                    import re
+                    s = re.sub(r"token=[^&\s]*", "token=<redacted>", s)
+                redacted.append(s)
+            logger.debug("keys-ui: " + fmt, *redacted)
+        except Exception:
+            # Never crash a request because of a logging issue
+            logger.debug("keys-ui: <log redaction failed>")
+
+    def _apply_security_headers(self) -> None:
+        for k, v in _SECURITY_HEADERS.items():
+            self.send_header(k, v)
 
     def _send_json(self, payload, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self._apply_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -511,7 +750,25 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         q = parse_qs(parsed.query)
         provided = (q.get("token") or [""])[0]
-        return bool(expected) and provided == expected
+        # Constant-time compare to avoid leaking via timing
+        if not expected or not provided:
+            return False
+        return secrets.compare_digest(expected, provided)
+
+    def _check_origin_for_post(self) -> bool:
+        """W14-KEYS-UI-SECURITY-PATCH: validate POST Origin matches
+        the server's bound URL.  Defends against a malicious local
+        page POSTing with a stolen token from a different origin.
+
+        Empty Origin (curl, native clients) is allowed because the
+        token alone is sufficient authn for non-browser clients.
+        """
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return True  # non-browser client; token-only authn
+        expected_host = f"127.0.0.1:{self.server.server_address[1]}"
+        expected = f"http://{expected_host}"
+        return origin == expected
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -519,6 +776,7 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
             if not self._check_token():
                 self.send_response(403)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self._apply_security_headers()
                 self.end_headers()
                 self.wfile.write(b"Forbidden: token required")
                 return
@@ -529,6 +787,7 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self._apply_security_headers()
             self.end_headers()
             self.wfile.write(body)
             return
@@ -544,15 +803,34 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        # Read+discard the body up front EVEN if we're going to reject —
+        # otherwise Windows tears the connection down with WinError 10053
+        # because the body sat in the socket buffer unread when we
+        # close.  We cap at 64 KB to defend against flooding.
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > 64 * 1024:
+            # Try to drain so the client can read our response cleanly
+            try:
+                self.rfile.read(min(length, 64 * 1024))
+            except OSError:
+                pass
+            self._send_error_json("request too large", 413)
+            return
+        try:
+            raw = self.rfile.read(length) if length > 0 else b""
+        except OSError:
+            raw = b""
+
         if not self._check_token():
             self._send_error_json("token mismatch", 403)
             return
+        if not self._check_origin_for_post():
+            self._send_error_json("bad Origin", 403)
+            return
 
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length)
         try:
             payload = json.loads(raw.decode("utf-8")) if raw else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._send_error_json("invalid JSON", 400)
             return
 
@@ -570,11 +848,20 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
         env_var = payload.get("env_var", "")
         engine_probe = payload.get("engine_probe", "")
         new_value = payload.get("new_value")
-        if not env_var or not engine_probe:
-            self._send_error_json(
-                "env_var and engine_probe required", 400,
-            )
+        # P0-1: validate env_var against allowlist
+        err = _validate_env_var(env_var)
+        if err:
+            self._send_error_json(err, 400)
             return
+        if not engine_probe:
+            self._send_error_json("engine_probe is required", 400)
+            return
+        # P0-3: validate value shape if one was supplied
+        if new_value:
+            v_err = _validate_value(new_value)
+            if v_err:
+                self._send_error_json(v_err, 400)
+                return
         # Override the env var temporarily for the probe if a new value
         # was supplied; otherwise probe with whatever's currently in env
         prior = os.environ.get(env_var)
@@ -603,7 +890,22 @@ class _KeyServerHandler(http.server.BaseHTTPRequestHandler):
         if not isinstance(updates, dict) or not updates:
             self._send_error_json("updates must be a non-empty dict", 400)
             return
-        env_path = Path.cwd() / ".env"
+        # P0-1: every key must be in the allowlist
+        for k in updates:
+            err = _validate_env_var(k)
+            if err:
+                self._send_error_json(err, 400)
+                return
+        # P0-3: every value must pass content-validation
+        for k, v in updates.items():
+            if not isinstance(v, str):
+                self._send_error_json(f"value for {k} must be a string", 400)
+                return
+            v_err = _validate_value(v)
+            if v_err:
+                self._send_error_json(f"{k}: {v_err}", 400)
+                return
+        env_path = _resolve_env_path()
         try:
             _write_env_file(env_path, updates)
         except Exception as exc:
@@ -640,6 +942,9 @@ def serve_key_ui(
         (does NOT auto-shut after Save — operator can edit multiple
         rows in succession)
     """
+    # P1-4: clean up any leftover .env.tmp from a prior crashed write
+    _cleanup_stale_tmp(_resolve_env_path())
+
     token = secrets.token_urlsafe(32)
     httpd = http.server.HTTPServer(("127.0.0.1", port), _KeyServerHandler)
     httpd._token = token  # type: ignore[attr-defined]
@@ -702,5 +1007,6 @@ def serve_key_ui(
 
 def list_key_status() -> list[dict]:
     """Return the current key-status list for ``harness keys list``.
-    Same shape as the UI's /api/status response."""
-    return _build_status()
+    Same shape as the old UI /api/status response (just the providers
+    list) — the keys-ui-list CLI doesn't need the env_path field."""
+    return _build_status()["providers"]
