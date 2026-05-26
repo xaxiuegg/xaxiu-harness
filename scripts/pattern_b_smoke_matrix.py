@@ -86,9 +86,13 @@ def _dispatch_one(engine_name: str, category: str, prompt: str) -> dict:
             "error": f"get_engine failed: {exc}",
         }
     try:
+        # W14-CROSS-ENGINE-AUDIT 2026-05-26: omit timeout_s so the
+        # engine's own _DEFAULT_TIMEOUT_S applies.  Previously this
+        # hardcoded 90s which defeated W14-DEEPSEEK-TIMEOUT-BUMP
+        # (which raised DeepSeek's default to 180s).
         resp = eng.dispatch(
             prompt, "",
-            {"max_budget_usd": 0.10, "timeout_s": 90},
+            {"max_budget_usd": 0.10},
         )
     except Exception as exc:
         return {

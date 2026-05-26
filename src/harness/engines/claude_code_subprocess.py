@@ -808,10 +808,15 @@ class DeepSeekViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
     _DEFAULT_TIMEOUT_S: int = 180
 
     def __init__(self, api_key: str, **kwargs) -> None:
+        # W14-CROSS-ENGINE-AUDIT 2026-05-26: default to deepseek-v4-flash
+        # per operator memory entry `feedback_default_deepseek_v4_flash`
+        # ("~5x cheaper than v4-pro at comparable quality; reserve v4-pro
+        # for ship-blocking audits").  Callers that need v4-pro pass
+        # `extra_args={"model": "deepseek-v4-pro"}` explicitly.
         super().__init__(
             api_key=api_key,
             base_url="https://api.deepseek.com/anthropic",
-            default_model="deepseek-v4-pro",
+            default_model="deepseek-v4-flash",
             **kwargs,
         )
 

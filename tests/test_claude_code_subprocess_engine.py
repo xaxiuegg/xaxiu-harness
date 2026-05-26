@@ -1054,7 +1054,11 @@ class TestDeepSeekViaClaudeCode:
         eng = DeepSeekViaClaudeCodeEngine(api_key="sk-x", verify_binary=False)
         assert eng.name == "deepseek-via-claude"
         assert eng._base_url == "https://api.deepseek.com/anthropic"
-        assert eng._default_model == "deepseek-v4-pro"
+        # W14-CROSS-ENGINE-AUDIT 2026-05-26: default flipped to
+        # v4-flash per operator memory feedback_default_deepseek_v4_flash
+        # (~5x cheaper than v4-pro at comparable quality; reserve
+        # v4-pro for ship-blocking audits via explicit override)
+        assert eng._default_model == "deepseek-v4-flash"
 
     def test_multimodal_logs_warning_but_proceeds(
         self, caplog: pytest.LogCaptureFixture,

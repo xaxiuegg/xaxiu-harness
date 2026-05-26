@@ -3656,8 +3656,9 @@ def loops(
     sys.exit(1)
 
 
-@cli.command()
+@cli.command(context_settings={"ignore_unknown_options": True})
 @click.argument("subcmd", required=False)
+@click.argument("subcmd_args", nargs=-1)
 @click.option("--list", "list_", is_flag=True, help="List engines.")
 @click.option("--health", is_flag=True, help="Check engine health (live "
               "dispatch probe by default; --shallow for network-only check).")
@@ -3668,18 +3669,27 @@ def loops(
               "(default 168 = 7 days).")
 @click.option("--engine", "engine_filter", default=None, help="With "
               "'engines failures' subcommand, restrict to one engine.")
-def engines(subcmd: str | None, list_: bool, health: bool, shallow: bool,
+def engines(subcmd: str | None, subcmd_args: tuple[str, ...],
+            list_: bool, health: bool, shallow: bool,
             since_hours: int, engine_filter: str | None) -> None:
     """Query or modify the engine pool.
 
     Subcommands:
-      list       — show priority/locked/status per engine (default)
-      health     — live-dispatch probe categorizing each engine's state
-                   (terminated/auth-failed/quota-exceeded/transient/...)
-      heal       — re-issue the in-memory engine health state from disk
-      failures   — read state/engine_performance_log.jsonl +
-                   state/engine_health_probes.jsonl, aggregate failure
-                   counts by category per engine, show recent samples
+      list             — show priority/locked/status per engine (default)
+      health           — live-dispatch probe categorizing each engine's
+                         state (terminated/auth-failed/quota-exceeded/...)
+      heal             — re-issue the in-memory engine health state
+      failures         — read state/engine_performance_log.jsonl +
+                         state/engine_health_probes.jsonl, aggregate
+                         failure counts by category per engine
+      install-wrappers — install per-provider claude-* wrapper scripts
+      list-wrappers    — show installed wrappers + their key status
+      fallback-policy  — show effective fallback chain + skip reasons
+      recommend <cls>  — W14-CROSS-ENGINE-AUDIT 2026-05-26 — print the
+                         recommended Pattern B engine for a task class.
+                         Valid classes: default/latency/verbose/cost/
+                         multimodal/audit.  Engine name on stdout
+                         (pipe-friendly); rationale on stderr.
 
     W13-ENGINE-FAILURE-VISIBILITY 2026-05-25: ``engines --health`` now
     defaults to a real dispatch probe (~5 tokens per engine).  The
@@ -3782,6 +3792,51 @@ def engines(subcmd: str | None, list_: bool, health: bool, shallow: bool,
             click.echo("Skipped engines:")
             for eng, reason in sorted(policy['skipped'].items()):
                 click.echo(f"  ✗ {eng}: {reason}")
+        sys.exit(0)
+    elif subcmd == "recommend":
+        # W14-CROSS-ENGINE-AUDIT 2026-05-26: programmatic routing
+        # recommendations from the empirical smoke matrix.  See
+        # spec/engine-routing-empirical.md for the data + rationale.
+        #
+        # Usage:  harness engines recommend <task-class>
+        # Valid:  default | latency | verbose | cost | multimodal | audit
+        from harness.engines.routing_recommend import (
+            VALID_TASK_CLASSES, recommend as _recommend,
+        )
+        task_class = subcmd_args[0] if subcmd_args else ""
+        if not task_class:
+            click.echo(
+                click.style(
+                    "ERROR: harness engines recommend requires a "
+                    "task-class argument.  Valid: "
+                    + ", ".join(sorted(VALID_TASK_CLASSES)),
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
+        rec = _recommend(task_class)
+        # Print engine on stdout (pipe-friendly).  Rationale + alternates
+        # on stderr so callers can `$(harness engines recommend default)`.
+        click.echo(rec.engine)
+        if rec.model_override:
+            click.echo(
+                click.style(
+                    f"  (model_override: {rec.model_override})",
+                    fg="cyan", dim=True,
+                ), err=True,
+            )
+        click.echo(
+            click.style(f"  rationale: {rec.rationale}",
+                        fg="white", dim=True),
+            err=True,
+        )
+        if rec.alternates:
+            click.echo(
+                click.style(
+                    f"  alternates: {', '.join(rec.alternates)}",
+                    fg="white", dim=True,
+                ), err=True,
+            )
         sys.exit(0)
     elif subcmd == "failures":
         from harness.cli_helpers import read_failure_summary

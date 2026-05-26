@@ -2,7 +2,27 @@
 
 These rules are extracted from the operator's warehouse project retrospective (2026-05-20). They are load-bearing for the `developing` and `integrating` supervisors. Treat as the authoritative source of truth when packet drafting and dispatch decisions are made; if a supervisor's behavior conflicts with these rules, fix the supervisor.
 
-## Engine selection
+## Two engine families
+
+There are now two dispatch families, each with its own routing rules:
+
+1. **Swarm-based** (`swarm/kimi`, `swarm/kimi-api`, `swarm/deepseek`) — the original xaxiu-swarm path documented in this file.
+2. **Pattern B subprocess** (`kimi-via-claude`, `mimo-via-claude`, `deepseek-via-claude`) — Claude Code CLI as subprocess to provider Anthropic-compat endpoints.  Empirically benchmarked 2026-05-26.  Routing rules + decision tree live in **[spec/engine-routing-empirical.md](../../spec/engine-routing-empirical.md)**.
+
+For Pattern B routing decisions in code, prefer the programmatic CLI:
+
+```bash
+harness engines recommend default     # → mimo-via-claude (most cases)
+harness engines recommend latency     # → mimo-via-claude (9.3s avg)
+harness engines recommend verbose     # → kimi-via-claude (elaboration)
+harness engines recommend cost        # → kimi-via-claude (cheapest matrix)
+harness engines recommend multimodal  # → mimo-via-claude (avoids WARN log)
+harness engines recommend audit       # → deepseek-via-claude w/ v4-pro
+```
+
+The rest of this file documents the swarm-based dispatch path.  Both paths are active; choose the one that matches your packet shape.
+
+## Engine selection (swarm path)
 
 | Task shape | Engine | Model | Notes |
 |---|---|---|---|
