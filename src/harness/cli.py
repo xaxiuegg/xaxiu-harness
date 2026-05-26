@@ -3423,6 +3423,61 @@ def engines(subcmd: str | None, list_: bool, health: bool, shallow: bool,
         list_ = True
     elif subcmd == "health":
         health = True
+    elif subcmd == "install-wrappers":
+        # W14-CLAUDE-CODE-WRAPPER-SCRIPTS: install per-provider wrappers
+        from harness.engines.wrapper_scripts import (
+            DEFAULT_WRAPPER_DIR, get_path_hint, install_wrappers,
+        )
+        click.echo(f"Installing claude-* wrapper scripts to "
+                   f"{DEFAULT_WRAPPER_DIR}...")
+        result = install_wrappers()
+        for name, info in result.items():
+            status = info.get("status", "?")
+            path = info.get("path", "-")
+            if status == "installed":
+                color = "green"
+                badge = "INSTALLED"
+            elif status == "skipped-exists":
+                color = "cyan"
+                badge = "EXISTS"
+            else:
+                color = "yellow"
+                badge = "SKIPPED"
+            badge_styled = click.style(badge, fg=color, bold=True)
+            click.echo(f"  {badge_styled:<18}  {name:<22}  {path}")
+        hint = get_path_hint()
+        if hint:
+            click.echo()
+            click.echo(click.style(
+                "NOTE: wrapper dir is not on your PATH.",
+                fg="yellow", bold=True,
+            ))
+            click.echo(hint)
+        else:
+            click.echo()
+            click.echo(click.style(
+                "Wrappers ready — use them like 'claude-mimo \"your prompt\"'",
+                fg="green",
+            ))
+        sys.exit(0)
+    elif subcmd == "list-wrappers":
+        from harness.engines.wrapper_scripts import list_wrappers
+        wrappers = list_wrappers()
+        click.echo(f"{'wrapper':<22} {'installed':<10} {'key set':<8}  "
+                   f"description")
+        click.echo("-" * 80)
+        for w in wrappers:
+            inst = click.style(
+                "yes" if w["installed"] else "no",
+                fg="green" if w["installed"] else "red",
+            )
+            key = click.style(
+                "yes" if w["key_present"] else "no",
+                fg="green" if w["key_present"] else "yellow",
+            )
+            click.echo(f"  {w['name']:<20} {inst:<19} {key:<17}  "
+                       f"{w['description']}")
+        sys.exit(0)
     elif subcmd == "fallback-policy":
         # W14-DISPATCH-HEALTH-AWARE-FALLBACK: show the effective fallback
         # order (priority-sorted, matches dispatcher runtime) with skip
