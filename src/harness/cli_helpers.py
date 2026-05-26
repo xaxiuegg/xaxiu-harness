@@ -233,7 +233,8 @@ def categorize_engine_failure(
             or "name or service not known" in text \
             or "dns" in text or "getaddrinfo" in text:
         return "endpoint-down"
-    if "remoteprotocolerror" in text or "server disconnected" in text \
+    if "remoteprotocolerror" in text or "remote_protocol_error" in text \
+            or "server disconnected" in text \
             or "timeout" in text or "timed out" in text \
             or "read timeout" in text:
         return "transient"
