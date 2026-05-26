@@ -751,6 +751,19 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
             )
         return MimoViaClaudeCodeEngine(api_key=api_key)
 
+    if name_lower == "deepseek-via-claude":
+        from harness.engines.claude_code_subprocess import (
+            DeepSeekViaClaudeCodeEngine,
+        )
+        from harness.secrets.resolve import resolve_key
+        api_key = resolve_key("DEEPSEEK_API_KEY", prefer_dpapi=prefer_dpapi)
+        if not api_key:
+            raise RuntimeError(
+                "No API key for deepseek-via-claude. Set DEEPSEEK_API_KEY "
+                "(same key the direct-httpx 'deepseek' engine uses)."
+            )
+        return DeepSeekViaClaudeCodeEngine(api_key=api_key)
+
     if name_lower not in _ENV_VAR_MAP:
         raise RuntimeError(
             f"Unknown engine '{name}'. Supported: {list(_ENV_VAR_MAP.keys())}"

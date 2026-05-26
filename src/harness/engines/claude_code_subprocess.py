@@ -42,8 +42,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -51,6 +53,126 @@ from typing import Optional
 from harness.engines.base import Engine, EngineResponse
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY 2026-05-26: shared resource ceiling.
+#
+# Each ``claude`` subprocess spawns a Node.js runtime loading the full CLI
+# binary (~100-200 MB RSS, ~1-2s init).  10 parallel = 1-2 GB + significant
+# context-switch overhead.  DeepSeek-risk panelist flagged this as
+# "common probability, high severity" because the harness already runs
+# 10-voice panels via ThreadPoolExecutor.
+#
+# Default ceiling is 4 (configurable via HARNESS_CLAUDE_SUBPROCESS_MAX_CONCURRENT)
+# — enough for typical 3-4 voice panels, low enough to not thrash a
+# typical dev laptop.  The semaphore is module-scoped so it caps across
+# ALL engine instances (one operator, one machine, one Claude Code
+# binary), not per-engine.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_max_concurrent() -> int:
+    """Return the configured concurrency ceiling.  Falls back to 4 when
+    the env var is unset or malformed."""
+    raw = os.environ.get("HARNESS_CLAUDE_SUBPROCESS_MAX_CONCURRENT", "4")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return 4
+    return max(1, n)
+
+
+_GLOBAL_SUBPROCESS_SEMAPHORE = threading.Semaphore(_resolve_max_concurrent())
+
+
+def reset_subprocess_semaphore(max_concurrent: int) -> None:
+    """Re-initialize the global semaphore.  Used by tests + by
+    ``harness engines subprocess-concurrency <N>`` operator override."""
+    global _GLOBAL_SUBPROCESS_SEMAPHORE
+    _GLOBAL_SUBPROCESS_SEMAPHORE = threading.Semaphore(max(1, max_concurrent))
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY 2026-05-26: first-launch onboarding bypass.
+#
+# Claude Code prompts for Anthropic login on first launch.  In a
+# subprocess context (--print --bare), the prompt becomes an indefinite
+# block.  Setting hasCompletedOnboarding: true in ~/.claude.json
+# pre-emptively bypasses this.  DeepSeek-A flagged as "occasional rate,
+# high severity" because fresh installs / CI environments hit it.
+#
+# We write the flag atomically (tmp + replace) to avoid concurrent-
+# subprocess race when two engines run dispatch simultaneously on a
+# fresh machine.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_onboarding_bypass(
+    cfg_path: Optional[Path] = None,
+) -> bool:
+    """Write ``hasCompletedOnboarding: true`` to ``~/.claude.json`` if
+    absent.  Returns True iff the file was modified.  Best-effort:
+    never raises, returns False on any failure (subprocess can still
+    succeed if the flag was already set by the operator).
+    """
+    try:
+        path = cfg_path or (Path.home() / ".claude.json")
+        cfg: dict = {}
+        if path.exists():
+            try:
+                cfg = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                cfg = {}
+        if cfg.get("hasCompletedOnboarding") is True:
+            return False
+        cfg["hasCompletedOnboarding"] = True
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        tmp.replace(path)
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY 2026-05-26: DeepSeek multimodal pre-flight.
+#
+# DeepSeek's Anthropic-compat layer silently drops image / document /
+# search_result / server_tool / web_search_tool / mcp_tool / container
+# upload content blocks (per their official docs).  Text + tool use
+# survive.  Without a pre-flight, callers that pass multimodal content
+# get silent truncation — the dispatch returns success with degraded
+# text-only output and no warning.
+#
+# DETECTION is heuristic: scan packet text for markdown image syntax,
+# HTML media tags, data URLs, and known image file extensions in the
+# prompt.  False-positives are acceptable (a single warning logged);
+# silent drops are not.
+# ---------------------------------------------------------------------------
+
+
+_MULTIMODAL_MARKERS_RE = re.compile(
+    r"!\[[^\]]*\]\("                       # markdown image
+    r"|<(?:img|video|audio|source)\b"      # HTML media tags
+    r"|data:(?:image|video|audio)/"        # inline data URLs
+    r"|\.(?:png|jpe?g|gif|webp|mp4|mov|webm|mp3|wav|pdf)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_multimodal(text: str) -> bool:
+    """Heuristic check for multimodal markers in a prompt.
+
+    Returns True when the packet appears to reference images, video,
+    audio, or document content that a DeepSeek Anthropic-compat
+    dispatch would silently drop.  False positives are intentional —
+    a logged warning is preferable to a silent truncation.
+    """
+    if not text:
+        return False
+    return bool(_MULTIMODAL_MARKERS_RE.search(text))
 
 
 # Default binary name + lookup paths.  The CLI is typically installed at
@@ -345,17 +467,32 @@ class ClaudeCodeSubprocessEngine(Engine):
         env = self._build_env()
         timeout = float(extra.get("timeout_s", self._timeout_s))
 
+        # W14-PATTERN-B-SECONDARY: ensure ~/.claude.json onboarding flag
+        # is set BEFORE first dispatch.  Best-effort; never raises.
+        # Runs at most once per subprocess from each engine instance —
+        # actual atomic-write logic in _ensure_onboarding_bypass
+        # itself short-circuits when the flag is already true.
+        _ensure_onboarding_bypass()
+
+        # W14-PATTERN-B-SECONDARY: cap parallel subprocess spawning.
+        # The semaphore acquire blocks when we're at the global ceiling
+        # (default 4, env-overridable via HARNESS_CLAUDE_SUBPROCESS_MAX_
+        # CONCURRENT).  Without this, a 10-voice panel could spawn 10
+        # simultaneous claude processes — each ~150-200 MB RSS — and
+        # thrash the host.  The with-block context manager guarantees
+        # release on exception.
         start = time.monotonic()
         try:
-            proc = subprocess.run(
-                cmd,
-                input=packet_content,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=env,
-                # check=False so we can extract the error from stderr/stdout
-            )
+            with _GLOBAL_SUBPROCESS_SEMAPHORE:
+                proc = subprocess.run(
+                    cmd,
+                    input=packet_content,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=env,
+                    # check=False so we can extract the error from stderr/stdout
+                )
         except subprocess.TimeoutExpired:
             latency_ms = int((time.monotonic() - start) * 1000)
             return EngineResponse(
@@ -477,3 +614,63 @@ class MimoViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
     @property
     def name(self) -> str:
         return "mimo-via-claude"
+
+
+class DeepSeekViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
+    """DeepSeek via subprocess Claude Code.
+
+    W14-PATTERN-B-SECONDARY 2026-05-26: DeepSeek's Anthropic-compat
+    layer silently drops image / document / search_result /
+    server_tool / web_search_tool / mcp_tool / container upload
+    content blocks (per DeepSeek's official Anthropic API docs).
+    Text content + tool use survive.
+
+    This subclass pre-flights the packet for multimodal markers and
+    emits a WARNING log when detected; the dispatch still proceeds
+    (with silent truncation by DeepSeek) so the caller can decide
+    whether the warning is actionable.  The log message names the
+    detected marker class so the operator can audit what got dropped.
+    """
+
+    def __init__(self, api_key: str, **kwargs) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url="https://api.deepseek.com/anthropic",
+            default_model="deepseek-v4-pro",
+            **kwargs,
+        )
+
+    @property
+    def name(self) -> str:
+        return "deepseek-via-claude"
+
+    def dispatch(
+        self,
+        packet_content: str,
+        model: str,
+        extra_args: Optional[dict] = None,
+    ) -> EngineResponse:
+        if _looks_multimodal(packet_content):
+            logger.warning(
+                "deepseek-via-claude: packet appears to contain "
+                "multimodal content (image/video/audio/document/pdf). "
+                "DeepSeek's Anthropic-compat layer SILENTLY DROPS these "
+                "blocks. Text + tool use will still dispatch. Consider "
+                "routing multimodal packets to mimo-via-claude or qwen "
+                "instead. Set HARNESS_DEEPSEEK_MULTIMODAL_REFUSE=1 to "
+                "refuse instead of warn."
+            )
+            refuse = os.environ.get(
+                "HARNESS_DEEPSEEK_MULTIMODAL_REFUSE", "",
+            ).strip().lower() in {"1", "true", "yes"}
+            if refuse:
+                return EngineResponse(
+                    success=False, text="", latency_ms=0,
+                    error=(
+                        "deepseek-via-claude refused: packet contains "
+                        "multimodal content that DeepSeek would silently "
+                        "drop. Unset HARNESS_DEEPSEEK_MULTIMODAL_REFUSE "
+                        "or route to a multimodal-capable engine."
+                    ),
+                )
+        return super().dispatch(packet_content, model, extra_args)

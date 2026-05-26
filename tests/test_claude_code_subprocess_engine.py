@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,12 +32,17 @@ from harness.engines.base import EngineResponse
 from harness.engines.claude_code_subprocess import (
     ClaudeCodeSubprocessEngine,
     DEFAULT_MODEL_PER_ENGINE,
+    DeepSeekViaClaudeCodeEngine,
     MimoViaClaudeCodeEngine,
     PROVIDER_ANTHROPIC_ENDPOINTS,
     _engine_name_for_mimo_key,
+    _ensure_onboarding_bypass,
+    _looks_multimodal,
     _resolve_binary,
+    _resolve_max_concurrent,
     _resolve_mimo_tp_region,
     _verify_binary_available,
+    reset_subprocess_semaphore,
 )
 
 
@@ -686,6 +692,216 @@ class TestModelAliases:
         assert "ANTHROPIC_DEFAULT_SONNET_MODEL" not in env
         assert "ANTHROPIC_DEFAULT_OPUS_MODEL" not in env
         assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" not in env
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY: onboarding-flag bypass
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureOnboardingBypass:
+    def test_creates_file_when_missing(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "subdir" / ".claude.json"
+        # Parent doesn't exist → function creates it
+        modified = _ensure_onboarding_bypass(cfg)
+        assert modified is True
+        assert cfg.exists()
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        assert data["hasCompletedOnboarding"] is True
+
+    def test_idempotent_when_already_true(self, tmp_path: Path) -> None:
+        cfg = tmp_path / ".claude.json"
+        cfg.write_text(
+            json.dumps({"hasCompletedOnboarding": True}),
+            encoding="utf-8",
+        )
+        modified = _ensure_onboarding_bypass(cfg)
+        # No change needed
+        assert modified is False
+
+    def test_preserves_other_config_keys(self, tmp_path: Path) -> None:
+        cfg = tmp_path / ".claude.json"
+        cfg.write_text(
+            json.dumps({"theme": "dark", "model": "sonnet"}),
+            encoding="utf-8",
+        )
+        _ensure_onboarding_bypass(cfg)
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        assert data["hasCompletedOnboarding"] is True
+        assert data["theme"] == "dark"
+        assert data["model"] == "sonnet"
+
+    def test_handles_malformed_json(self, tmp_path: Path) -> None:
+        cfg = tmp_path / ".claude.json"
+        cfg.write_text("not valid json{", encoding="utf-8")
+        # Should not raise; should reset to a valid config with the flag
+        modified = _ensure_onboarding_bypass(cfg)
+        assert modified is True
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        assert data["hasCompletedOnboarding"] is True
+
+    def test_never_raises_on_filesystem_error(self) -> None:
+        # Use a path that can't be created (a file masquerading as a dir)
+        # The function should swallow the error and return False
+        modified = _ensure_onboarding_bypass(Path("/dev/null/.claude.json"))
+        # Either succeeds (some envs) or returns False — never raises
+        assert modified in (True, False)
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY: multimodal detection
+# ---------------------------------------------------------------------------
+
+
+class TestLooksMultimodal:
+    def test_markdown_image(self) -> None:
+        assert _looks_multimodal("see ![alt text](photo.png) below") is True
+
+    def test_html_video_tag(self) -> None:
+        assert _looks_multimodal("<video src='clip.mp4'></video>") is True
+
+    def test_html_img_tag(self) -> None:
+        assert _looks_multimodal("<img src='/path/x.png'>") is True
+
+    def test_data_url(self) -> None:
+        assert _looks_multimodal("data:image/png;base64,abc123") is True
+
+    def test_pdf_extension_in_text(self) -> None:
+        assert _looks_multimodal("review report.pdf for details") is True
+
+    def test_image_extension_in_text(self) -> None:
+        assert _looks_multimodal("the screenshot.jpg shows") is True
+
+    def test_plain_text(self) -> None:
+        assert _looks_multimodal("just regular text content") is False
+
+    def test_empty_string(self) -> None:
+        assert _looks_multimodal("") is False
+
+    def test_code_with_no_media(self) -> None:
+        assert _looks_multimodal("def foo(x): return x + 1") is False
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY: concurrency semaphore
+# ---------------------------------------------------------------------------
+
+
+class TestSubprocessSemaphore:
+    def test_default_concurrency_4(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("HARNESS_CLAUDE_SUBPROCESS_MAX_CONCURRENT",
+                            raising=False)
+        assert _resolve_max_concurrent() == 4
+
+    def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HARNESS_CLAUDE_SUBPROCESS_MAX_CONCURRENT", "10")
+        assert _resolve_max_concurrent() == 10
+
+    def test_env_zero_clamps_to_one(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HARNESS_CLAUDE_SUBPROCESS_MAX_CONCURRENT", "0")
+        assert _resolve_max_concurrent() == 1
+
+    def test_env_garbage_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HARNESS_CLAUDE_SUBPROCESS_MAX_CONCURRENT", "abc")
+        assert _resolve_max_concurrent() == 4
+
+    def test_reset_subprocess_semaphore_callable(self) -> None:
+        # Just make sure the API works; the global state is process-wide
+        # so we don't assert on the actual value.
+        reset_subprocess_semaphore(2)
+        reset_subprocess_semaphore(4)  # restore
+
+
+# ---------------------------------------------------------------------------
+# W14-PATTERN-B-SECONDARY: DeepSeek multimodal warning + refuse mode
+# ---------------------------------------------------------------------------
+
+
+class TestDeepSeekViaClaudeCode:
+    def test_engine_name_and_endpoint(self) -> None:
+        eng = DeepSeekViaClaudeCodeEngine(api_key="sk-x", verify_binary=False)
+        assert eng.name == "deepseek-via-claude"
+        assert eng._base_url == "https://api.deepseek.com/anthropic"
+        assert eng._default_model == "deepseek-v4-pro"
+
+    def test_multimodal_logs_warning_but_proceeds(
+        self, caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("HARNESS_DEEPSEEK_MULTIMODAL_REFUSE",
+                            raising=False)
+        eng = DeepSeekViaClaudeCodeEngine(api_key="sk-x", verify_binary=False)
+        # Stub subprocess.run so dispatch completes "successfully" past
+        # the warning gate
+        with patch(
+            "harness.engines.claude_code_subprocess.subprocess.run",
+            return_value=_make_subprocess_result(
+                stdout=_make_success_json(text="parsed text"),
+            ),
+        ):
+            with caplog.at_level("WARNING",
+                                  logger="harness.engines.claude_code_subprocess"):
+                resp = eng.dispatch(
+                    "look at ![diagram](img.png)",
+                    "deepseek-v4-pro", {},
+                )
+        # Warning was logged
+        assert any("multimodal" in r.message.lower()
+                   for r in caplog.records)
+        # Dispatch still proceeded (success based on stubbed JSON)
+        assert resp.success is True
+
+    def test_multimodal_refuse_mode_blocks_dispatch(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HARNESS_DEEPSEEK_MULTIMODAL_REFUSE", "1")
+        eng = DeepSeekViaClaudeCodeEngine(api_key="sk-x", verify_binary=False)
+        # Stub subprocess.run — should NOT be called when we refuse
+        with patch(
+            "harness.engines.claude_code_subprocess.subprocess.run",
+            return_value=_make_subprocess_result(),
+        ) as mock_run:
+            resp = eng.dispatch(
+                "see report.pdf for details",
+                "deepseek-v4-pro", {},
+            )
+        assert resp.success is False
+        assert "refused" in (resp.error or "").lower()
+        assert "multimodal" in (resp.error or "").lower()
+        # Subprocess never invoked
+        mock_run.assert_not_called()
+
+    def test_text_only_packet_passes_through(self) -> None:
+        eng = DeepSeekViaClaudeCodeEngine(api_key="sk-x", verify_binary=False)
+        with patch(
+            "harness.engines.claude_code_subprocess.subprocess.run",
+            return_value=_make_subprocess_result(
+                stdout=_make_success_json(text="OK"),
+            ),
+        ):
+            resp = eng.dispatch("plain text prompt", "deepseek-v4-pro", {})
+        assert resp.success is True
+        assert resp.text == "OK"
+
+    def test_factory_returns_deepseek_via_claude(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
+        from harness.secrets import resolve as resolve_module
+        monkeypatch.setattr(
+            resolve_module, "resolve_key",
+            lambda env_var, prefer_dpapi=True: "sk-test-deepseek",
+        )
+        from harness.engines.concrete import get_engine
+        eng = get_engine("deepseek-via-claude")
+        assert eng.name == "deepseek-via-claude"
+        assert "api.deepseek.com" in eng._base_url
 
 
 class TestModuleConstants:
