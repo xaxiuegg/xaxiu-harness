@@ -36,7 +36,11 @@ See [`memory/engine-reliability.md`](memory/engine-reliability.md) for engine re
 
 ---
 
-## Quick start
+## Quick start (fresh machine)
+
+**Non-technical operator?** Start with [`docs/OPERATOR_QUICKSTART.md`](docs/OPERATOR_QUICKSTART.md) instead — guided 30-minute walkthrough from blank machine to first dispatch.
+
+For everyone else:
 
 1. Clone the repo
    ```powershell
@@ -46,29 +50,42 @@ See [`memory/engine-reliability.md`](memory/engine-reliability.md) for engine re
    ```powershell
    cd xaxiu-harness && python -m venv .venv && .venv\Scripts\activate && pip install -e .
    ```
-3. Start the harness — pick your orchestrator + mode
+3. Set provider API keys (easiest path: the keys UI)
    ```powershell
-   harness start
+   python -m harness keys serve
    ```
-   This walks you through picking one of four orchestrators (Claude / MiMo / DeepSeek / Kimi) with connection status, then asks for interactive vs autonomous mode. Skip the prompts for scripted invocation:
+   Opens a browser form at `127.0.0.1:<port>` for pasting + testing keys.  Or copy `.env.example` to `.env` and edit by hand.  See [`.env.example`](.env.example) for the full env-var list.
+4. Verify your install + key wiring
    ```powershell
-   harness start --orchestrator mimo --mode interactive
-   harness start --orchestrator claude --mode autonomous --interval-minutes 60
+   harness doctor
    ```
-4. Create your first project adapter
-   ```powershell
-   harness init -p my-first-project -t solo-dev
-   ```
+   Six-check traffic-light report; tells you exactly what to fix if anything's red.
 
-After step 4 you can dispatch your first packet:
+After step 4 you can:
+
+- **Ask a cross-engine panel** — single command, 3 engines in parallel:
+  ```powershell
+  harness ask "should we deprecate the legacy swarm/kimi-api?"
+  ```
+- **Dispatch a single packet** — for older multi-project workflows:
+  ```powershell
+  harness init -p my-first-project -t solo-dev
+  harness dispatch -p my-first-project --packet packet.md
+  ```
+- **See all 50+ verbs** — `harness --help` (live) or `harness capabilities` (introspected snapshot).
+
+## Optional second repo: `xaxiu-swarm`
+
+xaxiu-harness's Pattern B engines (`*-via-claude`) work entirely from this repo + the `claude` CLI binary.  If you want the **agentic swarm path** (`swarm/kimi`, `swarm/claude-mimo`, `swarm/deepseek` etc. — multi-file edits, multi-turn tool use), clone the sibling repo:
+
 ```powershell
-harness dispatch -p my-first-project --packet packet.md
+git clone https://github.com/xaxiuegg/xaxiu-swarm.git
+cd xaxiu-swarm && pip install -e .
+# Or via uv tool:
+uv tool install --from . xaxiu-swarm
 ```
 
-For help on any command:
-```powershell
-harness <verb> --help
-```
+Verify with `xaxiu-swarm backends`.  Without this second clone, you can still use everything in this repo's CLI; the `swarm/*` backends just won't be available.
 
 ---
 
