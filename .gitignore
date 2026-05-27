@@ -21,6 +21,9 @@ runs/
 .env.local
 .venv/
 venv/
+# Lockfile-regen / audit-fix scratch venvs (never committed)
+.tmp-lock/
+.audit-tmp-venv/
 
 # Engine outputs / audit logs (per-project, never committed)
 audit/

@@ -8,29 +8,35 @@ version = "0.1.0"
 description = "Cross-project multi-engine LLM dispatch + monitoring tool"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+# P5 audit fix (2026-05-27): every direct dep carries a major-version
+# upper bound so a breaking-or-malicious transitive release doesn't get
+# pulled automatically onto a machine holding paid-API keys (the
+# documented first action in every session is `pip install -e .`).  The
+# bounds are deliberately generous — they refuse a known-incompatible
+# MAJOR bump, not minor.  Exact reproducibility lives in requirements.lock.
 dependencies = [
-    "click>=8.1",
-    "pydantic>=2.5",
-    "pyyaml>=6.0",
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
-    "httpx>=0.27",
-    "websockets>=12.0",
-    "rich>=13.7",
-    "psutil>=5.9",
+    "click>=8.1,<10",
+    "pydantic>=2.5,<3",
+    "pyyaml>=6.0,<7",
+    "fastapi>=0.110,<1",
+    "uvicorn[standard]>=0.27,<1",
+    "httpx>=0.27,<1",
+    "websockets>=12.0,<20",
+    "rich>=13.7,<20",
+    "psutil>=5.9,<10",
     # W12-B-INSTANT-REVIEW 2026-05-24: pypdf powers `harness review`
     # PDF extraction.  Pure-Python, no native deps.  Was installed
     # manually + missing from this list until W13-INSTALL-VERIFY
     # 2026-05-25 caught it.
-    "pypdf>=4.0",
+    "pypdf>=4.0,<10",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.4",
-    "mypy>=1.10",
+    "pytest>=8.0,<10",
+    "pytest-asyncio>=0.23,<2",
+    "ruff>=0.4,<1",
+    "mypy>=1.10,<2",
 ]
 
 [project.scripts]
