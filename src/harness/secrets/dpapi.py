@@ -45,46 +45,55 @@ def _require_windows() -> None:
         )
 
 
-_require_windows()  # module import time guard
+# P1 audit fix (2026-05-27): the previous module-import-time `_require_windows()`
+# call was removed.  It crashed `python -m harness <anything>` and ~76 test
+# files at COLLECTION time on Linux/macOS — including the ubuntu-latest CI
+# leg and every Linux-based Claude Code agent session.  Every public function
+# below still calls `_require_windows()` before touching DPAPI, so real DPAPI
+# usage on a non-Windows host still raises cleanly; the module just imports.
+#
+# The Windows-only ctypes bindings below are now conditionally defined so the
+# bare `import` does not crash on POSIX (`from ctypes import wintypes` and
+# `ctypes.windll.crypt32...` are both Windows-only).
 
 # ---------------------------------------------------------------------------
-# ctypes DPAPI bindings
+# ctypes DPAPI bindings (Windows only)
 # ---------------------------------------------------------------------------
 
-import ctypes
-from ctypes import wintypes
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    class _DATA_BLOB(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", wintypes.LPBYTE),
+        ]
 
 
-class _DATA_BLOB(ctypes.Structure):
-    _fields_ = [
-        ("cbData", wintypes.DWORD),
-        ("pbData", wintypes.LPBYTE),
+    _CryptProtectData = ctypes.windll.crypt32.CryptProtectData
+    _CryptProtectData.argtypes = [
+        ctypes.POINTER(_DATA_BLOB),  # pDataIn
+        wintypes.LPCWSTR,            # szDataDescr
+        ctypes.POINTER(_DATA_BLOB),  # pOptionalEntropy
+        ctypes.c_void_p,             # pvReserved
+        ctypes.c_void_p,             # pPromptStruct
+        wintypes.DWORD,              # dwFlags
+        ctypes.POINTER(_DATA_BLOB),  # pDataOut
     ]
+    _CryptProtectData.restype = wintypes.BOOL
 
-
-_CryptProtectData = ctypes.windll.crypt32.CryptProtectData
-_CryptProtectData.argtypes = [
-    ctypes.POINTER(_DATA_BLOB),  # pDataIn
-    wintypes.LPCWSTR,            # szDataDescr
-    ctypes.POINTER(_DATA_BLOB),  # pOptionalEntropy
-    ctypes.c_void_p,             # pvReserved
-    ctypes.c_void_p,             # pPromptStruct
-    wintypes.DWORD,              # dwFlags
-    ctypes.POINTER(_DATA_BLOB),  # pDataOut
-]
-_CryptProtectData.restype = wintypes.BOOL
-
-_CryptUnprotectData = ctypes.windll.crypt32.CryptUnprotectData
-_CryptUnprotectData.argtypes = [
-    ctypes.POINTER(_DATA_BLOB),  # pDataIn
-    wintypes.LPWSTR,             # ppszDataDescr (NULL allowed)
-    ctypes.POINTER(_DATA_BLOB),  # pOptionalEntropy
-    ctypes.c_void_p,             # pvReserved
-    ctypes.c_void_p,             # pPromptStruct
-    wintypes.DWORD,              # dwFlags
-    ctypes.POINTER(_DATA_BLOB),  # pDataOut
-]
-_CryptUnprotectData.restype = wintypes.BOOL
+    _CryptUnprotectData = ctypes.windll.crypt32.CryptUnprotectData
+    _CryptUnprotectData.argtypes = [
+        ctypes.POINTER(_DATA_BLOB),  # pDataIn
+        wintypes.LPWSTR,             # ppszDataDescr (NULL allowed)
+        ctypes.POINTER(_DATA_BLOB),  # pOptionalEntropy
+        ctypes.c_void_p,             # pvReserved
+        ctypes.c_void_p,             # pPromptStruct
+        wintypes.DWORD,              # dwFlags
+        ctypes.POINTER(_DATA_BLOB),  # pDataOut
+    ]
+    _CryptUnprotectData.restype = wintypes.BOOL
 
 
 # ---------------------------------------------------------------------------

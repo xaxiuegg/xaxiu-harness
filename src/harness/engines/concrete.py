@@ -29,7 +29,13 @@ from harness.engines.base import Engine, EngineResponse
 from harness.engines.gemini import GeminiConcrete
 from harness.engines.mock import MockEngine
 from harness.engines.transport import StreamingTransport
-from harness.secrets import dpapi
+
+# P1 audit fix (2026-05-27): removed unused `from harness.secrets import dpapi`.
+# It became dead since W11-DPAPI-CROSS-PLATFORM routed all key reads through
+# `harness.secrets.resolve.resolve_key()` (which lazy-imports dpapi only on
+# Windows).  The dead import was the sole module-level pull of dpapi outside
+# the package, and it propagated DPAPI's Windows-only crash to every concrete
+# engine import → cli.py import → `python -m harness <anything>` on Linux.
 
 
 # Sourced from harness._constants — single source of truth, avoids the
