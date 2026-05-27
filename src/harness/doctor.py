@@ -152,6 +152,51 @@ def _check_coord_writable() -> Diagnosis:
                          "Check filesystem permissions on the project dir")
 
 
+def _check_claude_binary() -> Diagnosis:
+    """W14-DEPLOY-FRICTION 2026-05-26: surface whether the ``claude``
+    CLI is installed.  Required by all Pattern B engines
+    (kimi-via-claude / mimo-via-claude / deepseek-via-claude) AND
+    by the wrapper scripts (claude-mimo / claude-kimi / etc.).
+
+    Without this check, operators who skipped the Claude Code install
+    step in OPERATOR_QUICKSTART.md hit silent subprocess failures on
+    their first dispatch and have to debug from the error message
+    instead of from doctor's actionable hint.
+
+    Severity: WARN, not FAIL — the operator may legitimately be
+    running harness in a context where Pattern B isn't needed (CI
+    smoke, swarm-only workflow, etc.).
+    """
+    binary = shutil.which("claude")
+    if binary is None:
+        return Diagnosis(
+            "claude_binary", "warn",
+            "claude CLI not found on PATH — Pattern B engines + "
+            "wrapper scripts will not work",
+            "Install Claude Code from "
+            "https://docs.claude.com/en/docs/claude-code/setup, "
+            "then verify with `claude --version`.",
+        )
+    # Optionally probe version + auth state without blocking
+    try:
+        out = subprocess.run(
+            [binary, "--version"],
+            capture_output=True, text=True, timeout=5,
+            encoding="utf-8", errors="replace",
+        )
+        version_info = (out.stdout or "").strip().split("\n")[0]
+    except Exception as exc:
+        return Diagnosis(
+            "claude_binary", "warn",
+            f"claude found at {binary} but --version failed: {exc}",
+            "Try `claude doctor` to diagnose the install.",
+        )
+    return Diagnosis(
+        "claude_binary", "ok",
+        f"claude installed: {version_info or binary}",
+    )
+
+
 def _check_task_scheduler() -> Diagnosis:
     if sys.platform != "win32":
         return Diagnosis("task_scheduler", "warn", "Windows-only — skipped")
@@ -175,6 +220,7 @@ def run_all() -> list[Diagnosis]:
     return [
         _check_python_version(),
         _check_git(),
+        _check_claude_binary(),  # W14-DEPLOY-FRICTION: required by Pattern B
         _check_dpapi(),
         _check_secrets(),
         _check_engine_reachability(),

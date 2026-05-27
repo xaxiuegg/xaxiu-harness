@@ -13,6 +13,7 @@ from harness.doctor import (
     Diagnosis, overall_severity, run_all,
     _check_python_version, _check_coord_writable, _check_secrets,
     _check_env_var_inventory, _check_engine_reachability,
+    _check_claude_binary,
 )
 
 
@@ -204,3 +205,55 @@ def test_engine_reachability_surfaces_mimo_payg(monkeypatch) -> None:
     assert d.severity == "ok"
     assert "mimo=payg" in d.message
     assert "sk-paykey" not in d.message
+
+
+# ---------------------------------------------------------------------------
+# W14-DEPLOY-FRICTION 2026-05-26: claude binary check
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeBinaryCheck:
+    def test_warn_when_claude_not_on_path(self) -> None:
+        # Mock shutil.which to return None
+        with patch("harness.doctor.shutil.which", return_value=None):
+            d = _check_claude_binary()
+        assert d.severity == "warn"
+        assert "claude CLI not found" in d.message
+        assert "claude.com" in d.fix or "docs.claude" in d.fix
+
+    def test_ok_when_claude_version_succeeds(self) -> None:
+        # Mock shutil.which to return a path + subprocess.run to succeed
+        fake_result = MagicMock()
+        fake_result.stdout = "1.2.3 (Claude Code)\n"
+        with patch(
+            "harness.doctor.shutil.which", return_value="/usr/bin/claude",
+        ), patch(
+            "harness.doctor.subprocess.run", return_value=fake_result,
+        ):
+            d = _check_claude_binary()
+        assert d.severity == "ok"
+        assert "1.2.3" in d.message
+
+    def test_warn_when_version_probe_fails(self) -> None:
+        with patch(
+            "harness.doctor.shutil.which", return_value="/usr/bin/claude",
+        ), patch(
+            "harness.doctor.subprocess.run",
+            side_effect=RuntimeError("crashed"),
+        ):
+            d = _check_claude_binary()
+        assert d.severity == "warn"
+        assert "--version failed" in d.message
+
+    def test_doctor_run_all_includes_claude_check(self) -> None:
+        diags = run_all()
+        names = {d.name for d in diags}
+        assert "claude_binary" in names
+
+    def test_doctor_cli_surfaces_claude_check(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["doctor"])
+        # Don't assert on exit code (depends on whether claude is
+        # actually installed on the test machine) — just that the
+        # check ran + appears in output
+        assert "claude_binary" in result.output

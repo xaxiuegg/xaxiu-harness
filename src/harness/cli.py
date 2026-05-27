@@ -401,6 +401,36 @@ def start_cmd(orchestrator: str | None, mode: str | None,
     sys.exit(0)
 
 
+@cli.command(name="setup")
+@click.option("--non-interactive", is_flag=True, default=False,
+              help="Accept safe defaults at every prompt + skip "
+                   "actions that would open a browser or run an "
+                   "interactive shell.  Suitable for CI / scripted "
+                   "bootstrap.")
+def setup_cmd(non_interactive: bool) -> None:
+    """W14-HARNESS-SETUP 2026-05-26: guided fresh-machine onboarding.
+
+    Walks a non-technical operator from blank machine to first
+    successful dispatch.  Each step is consent-gated; the wizard never
+    modifies PATH, runs sudo, or touches files outside the repo +
+    ~/.harness/.
+
+    Steps:
+
+      \b
+      1. harness doctor — preflight diagnostics
+      2. Claude Code CLI availability check (with install hint)
+      3. API key configuration (offers to launch keys UI)
+      4. Wrapper script installation (claude-mimo / claude-kimi / etc.)
+      5. Smoke dispatch (verifies end-to-end wiring)
+
+    Safe to re-run.  Each step detects existing state + skips when
+    already done.
+    """
+    from harness.setup_wizard import run_wizard
+    sys.exit(run_wizard(non_interactive=non_interactive))
+
+
 @cli.command(name="ask")
 @click.argument("question", required=False)
 @click.option("--file", "question_file", type=click.Path(
