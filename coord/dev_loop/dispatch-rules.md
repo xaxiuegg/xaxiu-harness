@@ -2,12 +2,23 @@
 
 These rules are extracted from the operator's warehouse project retrospective (2026-05-20). They are load-bearing for the `developing` and `integrating` supervisors. Treat as the authoritative source of truth when packet drafting and dispatch decisions are made; if a supervisor's behavior conflicts with these rules, fix the supervisor.
 
-## Two engine families
+## Three engine families
 
-There are now two dispatch families, each with its own routing rules:
+There are now THREE dispatch families:
 
-1. **Swarm-based** (`swarm/kimi`, `swarm/kimi-api`, `swarm/deepseek`) — the original xaxiu-swarm path documented in this file.
-2. **Pattern B subprocess** (`kimi-via-claude`, `mimo-via-claude`, `deepseek-via-claude`) — Claude Code CLI as subprocess to provider Anthropic-compat endpoints.  Empirically benchmarked 2026-05-26.  Routing rules + decision tree live in **[spec/engine-routing-empirical.md](../../spec/engine-routing-empirical.md)**.
+1. **Swarm-based legacy** (`swarm/kimi`, `swarm/kimi-api`, `swarm/deepseek`) — the original xaxiu-swarm path documented in this file.  Active but allowlist-fragile for `kimi-api`.
+2. **Swarm-based TOS-safe agentic** (`swarm/claude-mimo`, `swarm/claude-kimi`, `swarm/claude-deepseek` — W14-SWARM-CLAUDE-BACKENDS-VERIFIED 2026-05-26) — xaxiu-swarm dispatches through the local `claude-*` wrapper scripts.  Provides FULL agentic dispatch (tools enabled, multi-turn, in-place edits) via Claude Code's allowlisted UA.  Use this for agentic workloads on Kimi/MiMo/DeepSeek.
+3. **Pattern B subprocess** (`kimi-via-claude`, `mimo-via-claude`, `deepseek-via-claude`) — single-inference programmatic dispatch via subprocess to local `claude` binary with `--tools ""`.  Use for panels, audits, FIND/REPLACE drafts, single-shot text generation.  Empirically benchmarked.  Routing rules + decision tree in **[spec/engine-routing-empirical.md](../../spec/engine-routing-empirical.md)**.
+
+### Quick chooser
+
+| Use case | Family | Example |
+|---|---|---|
+| Multi-file refactor / in-place edits | Swarm TOS-safe agentic | `xaxiu-swarm dispatch --backend claude-mimo ...` |
+| Cross-engine ship audit (single text response) | Pattern B | `harness engines recommend audit` → use the recommended engine in code |
+| Panel work / structured drafts | Pattern B | `kimi-via-claude` / `mimo-via-claude` / `deepseek-via-claude` |
+| Interactive operator session | Wrapper script direct | `claude-mimo "your task"` |
+| Legacy swarm/kimi-api / swarm/deepseek (existing scripts) | Swarm legacy | unchanged — works after 2026-05-26 Kimi restoration |
 
 For Pattern B routing decisions in code, prefer the programmatic CLI:
 
