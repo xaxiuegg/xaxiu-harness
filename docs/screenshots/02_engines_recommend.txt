@@ -1,0 +1,25 @@
+$ harness engines recommend default
+mimo-via-claude
+  rationale: MiMo-via-claude scored 100% (31/31 programmatic checks) on a 10-prompt production corpus + is the cheapest of the three.  Latency is 36.8s vs DeepSeek's 10.2s - if you need speed pick the `latency` task class instead (returns DeepSeek-flash).
+  alternates: deepseek-via-claude, kimi-via-claude
+
+$ harness engines recommend latency
+deepseek-via-claude
+  rationale: DeepSeek-flash at 10.2s avg on 10-prompt production corpus (W14-MIMO-PRODUCTION-VALIDATION).  Fastest on every category.  MiMo averaged 36.8s on same corpus - the smoke matrix's 9.3s was trivial-prompt only and did not extrapolate to realistic workloads.  Kimi averages 39.0s.  Use DeepSeek-flash when latency matters.
+  alternates: mimo-via-claude
+
+$ harness engines recommend cost
+mimo-via-claude
+  rationale: MiMo-via-claude cheapest on both smoke ($0.033/5-cat) and production ($0.0875/10-prompt) corpora.  Token Plan Pro $50/month buys ~6,200 audit-class dispatches.  Latency penalty (36.8s realistic vs DeepSeek 10.2s) accepted at this task class - if speed matters, use the latency task class.
+  alternates: kimi-via-claude, deepseek-via-claude
+
+$ harness engines recommend high-volume
+mimo-via-claude
+  rationale: For batch workloads (100s+ dispatches), MiMo Token Plan Pro at $50/month → 38B credits ~ 6,200 audit-class dispatches gives effectively unlimited headroom.  DeepSeek-flash at $0.055/5-category is the PAYG alternate when MiMo's tool-call markup is unacceptable.
+  alternates: deepseek-via-claude
+
+$ harness engines recommend audit
+deepseek-via-claude
+  (model_override: deepseek-v4-pro)
+  rationale: Audit step needs a DIFFERENT engine than the producer.  DeepSeek v4-pro is the strongest reasoning model available; the caller should pass exclude={first-pass} to skip the original.  v4-pro is overridden via model_override (not the v4-flash default).
+  alternates: kimi-via-claude, mimo-via-claude

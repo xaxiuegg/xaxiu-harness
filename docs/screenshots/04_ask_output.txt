@@ -1,0 +1,17 @@
+[ask] firing 1 engines in parallel (budget $0.05 each, timeout 180s)...
+
+engine                   OK   elapsed    in     out    cost       alias 
+---------------------------------------------------------------------------
+  mimo-via-claude        OK  81.6s   427    179    $0.0078   k1    
+
+  total cost: $0.0078
+
+===========================================================================
+
+### mimo-via-claude
+
+- **Redundancy & uptime** — if one provider is rate-limited or down the panel automatically falls back to another backend, so the operator never sees a blank response.
+
+- **Cost/quality steering** — the harness can route quick-draft queries to a cheap/fast model and reserve expensive frontier models for high-stakes or long-context work, optimising spend per answer.
+
+- **Diverse perspective synthesis** — querying multiple engines in parallel (e.g. Claude, GPT-4o, Gemini) and comparing their outputs gives the operator a broader, less single-model-biased view of the problem space.

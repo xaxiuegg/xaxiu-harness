@@ -4,7 +4,11 @@
 
 **Version note (2026-05-25)**: package version stays at `0.1.0` while the Horizon C internal-tool work continues; the current release tag is **`v1.0.0-rc.1`**.  Run `harness capabilities` for the live install snapshot — it's the canonical source of truth for what this binary can do.
 
-**Non-technical operator? → [docs/INTERNAL_OPERATOR_RUNBOOK.md](docs/INTERNAL_OPERATOR_RUNBOOK.md)** is the daily playbook covering laptop-dies recovery, key rotation, engine-down debugging, and the daily loop.  No Python knowledge required.
+**Visual operator manual?** → **[docs/HARNESS_VISUAL_MANUAL.md](docs/HARNESS_VISUAL_MANUAL.md)** is the screenshot-driven walkthrough — what each command looks like + when to reach for each.  Refined by a 3-engine review panel.
+
+**Non-technical operator first-time setup?** → [docs/OPERATOR_QUICKSTART.md](docs/OPERATOR_QUICKSTART.md) is the 30-minute blank-machine-to-first-dispatch guide.
+
+**Daily operations?** → [docs/INTERNAL_OPERATOR_RUNBOOK.md](docs/INTERNAL_OPERATOR_RUNBOOK.md) covers laptop-dies recovery, key rotation, engine-down debugging.
 
 **Fresh agent?** → [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md) gets you from `git clone` to a real engine response in under 5 commands, plus a hallucination-resistance checklist.
 

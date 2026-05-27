@@ -1,0 +1,14 @@
+$ harness keys list
+
+provider               env var                source      key (masked)               health
+----------------------------------------------------------------------------------------------------
+  Kimi (Moonshot)      KIMI_API_KEY           env-legacy sk-k****************************************************************ApSf untested
+  Kimi (Moonshot)      KIMI_API_KEY_2         missing    (not set)                   
+  MiMo (Xiaomi)        MIMO_API_KEY           env-legacy tp-s*******************************************khm2 up
+  MiMo (Xiaomi)        MIMO_API_KEY_2         missing    (not set)                   
+  DeepSeek             DEEPSEEK_API_KEY       env-legacy sk-e***************************36ed untested
+  DeepSeek             DEEPSEEK_API_KEY_2     missing    (not set)                   
+  Qwen (Alibaba DashScope) DASHSCOPE_API_KEY      missing    (not set)                   
+  GLM (Zhipu z.ai)     GLM_API_KEY            missing    (not set)                   
+  Anthropic            ANTHROPIC_API_KEY      missing    (not set)                   
+  Google Gemini        GEMINI_API_KEY         missing    (not set)                   

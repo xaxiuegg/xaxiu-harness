@@ -1,0 +1,14 @@
+harness doctor — preflight diagnostics
+==================================================
+  [OK] python           Python 3.13 OK
+  [OK] git              git installed + identity set
+  [OK] claude_binary    claude installed: 2.1.150 (Claude Code)
+  [OK] dpapi            DPAPI read works
+  [OK] secrets          engine keys available: dpapi=(none) env=['DEEPSEEK_API_KEY', 'KIMI_API_KEY', 'MIMO_API_KEY']
+  [OK] engine_reachability env=MIMO_API_KEY mimo=tokenplan
+  [OK] env_var_inventory KIMI_API_KEY:SET, DEEPSEEK_API_KEY:SET, ANTHROPIC_API_KEY:UNSET, GEMINI_API_KEY:UNSET, MIMO_API_KEY:SET, OPENAI_API_KEY:UNSET
+          fix: Set at least one engine API key in your environment
+  [OK] coord_dir        coord/ is writable
+  [OK] task_scheduler   Task Scheduler reachable
+==================================================
+overall: OK
