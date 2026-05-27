@@ -1,6 +1,0 @@
-is_stale:        False
-last_cycle_at:   2026-05-24T15:12:00.807857+00:00
-stale_seconds:   1209.651516
-cadence_minutes: 60
-armed:           True
-paused:          False

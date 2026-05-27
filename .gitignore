@@ -53,6 +53,15 @@ coord/observer/
 # Heartbeat (HEARTBEAT): runtime pulse, per-machine, not committed.
 coord/dev_loop/heartbeat.json
 
+# Engine outputs from `harness ask` panels (P6 audit fix 2026-05-27):
+# the audit found 453 tracked files under coord/reviews/ — runtime panel
+# output that doesn't belong in version control.  Sibling runtime dirs
+# (coord/observer/, coord/dev_loop/heartbeat.json, etc.) were already
+# ignored; bringing coord/reviews/ in line.  The .gitkeep below
+# preserves the directory's existence on fresh clones.
+coord/reviews/
+!coord/reviews/.gitkeep
+
 # Budget ledger (BUDGET-METER): runtime cost tracking, per-machine, not committed.
 coord/dev_loop/budget_ledger.jsonl
 coord/dev_loop/budget_archive/

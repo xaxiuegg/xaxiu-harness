@@ -1,8 +1,0 @@
-<!-- name=K4-pragmatist latency_ms=88968 error='' -->
-
-1. **W6-A3**: A. The sweep succeeded as a diagnostic: it produced an honest report and queued follow-up rows. Holding Wave 6 to retrofit real assertions across three modules turns a closeout wave into open-ended test-engineering and defeats the “fix the foundation” mandate by never actually closing. Ship the report, queue the debt, move on.  
-**W6-C2**: A. The implementation is correct and the 17 unit tests validate every acceptance criterion including the full fire→recover→re-fire cycle. The auditor’s remaining asks—live-toast smoke, race fuzz, malformed-log parsing—are integration-style embellishments on a working alarm, not functional gaps. Blocking a shipping feature for test cosmetics is exactly the “perfect vs. shipped” trap.
-
-2. Unconsidered: (a) A **time-boxed retry on C2**—allocate 20 minutes to behavioral tests, ship regardless of the outcome. (b) A **conditional accept with Wave 7 backlog lock**—accept both A3 and C2 now, but mandate that W7-MUTATION-CONCRETE, W7-MUTATION-WORKER, and W7-MUTATION-ORCH must clear before any W7-B1-RETROFIT or W7-SPEC-DRIFT work begins. I would pick (b); it preserves ship momentum while ensuring the zero-kill-rate modules cannot be deprioritized by the next shiny refactor.
-
-3. Begin Wave 7 with **W7-MUTATION-WORKER**: add a single real behavioral test in `tests/coord/test_worker.py` that asserts on output state rather than mere execution, then immediately run `scripts/run_mutation_sweep.py --module src/harness/coord/worker.py` to confirm the semantic kill rate rises above 0.0. Do not touch W7-B1 or W7-SPEC-DRIFT until this file is no longer blind to mutations.

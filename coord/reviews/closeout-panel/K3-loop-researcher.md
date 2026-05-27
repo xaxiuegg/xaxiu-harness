@@ -1,7 +1,0 @@
-<!-- name=K3-loop-researcher latency_ms=73783 error='' retry=1 -->
-
-1. A3: A — Hard-blocking on real-assertion tests for the three failed modules duplicates the queued W7 follow-ups and stalls loop velocity without yielding new calibration signal for the mutation script. C2: B — A dead-engine alarm validated only by unit tests risks silent dispatcher-hook regressions; requiring behavioral integration tests now prevents the planner from scoping hook work as unit-test-only in future waves.
-
-2. For A3, a third path is module-level quarantine: accept the report but auto-ban modules scoring below 2.0 from release promotion until their W7 deep-dive rows pass. Another is partial acceptance: certify dispatcher and integrator baselines immediately while gating only the failing modules. I would use quarantine, because it preserves report velocity while protecting production surfaces without re-running the sweep. For C2, a third path is accept-and-auto-queue: accept the unit-tested deliverable but have the audit script automatically spawn W7 integration-test rows instead of halting. Another is canary smoke behind a feature flag. I would use accept-and-auto-queue, because it separates the ship decision from the verification backlog and keeps the wave moving.
-
-3. Patch `planner/read_set.py` to auto-include downstream dispatcher behavioral tests whenever a `src/harness/*_alarm.py` hook is added, closing the C2 integration gap at planning time rather than audit time.

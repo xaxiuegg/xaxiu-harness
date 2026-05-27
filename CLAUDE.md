@@ -32,7 +32,7 @@ If `pip install -e .` is genuinely impossible (no network, locked-down env) BUT 
 | Component | Files |
 |---|---|
 | Adapter schema, loader, NL→YAML | [src/harness/adapters/](src/harness/adapters/) |
-| CLI — 22 top-level verbs (60+ subcommands incl. coord/observer/proxy/session/loop/budget/heartbeat/state/engines) | [src/harness/cli.py](src/harness/cli.py) |
+| CLI — full verb list via `harness --help` / `harness capabilities` (live count beats stale doc numbers; P6 audit fix 2026-05-27) | [src/harness/cli.py](src/harness/cli.py) |
 | Engine ABC + 5 concrete (kimi/deepseek/anthropic/gemini/mock) + auto-fallback (mock excluded from prod chain) | [src/harness/engines/](src/harness/engines/) |
 | State layer (JSON + SQLite + JSONL+redact; lazy init_db) | [src/harness/state/](src/harness/state/) |
 | DPAPI secrets | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
@@ -66,7 +66,7 @@ If `pip install -e .` is genuinely impossible (no network, locked-down env) BUT 
 `harness coord` subcommands: `plan`, `plan-from-description`, `run`, `work`, `retry`, `rerun-failed`, `integrate`, `replan`, `status`, `watch`, `list`, `cancel`, `cleanup`.
 
 Smoke test: `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
-Tests: 990/990 green as of commit `c0c156a` (2026-05-21).
+Tests: run `python -m pytest tests/ -m "not slow" -q --tb=no` for the live count.  (P6 audit fix 2026-05-27: removed the stale "990/990" snapshot — the suite has grown well past that and hard numbers in this file go stale faster than commits land.)
 
 ## Operator authority + escalation (load-bearing)
 

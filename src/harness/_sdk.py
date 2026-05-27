@@ -1,14 +1,17 @@
-"""W11-PYTHON-SDK-API-STUBS: agent-facing Python SDK contract.
+"""W11-PYTHON-SDK-API: agent-facing Python SDK contract + implementations.
 
 This module defines the public stable API that agentic coding agents
 import via `from harness import dispatch, retrieve, budget_status`.
-The bodies raise NotImplementedError; the real implementations land in
-W11-PYTHON-SDK-API-IMPL (Wave 11-D) after the W11-B context-frugal
-return + cache + retrieve rows stabilize.
-
 The contract — function signatures, DispatchResult dataclass, exception
-types — is FROZEN as of this row.  Downstream rows MUST target this
-contract; breaking it requires a wave-level decision.
+types — is FROZEN; breaking it requires a wave-level decision.
+
+P6 audit fix (2026-05-27): the original docstring claimed every body
+"raises NotImplementedError" — that was true at W11-PYTHON-SDK-API-STUBS
+landing but has been stale since W11-PYTHON-SDK-API-IMPL (Wave 11-D)
+when the real bodies shipped.  `dispatch`, `retrieve`, and
+`budget_status` are all fully implemented; the NotImplementedError
+mention previously confused agents reading the module header before
+the docstring of each function.
 """
 
 from __future__ import annotations

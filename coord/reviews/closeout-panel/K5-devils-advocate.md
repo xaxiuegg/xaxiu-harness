@@ -1,7 +1,0 @@
-<!-- name=K5-devils-advocate latency_ms=81246 retry=2 -->
-
-1. A3 B — 0.0 scores on worker.py and orchestrator.py suggest mutation may be breaking untestable infrastructure glue, so requiring real assertions first tests whether mutation is even a valid abstraction for those modules. C2 B — Seventeen unit tests exercise an internal state machine, but if the alarm triggers on the wrong telemetry, those tests are rehearsed theater; behavioral integration tests are needed to falsify the “wrong problem” hypothesis.
-
-2. A3 third path: Reclassify the three failing modules as I/O-bound infrastructure exempt from mutation, and require a single chaos test that randomly kills engine processes in staging to see if the dispatcher recovers; if the system survives real faults, mutation scores are irrelevant noise. C2 third path: Pause testing and audit the last five post-mortems for engine-death incidents; if the alarm would not have shortened any outage, the feature is solving the wrong problem. I would use the post-mortem audit because it is the fastest way to kill a wrong initiative before writing more tests.
-
-3. Create tests/integration/test_alarm_shadow.py that replays one hour of last week’s production dispatcher logs through DeadEngineAlarm in silent mode, outputting trigger timestamps versus actual PagerDuty pages so the next reviewer can compute false-positive and false-negative rates.

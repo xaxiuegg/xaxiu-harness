@@ -1,0 +1,12 @@
+# Engine outputs from `harness ask` land here as timestamped subdirs:
+#   coord/reviews/ask-<ts>-<slug>/
+#       ├── question.md
+#       ├── kimi-via-claude.md
+#       ├── mimo-via-claude.md
+#       ├── deepseek-via-claude.md
+#       ├── packet.md       (all three concatenated)
+#       └── summary.json
+#
+# This directory is ignored by git (P6 audit fix 2026-05-27 — the
+# pre-audit repo had 453 tracked panel outputs).  This .gitkeep is
+# the ONLY tracked entry; everything else here is runtime artifacts.

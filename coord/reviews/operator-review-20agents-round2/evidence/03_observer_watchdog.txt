@@ -1,7 +1,0 @@
-Watchdog: OK - last cycle 33min ago (cadence: every 60m)
-
-  verdict:         OK
-  last_cycle_at:   2026-05-24T20:12:00.168179+00:00
-  stale:           33min ago
-  cadence:         every 60m
-  armed/paused:    armed=True paused=False
