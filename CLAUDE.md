@@ -25,6 +25,16 @@ If `pip install -e .` is genuinely impossible (no network, locked-down env) BUT 
 
 ---
 
+## What this project is (load-bearing framing)
+
+xaxiu-harness is the operator's command surface and observability layer for delegating dev work to multiple LLMs.  **Three operating modes**, low → high autonomy:
+
+1. **Cross-engine panel** (`harness ask`) — fire the same question at 3+ engines in parallel; compare answers side-by-side.  $0.20-0.30 per panel via Pattern B routing.
+2. **Agentic dev manager** — single Claude session orchestrating in real time, with full dev authority, captured directives, forensic audit trail, per-engine budget caps.
+3. **Multi-agent coordinator** (`harness coord`) — Planner/Worker pattern with isolated git worktrees, stateful 4-key proxy with circuit breaker + auto-quarantine, replan-from-failure, integration phase.  The mode that justifies the proxy + worktree + multi-key infra.
+
+Underneath: cross-platform key resolution, JSONL audit ledger with redaction, replay, budget meter, observer flags, FastAPI dashboard.  "Ask 3 LLMs" is the lowest-autonomy surface, not the project's scope.  Operator-facing docs in [docs/OPERATOR_GUIDE.md](docs/OPERATOR_GUIDE.md), agent-facing in [docs/AGENT_REFERENCE.md](docs/AGENT_REFERENCE.md).
+
 ## Current state — v0.5 (v2 production-hardened + Phase-5 operator UX layered on top)
 
 **v1 core** (single-Claude dev manager, in-session orchestration):

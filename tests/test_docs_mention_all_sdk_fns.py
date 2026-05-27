@@ -13,7 +13,7 @@ Symmetric twin of ``tests/test_docs_no_future_as_present.py``:
 Together they bound doc drift in both directions: the docs cannot
 overpromise nor underpromise relative to the binary.
 
-Motivation: a fresh agent reading AGENT_QUICKSTART.md and trusting it
+Motivation: a fresh agent reading AGENT_REFERENCE.md and trusting it
 must not miss real SDK capabilities.  Caught in the 2026-05-25 review:
 ``review`` and ``capabilities`` had shipped but the quickstart's
 section 10 API surface table still listed only dispatch / retrieve /
@@ -25,8 +25,11 @@ from pathlib import Path
 
 import pytest
 
+# Path renamed 2026-05-27 (W14-DOCS-CONSOLIDATE 7→3): AGENT_QUICKSTART.md
+# → AGENT_REFERENCE.md.  Variable name kept as QUICKSTART for diff hygiene;
+# semantically it's now the agent SDK reference.
 REPO_ROOT = Path(__file__).resolve().parents[1]
-QUICKSTART = REPO_ROOT / "docs" / "AGENT_QUICKSTART.md"
+QUICKSTART = REPO_ROOT / "docs" / "AGENT_REFERENCE.md"
 
 # Names in __all__ that don't need their own doc mention.  Type aliases
 # and exception subclasses are conventionally documented as part of the
@@ -55,14 +58,14 @@ def _quickstart_text() -> str:
 def test_quickstart_exists() -> None:
     """Sanity: the doc file is present."""
     assert QUICKSTART.exists(), (
-        f"docs/AGENT_QUICKSTART.md is missing.  This is the load-bearing "
+        f"docs/AGENT_REFERENCE.md is missing.  This is the load-bearing "
         f"fresh-agent onboarding doc; CI must not pass without it."
     )
 
 
 def test_quickstart_mentions_every_public_sdk_name() -> None:
     """Every name in ``harness.__all__`` (except by-reference ones) must
-    appear at least once in AGENT_QUICKSTART.md.
+    appear at least once in AGENT_REFERENCE.md.
 
     The check is a plain substring match — the doc can mention the name
     in prose, in a code block, or in a signature; all count.  A real
@@ -77,7 +80,7 @@ def test_quickstart_mentions_every_public_sdk_name() -> None:
         if name not in text:
             missing.append(name)
     assert not missing, (
-        f"AGENT_QUICKSTART.md is missing references to public SDK "
+        f"AGENT_REFERENCE.md is missing references to public SDK "
         f"names: {missing}\n\n"
         f"Either: (a) add a brief code example / signature to the "
         f"quickstart so a fresh agent learns the surface, OR (b) if "
@@ -97,7 +100,7 @@ def test_quickstart_documents_dispatch_signature() -> None:
     text = _quickstart_text()
     # The signature snippet from section 10 — drift here is a real bug
     assert "dispatch(prompt" in text, (
-        "AGENT_QUICKSTART.md missing the dispatch() signature.  "
+        "AGENT_REFERENCE.md missing the dispatch() signature.  "
         "Section 10 'The API surface, briefly' must show the signature "
         "starting with 'dispatch(prompt, ...)' verbatim — agents "
         "literally read that line to learn the contract."
@@ -108,7 +111,7 @@ def test_quickstart_documents_review_signature() -> None:
     """W13 Wed-Thu: review() is a Tier-1 SDK function; signature required."""
     text = _quickstart_text()
     assert "review(document_path" in text, (
-        "AGENT_QUICKSTART.md missing the review() signature.  "
+        "AGENT_REFERENCE.md missing the review() signature.  "
         "Section 10 must show 'review(document_path, ...)' verbatim."
     )
 
@@ -117,7 +120,7 @@ def test_quickstart_documents_capabilities() -> None:
     """W13 Wed-Thu: capabilities() is the orientation entry point."""
     text = _quickstart_text()
     assert "capabilities()" in text, (
-        "AGENT_QUICKSTART.md missing capabilities().  This is the "
+        "AGENT_REFERENCE.md missing capabilities().  This is the "
         "primary tool an agent uses to learn what's installed — must "
         "be documented."
     )
@@ -127,7 +130,7 @@ def test_quickstart_documents_audit_show() -> None:
     """W13-AUDIT-JSONL: the audit ledger is opt-in-readable; tell agents."""
     text = _quickstart_text()
     assert "harness audit" in text, (
-        "AGENT_QUICKSTART.md missing the `harness audit` CLI surface.  "
+        "AGENT_REFERENCE.md missing the `harness audit` CLI surface.  "
         "Every dispatch goes through the audit ledger; agents need to "
         "know it exists + how to inspect it."
     )
@@ -137,7 +140,7 @@ def test_quickstart_documents_today_command() -> None:
     """`harness today` is the W8-STATUS-HUMAN orientation surface."""
     text = _quickstart_text()
     assert "harness today" in text, (
-        "AGENT_QUICKSTART.md missing `harness today`.  This is the "
+        "AGENT_REFERENCE.md missing `harness today`.  This is the "
         "one-command orientation surface; agents must know it."
     )
 

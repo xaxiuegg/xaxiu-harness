@@ -18,9 +18,14 @@ How to fix a failure:
   3. The command does NOT exist + you intend to add it → ship the verb
      OR mark FUTURE and add a STATUS.csv row
 
-The test scope is the two operator-facing docs that matter most:
-  - docs/INTERNAL_OPERATOR_RUNBOOK.md (runbook for the operator + future Claude)
-  - docs/AGENT_QUICKSTART.md (5-minute onboarding for new agents)
+The test scope is the two operator-facing docs that matter most.
+Updated 2026-05-27 (W14-DOCS-CONSOLIDATE 7→3) — both old doc names
+(INTERNAL_OPERATOR_RUNBOOK + AGENT_QUICKSTART) were merged into:
+  - docs/OPERATOR_GUIDE.md (operator-facing; absorbed quickstart +
+    runbook + visual manual + using-from-other-projects + internal
+    runbook)
+  - docs/AGENT_REFERENCE.md (agent-facing; absorbed AGENT_QUICKSTART
+    + new sections for agent-instructions + v2 coord programmatic use)
 """
 from __future__ import annotations
 
@@ -31,8 +36,8 @@ import pytest
 
 DOCS_ROOT = Path(__file__).resolve().parents[1] / "docs"
 DOCS_TO_SCAN = [
-    DOCS_ROOT / "INTERNAL_OPERATOR_RUNBOOK.md",
-    DOCS_ROOT / "AGENT_QUICKSTART.md",
+    DOCS_ROOT / "OPERATOR_GUIDE.md",
+    DOCS_ROOT / "AGENT_REFERENCE.md",
 ]
 
 # Patterns that match `harness <verb>` or `harness <group> <subverb>`

@@ -51,7 +51,7 @@ working directory):
 Set up xaxiu-harness on this machine for me.  Do these steps in order, stopping
 to ask me if anything fails or needs my input:
 
-1. Read CLAUDE.md and docs/OPERATOR_QUICKSTART.md for context on what this is.
+1. Read CLAUDE.md and docs/OPERATOR_GUIDE.md for context on what this is.
 
 2. Check my prerequisites:
    - Python 3.11+ installed (`python --version`)
@@ -125,9 +125,9 @@ to ask me if anything fails or needs my input:
        * python -m harness doctor          (verify health)
        * python -m harness engines recommend <task-class>  (pick right engine)
    - Where outputs land: coord/reviews/ask-<timestamp>-<slug>/
-   - That docs/HARNESS_VISUAL_MANUAL.md has the screenshot walkthrough
-   - That docs/USING_HARNESS_FROM_OTHER_PROJECTS.md explains using
-     the harness from any project directory
+   - That docs/OPERATOR_GUIDE.md § 2 has the screenshot walkthrough
+   - That docs/OPERATOR_GUIDE.md § 4 explains using the harness
+     from any project directory
 
 CRITICAL: do NOT try to "fix" failures by running arbitrary commands or editing
 my .env / configuration files.  Tell me the error, suggest the most likely
@@ -256,7 +256,7 @@ After they've used it for a bit, the recipient might come back with questions.  
 | "Is it safe to commit my .env?" | No.  `.env` is in `.gitignore` already; double-check before committing. |
 | "How do I make a backup of my setup?" | The keys live in `.env`; per-machine state lives in `~/.harness/` and `coord/key_health.jsonl`.  Back those up if you care. |
 | "How do I uninstall?" | `pip uninstall xaxiu-harness && rm -rf .venv ~/.harness/`.  The repo dir can be `rm -rf`'d like any other. |
-| "Where's the documentation?" | Three docs cover most needs: README.md (overview), docs/OPERATOR_QUICKSTART.md (first install), docs/HARNESS_VISUAL_MANUAL.md (screenshot walkthrough). |
+| "Where's the documentation?" | Three docs cover most needs: README.md (overview), docs/OPERATOR_GUIDE.md (everything operator-facing including setup, daily commands, and recovery), docs/AGENT_REFERENCE.md (for AIs using the harness as a sub-tool). |
 
 ---
 
@@ -280,6 +280,6 @@ If they want it later:
 
 ## Appendix: this handoff doc itself
 
-This file is designed to be self-contained — you can copy the URL + Piece B + Piece C from § Part 1 and paste them into a Slack DM, email, or chat.  The recipient doesn't need to open this document to succeed; their Claude Code session reads the in-repo docs (CLAUDE.md, OPERATOR_QUICKSTART.md, HARNESS_VISUAL_MANUAL.md) and walks them through the rest.
+This file is designed to be self-contained — you can copy the URL + Piece B + Piece C from § Part 1 and paste them into a Slack DM, email, or chat.  The recipient doesn't need to open this document to succeed; their Claude Code session reads the in-repo docs (CLAUDE.md, OPERATOR_GUIDE.md) and walks them through the rest.
 
 Updated: 2026-05-26.  If you change `harness setup`, `harness keys serve`, or `harness ask` significantly, also update Part 3 here.

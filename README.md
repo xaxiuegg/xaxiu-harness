@@ -4,17 +4,17 @@
 
 **Version note (2026-05-25)**: package version stays at `0.1.0` while the Horizon C internal-tool work continues; the current release tag is **`v1.0.0-rc.1`**.  Run `harness capabilities` for the live install snapshot — it's the canonical source of truth for what this binary can do.
 
-**Handing this to someone else?** → **[docs/HANDOFF.md](docs/HANDOFF.md)** is the one-page sharing kit: the URL, the message, and the exact prompt to paste into their Claude Code.  Recipient time: 15-25 min.
+<!-- W14-DOCS-CONSOLIDATE 2026-05-27: seven overlapping entry points
+     collapsed into three.  OPERATOR_GUIDE covers setup + daily commands
+     + screenshots + multi-project use + recovery in one place;
+     AGENT_REFERENCE covers SDK + agent-instructions + v2 coord;
+     HANDOFF stays as the standalone copy-paste-into-chat sharing kit. -->
 
-**Using the harness from another project?** → [docs/USING_HARNESS_FROM_OTHER_PROJECTS.md](docs/USING_HARNESS_FROM_OTHER_PROJECTS.md) — once installed, the harness works from any directory; one command (`harness install-agent-instructions`) makes it discoverable to every Claude Code session on the machine.
+**Operator?** → **[docs/OPERATOR_GUIDE.md](docs/OPERATOR_GUIDE.md)** is your single source of truth: fresh-machine setup, daily commands with screenshots, three operating modes (panel / in-session / multi-agent coord), using from other projects, recovery procedures.
 
-**Visual operator manual?** → **[docs/HARNESS_VISUAL_MANUAL.md](docs/HARNESS_VISUAL_MANUAL.md)** is the screenshot-driven walkthrough — what each command looks like + when to reach for each.  Refined by a 3-engine review panel.
+**Agent (Claude / Cursor / Aider) using the harness as a sub-tool?** → **[docs/AGENT_REFERENCE.md](docs/AGENT_REFERENCE.md)** is the SDK contract, agent-instructions install, v2 coord programmatic surface, and the hallucination-resistance checklist.
 
-**Non-technical operator first-time setup?** → [docs/OPERATOR_QUICKSTART.md](docs/OPERATOR_QUICKSTART.md) is the 30-minute blank-machine-to-first-dispatch guide.
-
-**Daily operations?** → [docs/INTERNAL_OPERATOR_RUNBOOK.md](docs/INTERNAL_OPERATOR_RUNBOOK.md) covers laptop-dies recovery, key rotation, engine-down debugging.
-
-**Fresh agent?** → [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md) gets you from `git clone` to a real engine response in under 5 commands, plus a hallucination-resistance checklist.
+**Handing the harness to someone else?** → **[docs/HANDOFF.md](docs/HANDOFF.md)** is the one-page sharing kit: the URL, the message, and the exact prompt to paste into their Claude Code session. Recipient time: 15-25 min.
 
 ---
 
@@ -38,15 +38,15 @@ This section is updated by-hand and drifts; **`coord/STATUS.csv` is the canonica
 - **W13-AUDIT-JSONL forensic ledger** — every `harness.dispatch()` call lands one redacted row in `~/.harness/audit.jsonl` (7 secret-pattern classes scrubbed; never raises; size-cap + age-prune).  Surfaced via `harness audit show` / `harness audit summary`.
 - **W13-INSTALL-VERIFY CI gate** — every PR runs `pip install -e .` in a fresh venv and verifies the console script + SDK imports + `harness review --help` all work end-to-end.  Closes the "fresh-clone agent install promise" gap from AGENT_QUICKSTART.md.
 - **W13-ENGINE-RETRY-RESILIENT** — all 5 engine adapters (Kimi, DeepSeek, MiMo, Anthropic, Gemini) share a retry helper that classifies transient errors (`RemoteProtocolError`, `TimeoutException`) and retries once with a 0.5s cooldown.  Replaces the opaque `error="internal"` strings with descriptive `repr(exc)`.
-- **W13-FUTURE-MARKER-AUDIT** — docs that reference unimplemented CLI verbs now must use the `**FUTURE (...)**` marker, enforced by `tests/test_docs_no_future_as_present.py`.  Same gate now also enforces (via the new `tests/test_docs_mention_all_sdk_fns.py`) that every public SDK name appears in `docs/AGENT_QUICKSTART.md`.
+- **W13-FUTURE-MARKER-AUDIT** — docs that reference unimplemented CLI verbs now must use the `**FUTURE (...)**` marker, enforced by `tests/test_docs_no_future_as_present.py`.  Same gate now also enforces (via the new `tests/test_docs_mention_all_sdk_fns.py`) that every public SDK name appears in `docs/AGENT_REFERENCE.md`.
 
-See [`memory/engine-reliability.md`](memory/engine-reliability.md) for engine reliability + cooldown policy and [`docs/INTERNAL_OPERATOR_RUNBOOK.md`](docs/INTERNAL_OPERATOR_RUNBOOK.md) for operational procedures.
+See [`memory/engine-reliability.md`](memory/engine-reliability.md) for engine reliability + cooldown policy and [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md) § 5 for operational procedures (key rotation, engine-down debugging, laptop-dies recovery).
 
 ---
 
 ## Quick start (fresh machine)
 
-**Non-technical operator?** Start with [`docs/OPERATOR_QUICKSTART.md`](docs/OPERATOR_QUICKSTART.md) instead — guided 30-minute walkthrough from blank machine to first dispatch.
+**Non-technical operator?** Start with [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md) § 1 — guided 30-minute walkthrough from blank machine to first dispatch.
 
 For everyone else:
 
