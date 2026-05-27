@@ -65,15 +65,21 @@ to ask me if anything fails or needs my input:
 4. Run `python -m harness doctor` and show me the 9-check traffic-light output.
    If any check is red, walk me through fixing it before continuing.
 
-5. Now we set up API keys.  Run `python -m harness keys serve --no-open`.
-   The command will print a URL like `http://127.0.0.1:<port>/?token=...`.
-   Show me that URL and tell me to open it in my browser.
-   Wait for me to confirm I've pasted my keys, clicked Test on each, and clicked
-   Save all to .env.
+5. API keys.  Look at step 4's `secrets` and `engine_reachability` checks.
 
-6. Once I confirm keys are saved, kill the keys server (Ctrl+C in the terminal
-   running it) and re-run `python -m harness doctor` to verify the keys check
-   is now green.
+   IF they were green (I already have at least one provider key configured):
+       Skip to step 7.  Just tell me which key(s) you saw + that we're moving on.
+
+   IF either was red or yellow:
+       Run `python -m harness keys serve --no-open`.
+       Print the URL it shows + tell me to open it in my browser.
+       Wait for me to confirm I've pasted my keys, clicked Test on each
+       (live API probe — should turn the row green), and clicked
+       Save all to .env.
+
+6. After keys are saved (or if you skipped step 5), re-run
+   `python -m harness doctor` to verify the keys check is now green.
+   If it isn't, walk me through which key is missing or wrong.
 
 7. Run one verification dispatch:
    `python -m harness ask "Reply with the single word OK." --engines mimo-via-claude --no-save --max-budget-usd 0.05`
@@ -89,7 +95,27 @@ to ask me if anything fails or needs my input:
    If I say no or "ask again later", skip — I can run it manually anytime
    (or `--uninstall` to remove later).
 
-9. When everything succeeds, tell me:
+9. Ask me: "There's an optional sibling project called xaxiu-swarm that
+   adds agentic multi-file dispatch (multi-turn tool use, in-place file
+   edits across many files).  You DON'T need it for `harness ask`,
+   `harness doctor`, or single-shot Pattern B engines — those work
+   entirely from this repo.  You'd only want xaxiu-swarm if you plan to
+   do agentic coding tasks (multi-file refactors, swarm-style fanout).
+   Do you want to clone it now? [y/N]"
+
+   IF I say yes:
+     Clone it next to xaxiu-harness:
+       git clone https://github.com/xaxiuegg/xaxiu-swarm.git
+       cd xaxiu-swarm && pip install -e .
+     Verify by running: `xaxiu-swarm backends`
+     Should list: claude, claude-deepseek, claude-kimi, claude-mimo,
+     deepseek, kimi, kimi-api, qwen
+
+   IF I say no:
+     Skip cleanly.  Tell me I can clone it later if I change my mind —
+     instructions are in docs/HANDOFF.md § "Optional add-on".
+
+10. When everything succeeds, tell me:
    - The harness is set up and working
    - The 4 most useful commands I should know:
        * python -m harness ask "..."       (your daily driver)
