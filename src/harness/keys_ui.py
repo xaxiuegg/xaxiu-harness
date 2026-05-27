@@ -487,10 +487,98 @@ def _build_status() -> dict:
             "strategy": strategy,
             "slots": slots,
         })
+
+    # W14-KEYS-POOL-P2 2026-05-26: global dispatch-readiness rollup.
+    # Computed from the per-provider slot health.  Surface as a single
+    # status indicator at the top of the Keys UI so the operator can
+    # answer "can I dispatch right now?" without scanning each row.
+    global_health = _compute_global_health(providers)
+
     return {
         "providers": providers,
         "env_path": str(env_file.resolve()),
         "max_slots": KEY_MAX_SLOTS,
+        "global_health": global_health,
+    }
+
+
+def _compute_global_health(providers: list[dict]) -> dict:
+    """Aggregate per-provider slot health into a single dispatch-
+    readiness status.
+
+    Logic:
+      - GREEN (ready): every provider WITH configured keys has >= 1
+        healthy slot.  Providers with no keys at all don't count
+        against readiness (operator may have intentionally left them
+        unconfigured).
+      - YELLOW (degraded): at least one provider has some unhealthy
+        slot, but every configured provider still has a healthy
+        slot.  Failover is working but operator should investigate.
+      - RED (blocked): at least one provider has zero healthy slots.
+        Dispatch to that provider WILL fail; failover within that
+        provider is exhausted.
+
+    Innocent-until-proven-guilty rule: a slot with no probe data is
+    considered healthy.  Only explicitly-recorded failures count
+    against the slot.
+
+    Returns
+    -------
+    dict
+        ``{"status": "ready" | "degraded" | "blocked",
+           "configured_providers": N,
+           "blocked_providers": [env_prefix, ...],
+           "degraded_providers": [env_prefix, ...],
+           "summary": "human-readable one-liner"}``
+    """
+    configured = []
+    degraded = []
+    blocked = []
+    for prov in providers:
+        prefix = prov["env_prefix"]
+        slots_with_keys = [s for s in prov["slots"] if s["has_value"]]
+        if not slots_with_keys:
+            continue  # provider not configured; doesn't count
+        configured.append(prefix)
+        # A slot is "healthy" if it has no health record OR latest
+        # record's healthy flag is True.
+        slot_healthy = []
+        for slot in slots_with_keys:
+            health = slot.get("health")
+            if health is None:
+                slot_healthy.append(True)  # innocent until proven guilty
+            else:
+                slot_healthy.append(bool(health.get("healthy", True)))
+        healthy_count = sum(1 for h in slot_healthy if h)
+        if healthy_count == 0:
+            blocked.append(prefix)
+        elif healthy_count < len(slot_healthy):
+            degraded.append(prefix)
+
+    if blocked:
+        status = "blocked"
+        summary = (
+            f"BLOCKED: {len(blocked)} provider(s) have zero healthy keys "
+            f"({', '.join(blocked)}).  Dispatch to those providers will fail."
+        )
+    elif degraded:
+        status = "degraded"
+        summary = (
+            f"Degraded: {len(degraded)} provider(s) have an unhealthy slot "
+            f"but failover is available ({', '.join(degraded)})."
+        )
+    else:
+        status = "ready"
+        summary = (
+            f"Ready to dispatch.  All {len(configured)} configured "
+            f"provider(s) have at least one healthy key."
+        )
+    return {
+        "status": status,
+        "configured_providers": len(configured),
+        "blocked_providers": blocked,
+        "degraded_providers": degraded,
+        "summary": summary,
     }
 
 
@@ -539,6 +627,48 @@ HTML_PAGE = """<!DOCTYPE html>
   .env-path-info code {
     color: #58a6ff;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* W14-KEYS-POOL-P2: global dispatch-readiness indicator at top */
+  .global-health {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    border-left: 4px solid #6e7681;
+    background: #161b22;
+  }
+  .global-health.global-ready {
+    border-left-color: #3fb950;
+    background: #0d2818;
+  }
+  .global-health.global-degraded {
+    border-left-color: #d29922;
+    background: #2a2007;
+  }
+  .global-health.global-blocked {
+    border-left-color: #f85149;
+    background: #2d0d10;
+  }
+  .global-health-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .global-ready .global-health-dot { background: #3fb950; }
+  .global-degraded .global-health-dot { background: #d29922; }
+  .global-blocked .global-health-dot { background: #f85149; }
+  .global-health-label {
+    font-weight: 600;
+    color: #f0f6fc;
+    min-width: 90px;
+  }
+  .global-health-summary {
+    color: #c9d1d9;
+    flex-grow: 1;
   }
   .row {
     background: #161b22;
@@ -729,6 +859,12 @@ HTML_PAGE = """<!DOCTYPE html>
   done to shut down this server.
 </div>
 
+<div id="global-health" class="global-health">
+  <div class="global-health-dot"></div>
+  <div class="global-health-label">Loading&hellip;</div>
+  <div class="global-health-summary"></div>
+</div>
+
 <div class="env-path-info" id="env-path-info">
   Loading target .env path&hellip;
 </div>
@@ -777,6 +913,8 @@ async function loadStatus() {
     return;
   }
   const data = await r.json();
+  // W14-KEYS-POOL-P2: render the global dispatch-readiness indicator first
+  renderGlobalHealth(data.global_health);
   // Show resolved .env path so operator knows where keys will save
   const envPathEl = document.getElementById("env-path-info");
   envPathEl.textContent = "";
@@ -785,6 +923,20 @@ async function loadStatus() {
   codeEl.textContent = data.env_path;
   envPathEl.appendChild(codeEl);
   renderRows(data.providers, data.max_slots);
+}
+
+function renderGlobalHealth(health) {
+  if (!health) return;
+  const el = document.getElementById("global-health");
+  el.className = "global-health global-" + health.status;
+  const label = el.querySelector(".global-health-label");
+  const summary = el.querySelector(".global-health-summary");
+  label.textContent =
+    health.status === "ready" ? "Ready" :
+    health.status === "degraded" ? "Degraded" :
+    health.status === "blocked" ? "BLOCKED" :
+    "Unknown";
+  summary.textContent = health.summary;
 }
 
 // W14-KEYS-UI-SECURITY-PATCH: use createElement + textContent for

@@ -857,3 +857,185 @@ class TestSecurityRegression:
             )
             # Either 413 (too large) or 400 (value too long); both OK
             assert status in (400, 413)
+
+
+# ---------------------------------------------------------------------------
+# W14-KEYS-POOL-P2: global health widget
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalHealthCompute:
+    """W14-KEYS-POOL-P2 2026-05-26: aggregate per-slot health into a
+    single dispatch-readiness rollup."""
+
+    def _make_provider(
+        self,
+        env_prefix: str,
+        slots: list[dict],
+    ) -> dict:
+        return {
+            "env_prefix": env_prefix,
+            "display": env_prefix,
+            "purpose": "",
+            "engine_probe": "",
+            "strategy": "rotation",
+            "slots": slots,
+        }
+
+    def _make_slot(
+        self, slot: int, has_value: bool,
+        health: dict | None = None,
+    ) -> dict:
+        return {
+            "slot": slot,
+            "env_var": f"FAKE_KEY_{slot}",
+            "source": "env" if has_value else "missing",
+            "masked": "fake***test" if has_value else "",
+            "has_value": has_value,
+            "label": "",
+            "health": health,
+        }
+
+    def test_no_configured_providers_is_ready(self) -> None:
+        # Edge case: no provider has any keys.  Not "blocked" — just
+        # nothing to dispatch to.  Operator hasn't broken anything.
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(1, has_value=False),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert result["status"] == "ready"
+        assert result["configured_providers"] == 0
+
+    def test_single_provider_healthy_is_ready(self) -> None:
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(
+                    1, has_value=True,
+                    health={"healthy": True, "category": "up"},
+                ),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert result["status"] == "ready"
+        assert result["configured_providers"] == 1
+        assert "Ready" in result["summary"]
+
+    def test_innocent_until_proven_guilty(self) -> None:
+        # Slot has a key but no probe data → considered healthy
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(1, has_value=True, health=None),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert result["status"] == "ready"
+
+    def test_all_slots_unhealthy_blocks_provider(self) -> None:
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(
+                    1, has_value=True,
+                    health={"healthy": False, "category": "auth-failed"},
+                ),
+                self._make_slot(
+                    2, has_value=True,
+                    health={"healthy": False, "category": "terminated"},
+                ),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert result["status"] == "blocked"
+        assert result["blocked_providers"] == ["KIMI_API_KEY"]
+        assert "BLOCKED" in result["summary"]
+
+    def test_partial_unhealthy_with_failover_is_degraded(self) -> None:
+        # k1 down but k2 healthy → degraded but operational
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(
+                    1, has_value=True,
+                    health={"healthy": False, "category": "auth-failed"},
+                ),
+                self._make_slot(
+                    2, has_value=True,
+                    health={"healthy": True, "category": "up"},
+                ),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert result["status"] == "degraded"
+        assert "KIMI_API_KEY" in result["degraded_providers"]
+        assert "KIMI_API_KEY" not in result["blocked_providers"]
+
+    def test_mixed_blocked_and_healthy_is_blocked(self) -> None:
+        # If ANY configured provider has zero healthy keys, status is
+        # blocked overall (worst case wins)
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(
+                    1, has_value=True,
+                    health={"healthy": True, "category": "up"},
+                ),
+            ]),
+            self._make_provider("MIMO_API_KEY", [
+                self._make_slot(
+                    1, has_value=True,
+                    health={"healthy": False, "category": "auth-failed"},
+                ),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert result["status"] == "blocked"
+        assert "MIMO_API_KEY" in result["blocked_providers"]
+
+    def test_summary_includes_provider_names(self) -> None:
+        providers = [
+            self._make_provider("KIMI_API_KEY", [
+                self._make_slot(
+                    1, has_value=True,
+                    health={"healthy": False, "category": "auth-failed"},
+                ),
+            ]),
+        ]
+        result = keys_ui_mod._compute_global_health(providers)
+        assert "KIMI_API_KEY" in result["summary"]
+
+
+class TestGlobalHealthInPayload:
+    def test_status_endpoint_includes_global_health(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Repoint env_path so we don't read real .env
+        monkeypatch.setattr(
+            keys_ui_mod, "_resolve_env_path",
+            lambda: tmp_path / ".env",
+        )
+        for spec in KEY_PROVIDERS:
+            monkeypatch.delenv(spec["env"], raising=False)
+            for n in range(1, 5):
+                monkeypatch.delenv(f"{spec['env']}_{n}", raising=False)
+        payload = keys_ui_mod._build_status()
+        assert "global_health" in payload
+        gh = payload["global_health"]
+        assert "status" in gh
+        assert "summary" in gh
+        assert gh["status"] in ("ready", "degraded", "blocked")
+
+
+class TestGlobalHealthInHtml:
+    def test_html_has_global_health_slot(self) -> None:
+        # The HTML template should have the global health div
+        assert 'id="global-health"' in HTML_PAGE
+        assert "global-health-dot" in HTML_PAGE
+
+    def test_html_has_global_health_css(self) -> None:
+        # CSS classes for ready/degraded/blocked variants
+        assert ".global-ready" in HTML_PAGE
+        assert ".global-degraded" in HTML_PAGE
+        assert ".global-blocked" in HTML_PAGE
+
+    def test_html_has_global_health_js(self) -> None:
+        # The renderGlobalHealth function should exist + be called
+        assert "renderGlobalHealth" in HTML_PAGE
