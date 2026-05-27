@@ -27,10 +27,12 @@ class TestRecommendCore:
         assert rec.model_override is None
 
     def test_latency_class(self) -> None:
+        # W14-MIMO-PRODUCTION-VALIDATION 2026-05-26 recalibration:
+        # MiMo was 36.8s on realistic prompts (vs smoke's 9.3s on
+        # trivial).  DeepSeek-flash won latency on every category.
         rec = recommend("latency")
-        assert rec.engine == "mimo-via-claude"  # 9.3s fastest
-        assert "deepseek-via-claude" in rec.alternates
-        # Kimi excluded from latency due to variance
+        assert rec.engine == "deepseek-via-claude"
+        assert "mimo-via-claude" in rec.alternates
 
     def test_verbose_class(self) -> None:
         rec = recommend("verbose")

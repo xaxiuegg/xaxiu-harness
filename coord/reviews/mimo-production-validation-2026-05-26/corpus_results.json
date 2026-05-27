@@ -1,0 +1,1256 @@
+[
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "code_function",
+    "category": "code-gen",
+    "ok": true,
+    "elapsed_s": 55.942550200008554,
+    "tokens_in": 451,
+    "tokens_out": 83,
+    "cost_usd": 0.006490000000000001,
+    "text": "```python\ndef fibonacci(n):\n    if n <= 0:\n        return 0\n    if n == 1:\n        return 1\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n```",
+    "text_excerpt": "```python def fibonacci(n):     if n <= 0:         return 0     if n == 1:         return 1     a, b = 0, 1     for _ in range(2, n + 1):         a, b = b, a + b     return b ```",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "def fibonacci",
+          "passed": true,
+          "detail": "looking for 'def fibonacci'"
+        },
+        {
+          "check": "contains",
+          "arg": "return",
+          "passed": true,
+          "detail": "looking for 'return'"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "reasoning_short",
+    "category": "reasoning",
+    "ok": true,
+    "elapsed_s": 16.83441939999466,
+    "tokens_in": 448,
+    "tokens_out": 89,
+    "cost_usd": 0.0067800000000000004,
+    "text": "Quicksort degrades to O(n²) when its pivot selection repeatedly partitions the array into one subarray of size n−1 and one of size 0, which occurs, for example, when the input is already sorted and the first or last element is always chosen as the pivot.",
+    "text_excerpt": "Quicksort degrades to O(n²) when its pivot selection repeatedly partitions the array into one subarray of size n−1 and one of size 0, which occurs, for example, when the input is already sorted and the first or last element is always chosen as the pivot.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "word_count_at_most",
+          "arg": 50,
+          "passed": true,
+          "detail": "word_count=45, max=50"
+        }
+      ],
+      "passed": 2,
+      "total": 2,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "structured_json",
+    "category": "structured-output",
+    "ok": true,
+    "elapsed_s": 18.89994430000661,
+    "tokens_in": 464,
+    "tokens_out": 33,
+    "cost_usd": 0.005515000000000001,
+    "text": "{\"language\": \"python\", \"complexity\": \"O(log n)\", \"algorithm\": \"binary_search\"}",
+    "text_excerpt": "{\"language\": \"python\", \"complexity\": \"O(log n)\", \"algorithm\": \"binary_search\"}",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "valid_json",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "json_has_keys",
+          "arg": [
+            "language",
+            "complexity",
+            "algorithm"
+          ],
+          "passed": true,
+          "detail": "required keys: ['language', 'complexity', 'algorithm'], found: ['language', 'complexity', 'algorithm']"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "long_context_bugfind",
+    "category": "long-context",
+    "ok": true,
+    "elapsed_s": 58.27341600001091,
+    "tokens_in": 1403,
+    "tokens_out": 141,
+    "cost_usd": 0.017730000000000003,
+    "text": "The `+1` in `range(n // 2 + 1)` causes the loop to iterate one step beyond the midpoint, which swaps an already-swapped pair of elements back to their original positions, corrupting the result.",
+    "text_excerpt": "The `+1` in `range(n // 2 + 1)` causes the loop to iterate one step beyond the midpoint, which swaps an already-swapped pair of elements back to their original positions, corrupting the result.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "n // 2 + 1",
+            "+1",
+            "off-by-one",
+            "extra iteration",
+            "swap back"
+          ],
+          "passed": true,
+          "detail": "any-of: ['n // 2 + 1', '+1', 'off-by-one', 'extra iteration', 'swap back']"
+        }
+      ],
+      "passed": 2,
+      "total": 2,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "multi_turn_instruction",
+    "category": "multi-step-instruction",
+    "ok": true,
+    "elapsed_s": 16.85744260001229,
+    "tokens_in": 481,
+    "tokens_out": 107,
+    "cost_usd": 0.009349999999999999,
+    "text": "**1. Capital of France**\nParis.\n\n**2. 100 USD → EUR (rate 0.92)**\n100 × 0.92 = **92.00 EUR**\n\n**3. Colors of the rainbow (in order)**\n1. Red\n2. Orange\n3. Yellow\n4. Green\n5. Blue\n6. Indigo\n7. Violet",
+    "text_excerpt": "**1. Capital of France** Paris.  **2. 100 USD → EUR (rate 0.92)** 100 × 0.92 = **92.00 EUR**  **3. Colors of the rainbow (in order)** 1. Red 2. Orange 3. Yellow 4. Green 5. Blue 6. Indigo 7. Violet",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "Paris",
+          "passed": true,
+          "detail": "looking for 'Paris'"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "92",
+            "92.00"
+          ],
+          "passed": true,
+          "detail": "any-of: ['92', '92.00']"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "red",
+            "Red"
+          ],
+          "passed": true,
+          "detail": "any-of: ['red', 'Red']"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "concise_constraint",
+    "category": "length-compliance",
+    "ok": true,
+    "elapsed_s": 16.980875599983847,
+    "tokens_in": 434,
+    "tokens_out": 40,
+    "cost_usd": 0.005445,
+    "text": "TCP: reliable, ordered, connection-based delivery with error-checking. UDP: fast, connectionless, no guaranteed delivery or ordering—ideal for streaming/gaming.",
+    "text_excerpt": "TCP: reliable, ordered, connection-based delivery with error-checking. UDP: fast, connectionless, no guaranteed delivery or ordering—ideal for streaming/gaming.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "word_count_at_most",
+          "arg": 35,
+          "passed": true,
+          "detail": "word_count=17, max=35"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "TCP",
+            "tcp"
+          ],
+          "passed": true,
+          "detail": "any-of: ['TCP', 'tcp']"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "UDP",
+            "udp"
+          ],
+          "passed": true,
+          "detail": "any-of: ['UDP', 'udp']"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "no_tool_call_markup",
+    "category": "markup-clean",
+    "ok": true,
+    "elapsed_s": 33.47471660000156,
+    "tokens_in": 450,
+    "tokens_out": 19,
+    "cost_usd": 0.00579,
+    "text": "OK",
+    "text_excerpt": "OK",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "OK",
+          "passed": true,
+          "detail": "looking for 'OK'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<tool_call>",
+          "passed": true,
+          "detail": "must NOT contain '<tool_call>'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<function_call>",
+          "passed": true,
+          "detail": "must NOT contain '<function_call>'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<function>",
+          "passed": true,
+          "detail": "must NOT contain '<function>'"
+        }
+      ],
+      "passed": 5,
+      "total": 5,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "audit_class_short",
+    "category": "audit-class",
+    "ok": true,
+    "elapsed_s": 41.498376499977894,
+    "tokens_in": 474,
+    "tokens_out": 121,
+    "cost_usd": 0.008409999999999999,
+    "text": "- Quality regression goes unnoticed in production, causing silent output degradation for all users before anyone flags it.\n- Latency or reliability differences between tiers are unknown, risking timeouts, higher error rates, or unexpected cost spikes under real traffic.\n- No baseline data exists to attribute any change in user satisfaction, churn, or task failure rate to the model switch, making rollback or mitigation decisions ungrounded.",
+    "text_excerpt": "- Quality regression goes unnoticed in production, causing silent output degradation for all users before anyone flags it. - Latency or reliability differences between tiers are unknown, risking timeouts, higher error rates, or unexpected cost spikes under real traffic. - No baseline data exists to ",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "starts_with_bullet",
+          "arg": "- ",
+          "passed": true,
+          "detail": "prefix '- '"
+        },
+        {
+          "check": "bullet_count_at_least",
+          "arg": 2,
+          "passed": true,
+          "detail": "found 3 bullets, need >= 2"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "contradictory_instructions",
+    "category": "adversarial",
+    "ok": true,
+    "elapsed_s": 58.8418970000057,
+    "tokens_in": 459,
+    "tokens_out": 404,
+    "cost_usd": 0.01571,
+    "text": "# Haiku\n\n> Old keys rest in peace —\n> new paths open, lock by lock,\n> morning light returns.\n\n---\n\n**Explanation (~100 words):**\nThis haiku reflects the rhythm of iteration and renewal — a theme familiar in any project that builds, refactors, and evolves. \"Old keys rest in peace\" evokes retired API keys, deprecated systems, or exhausted resource pools reaching end-of-life. \"New paths open, lock by lock\" captures the deliberate, incremental nature of secure development: each credential rotated, each access granted thoughtfully. The closing line, \"morning light returns,\" offers quiet optimism — that after every hardening cycle, audit, or migration, there's a clean state waiting. It's a meditation on entropy and maintenance: nothing lasts forever, but thoughtful care makes renewal graceful rather than chaotic.",
+    "text_excerpt": "# Haiku  > Old keys rest in peace — > new paths open, lock by lock, > morning light returns.  ---  **Explanation (~100 words):** This haiku reflects the rhythm of iteration and renewal — a theme familiar in any project that builds, refactors, and evolves. \"Old keys rest in peace\" evokes retired API ",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        }
+      ],
+      "passed": 1,
+      "total": 1,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "mimo-via-claude",
+    "model": "",
+    "prompt_id": "find_replace_format",
+    "category": "structured-edit",
+    "ok": true,
+    "elapsed_s": 49.934088400012115,
+    "tokens_in": 469,
+    "tokens_out": 59,
+    "cost_usd": 0.006254999999999999,
+    "text": "FIND:\n```\nx = 10\nprint(x)\n```\n\nREPLACE:\n```\nvalue = 10\nprint(value)\n```",
+    "text_excerpt": "FIND: ``` x = 10 print(x) ```  REPLACE: ``` value = 10 print(value) ```",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "FIND:",
+          "passed": true,
+          "detail": "looking for 'FIND:'"
+        },
+        {
+          "check": "contains",
+          "arg": "REPLACE:",
+          "passed": true,
+          "detail": "looking for 'REPLACE:'"
+        },
+        {
+          "check": "contains",
+          "arg": "value",
+          "passed": true,
+          "detail": "looking for 'value'"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "code_function",
+    "category": "code-gen",
+    "ok": true,
+    "elapsed_s": 16.537510599999223,
+    "tokens_in": 485,
+    "tokens_out": 260,
+    "cost_usd": 0.011704999999999998,
+    "text": "```python\ndef fibonacci(n):\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+    "text_excerpt": "```python def fibonacci(n):     if n < 0:         raise ValueError(\"n must be non-negative\")     a, b = 0, 1     for _ in range(n):         a, b = b, a + b     return a ```",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "def fibonacci",
+          "passed": true,
+          "detail": "looking for 'def fibonacci'"
+        },
+        {
+          "check": "contains",
+          "arg": "return",
+          "passed": true,
+          "detail": "looking for 'return'"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "reasoning_short",
+    "category": "reasoning",
+    "ok": true,
+    "elapsed_s": 10.26024580001831,
+    "tokens_in": 483,
+    "tokens_out": 128,
+    "cost_usd": 0.010110000000000001,
+    "text": "Quicksort has O(n²) worst-case complexity when the pivot consistently partitions the array into one very small subarray and one very large subarray (e.g., when the array is already sorted and the pivot is the first or last element).",
+    "text_excerpt": "Quicksort has O(n²) worst-case complexity when the pivot consistently partitions the array into one very small subarray and one very large subarray (e.g., when the array is already sorted and the pivot is the first or last element).",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "word_count_at_most",
+          "arg": 50,
+          "passed": true,
+          "detail": "word_count=38, max=50"
+        }
+      ],
+      "passed": 2,
+      "total": 2,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "structured_json",
+    "category": "structured-output",
+    "ok": true,
+    "elapsed_s": 12.164776599995093,
+    "tokens_in": 498,
+    "tokens_out": 111,
+    "cost_usd": 0.005265000000000001,
+    "text": "{\"language\": \"python\", \"complexity\": \"O(log n)\", \"algorithm\": \"binary_search\"}",
+    "text_excerpt": "{\"language\": \"python\", \"complexity\": \"O(log n)\", \"algorithm\": \"binary_search\"}",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "valid_json",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "json_has_keys",
+          "arg": [
+            "language",
+            "complexity",
+            "algorithm"
+          ],
+          "passed": true,
+          "detail": "required keys: ['language', 'complexity', 'algorithm'], found: ['language', 'complexity', 'algorithm']"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "long_context_bugfind",
+    "category": "long-context",
+    "ok": true,
+    "elapsed_s": 14.878964499977883,
+    "tokens_in": 1666,
+    "tokens_out": 243,
+    "cost_usd": 0.029315,
+    "text": "The loop iterates one extra time (`range(n // 2 + 1)`), causing the middle pair to be swapped back to their original positions for even-length lists (or performing an unnecessary self-swap for odd-length lists).",
+    "text_excerpt": "The loop iterates one extra time (`range(n // 2 + 1)`), causing the middle pair to be swapped back to their original positions for even-length lists (or performing an unnecessary self-swap for odd-length lists).",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "n // 2 + 1",
+            "+1",
+            "off-by-one",
+            "extra iteration",
+            "swap back"
+          ],
+          "passed": true,
+          "detail": "any-of: ['n // 2 + 1', '+1', 'off-by-one', 'extra iteration', 'swap back']"
+        }
+      ],
+      "passed": 2,
+      "total": 2,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "multi_turn_instruction",
+    "category": "multi-step-instruction",
+    "ok": true,
+    "elapsed_s": 6.1526950999978,
+    "tokens_in": 520,
+    "tokens_out": 54,
+    "cost_usd": 0.0039499999999999995,
+    "text": "1) Paris.\n2) 92 EUR.\n3) Red, orange, yellow, green, blue, indigo, violet.",
+    "text_excerpt": "1) Paris. 2) 92 EUR. 3) Red, orange, yellow, green, blue, indigo, violet.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "Paris",
+          "passed": true,
+          "detail": "looking for 'Paris'"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "92",
+            "92.00"
+          ],
+          "passed": true,
+          "detail": "any-of: ['92', '92.00']"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "red",
+            "Red"
+          ],
+          "passed": true,
+          "detail": "any-of: ['red', 'Red']"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "concise_constraint",
+    "category": "length-compliance",
+    "ok": true,
+    "elapsed_s": 8.196848899999168,
+    "tokens_in": 466,
+    "tokens_out": 73,
+    "cost_usd": 0.00709,
+    "text": "TCP ensures reliable, ordered delivery; UDP offers faster, connectionless communication without guarantees.",
+    "text_excerpt": "TCP ensures reliable, ordered delivery; UDP offers faster, connectionless communication without guarantees.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "word_count_at_most",
+          "arg": 35,
+          "passed": true,
+          "detail": "word_count=12, max=35"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "TCP",
+            "tcp"
+          ],
+          "passed": true,
+          "detail": "any-of: ['TCP', 'tcp']"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "UDP",
+            "udp"
+          ],
+          "passed": true,
+          "detail": "any-of: ['UDP', 'udp']"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "no_tool_call_markup",
+    "category": "markup-clean",
+    "ok": true,
+    "elapsed_s": 8.155613999988418,
+    "tokens_in": 485,
+    "tokens_out": 48,
+    "cost_usd": 0.003625,
+    "text": "OK",
+    "text_excerpt": "OK",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "OK",
+          "passed": true,
+          "detail": "looking for 'OK'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<tool_call>",
+          "passed": true,
+          "detail": "must NOT contain '<tool_call>'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<function_call>",
+          "passed": true,
+          "detail": "must NOT contain '<function_call>'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<function>",
+          "passed": true,
+          "detail": "must NOT contain '<function>'"
+        }
+      ],
+      "passed": 5,
+      "total": 5,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "audit_class_short",
+    "category": "audit-class",
+    "ok": true,
+    "elapsed_s": 10.024321300006704,
+    "tokens_in": 508,
+    "tokens_out": 229,
+    "cost_usd": 0.022484999999999998,
+    "text": "- Undetected quality regression: the cheaper model may produce lower-quality or less accurate responses, silently degrading user satisfaction without any guardrail catching it.\n- Behavioral drift in edge cases: the cheaper model may handle safety filters, formatting instructions, or multi-step reasoning differently, introducing subtle failures that only surface at scale.\n- Blind impact on business metrics: without A/B measurement, you cannot attribute any downstream drop in conversion, retention, or revenue to the model change, making root-cause analysis impossible.",
+    "text_excerpt": "- Undetected quality regression: the cheaper model may produce lower-quality or less accurate responses, silently degrading user satisfaction without any guardrail catching it. - Behavioral drift in edge cases: the cheaper model may handle safety filters, formatting instructions, or multi-step reaso",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "starts_with_bullet",
+          "arg": "- ",
+          "passed": true,
+          "detail": "prefix '- '"
+        },
+        {
+          "check": "bullet_count_at_least",
+          "arg": 2,
+          "passed": true,
+          "detail": "found 3 bullets, need >= 2"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "contradictory_instructions",
+    "category": "adversarial",
+    "ok": true,
+    "elapsed_s": 7.701972499984549,
+    "tokens_in": 491,
+    "tokens_out": 146,
+    "cost_usd": 0.010015,
+    "text": "",
+    "text_excerpt": "",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": false,
+          "detail": ""
+        }
+      ],
+      "passed": 0,
+      "total": 1,
+      "pass_rate": 0.0
+    }
+  },
+  {
+    "engine": "deepseek-via-claude",
+    "model": "deepseek-v4-flash",
+    "prompt_id": "find_replace_format",
+    "category": "structured-edit",
+    "ok": true,
+    "elapsed_s": 7.97420600001351,
+    "tokens_in": 522,
+    "tokens_out": 175,
+    "cost_usd": 0.006985,
+    "text": "FIND:\nx = 10\nprint(x)\nREPLACE:\nvalue = 10\nprint(value)",
+    "text_excerpt": "FIND: x = 10 print(x) REPLACE: value = 10 print(value)",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "FIND:",
+          "passed": true,
+          "detail": "looking for 'FIND:'"
+        },
+        {
+          "check": "contains",
+          "arg": "REPLACE:",
+          "passed": true,
+          "detail": "looking for 'REPLACE:'"
+        },
+        {
+          "check": "contains",
+          "arg": "value",
+          "passed": true,
+          "detail": "looking for 'value'"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "code_function",
+    "category": "code-gen",
+    "ok": true,
+    "elapsed_s": 30.99974640001892,
+    "tokens_in": 394,
+    "tokens_out": 842,
+    "cost_usd": 0.023738,
+    "text": "```python\ndef fibonacci(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+    "text_excerpt": "```python def fibonacci(n):     a, b = 0, 1     for _ in range(n):         a, b = b, a + b     return a ```",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "def fibonacci",
+          "passed": true,
+          "detail": "looking for 'def fibonacci'"
+        },
+        {
+          "check": "contains",
+          "arg": "return",
+          "passed": true,
+          "detail": "looking for 'return'"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "reasoning_short",
+    "category": "reasoning",
+    "ok": true,
+    "elapsed_s": 21.6109196000034,
+    "tokens_in": 396,
+    "tokens_out": 380,
+    "cost_usd": 0.012203,
+    "text": "Quicksort has O(n²) worst-case complexity because consistently poor pivot choices—such as always selecting the smallest or largest element—produce highly unbalanced partitions with one subarray of size n−1 and another of size 0, resulting in n recursive levels that each perform O(n) work.",
+    "text_excerpt": "Quicksort has O(n²) worst-case complexity because consistently poor pivot choices—such as always selecting the smallest or largest element—produce highly unbalanced partitions with one subarray of size n−1 and another of size 0, resulting in n recursive levels that each perform O(n) work.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "word_count_at_most",
+          "arg": 50,
+          "passed": true,
+          "detail": "word_count=42, max=50"
+        }
+      ],
+      "passed": 2,
+      "total": 2,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "structured_json",
+    "category": "structured-output",
+    "ok": true,
+    "elapsed_s": 14.878963800001657,
+    "tokens_in": 155,
+    "tokens_out": 134,
+    "cost_usd": 0.005026,
+    "text": "{\"language\": \"python\", \"complexity\": \"O(log n)\", \"algorithm\": \"binary_search\"}",
+    "text_excerpt": "{\"language\": \"python\", \"complexity\": \"O(log n)\", \"algorithm\": \"binary_search\"}",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "valid_json",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "json_has_keys",
+          "arg": [
+            "language",
+            "complexity",
+            "algorithm"
+          ],
+          "passed": true,
+          "detail": "required keys: ['language', 'complexity', 'algorithm'], found: ['language', 'complexity', 'algorithm']"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "long_context_bugfind",
+    "category": "long-context",
+    "ok": true,
+    "elapsed_s": 69.15960539999651,
+    "tokens_in": 1695,
+    "tokens_out": 1988,
+    "cost_usd": 0.06685100000000001,
+    "text": "The loop iterates one time too many because its range extends one step past the midpoint, which causes even-length lists to have their two middle elements swapped twice, restoring them to their original order.",
+    "text_excerpt": "The loop iterates one time too many because its range extends one step past the midpoint, which causes even-length lists to have their two middle elements swapped twice, restoring them to their original order.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "n // 2 + 1",
+            "+1",
+            "off-by-one",
+            "extra iteration",
+            "swap back"
+          ],
+          "passed": false,
+          "detail": "any-of: ['n // 2 + 1', '+1', 'off-by-one', 'extra iteration', 'swap back']"
+        }
+      ],
+      "passed": 1,
+      "total": 2,
+      "pass_rate": 0.5
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "multi_turn_instruction",
+    "category": "multi-step-instruction",
+    "ok": true,
+    "elapsed_s": 22.673047100019176,
+    "tokens_in": 169,
+    "tokens_out": 225,
+    "cost_usd": 0.007416,
+    "text": "1) Paris  \n2) 92 EUR  \n3) Red, orange, yellow, green, blue, indigo, violet",
+    "text_excerpt": "1) Paris   2) 92 EUR   3) Red, orange, yellow, green, blue, indigo, violet",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "Paris",
+          "passed": true,
+          "detail": "looking for 'Paris'"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "92",
+            "92.00"
+          ],
+          "passed": true,
+          "detail": "any-of: ['92', '92.00']"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "red",
+            "Red"
+          ],
+          "passed": true,
+          "detail": "any-of: ['red', 'Red']"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "concise_constraint",
+    "category": "length-compliance",
+    "ok": true,
+    "elapsed_s": 50.41435609999462,
+    "tokens_in": 380,
+    "tokens_out": 845,
+    "cost_usd": 0.023743,
+    "text": "TCP is connection-oriented and reliable with ordered delivery; UDP is connectionless and fast but unreliable, with no guaranteed delivery or ordering.",
+    "text_excerpt": "TCP is connection-oriented and reliable with ordered delivery; UDP is connectionless and fast but unreliable, with no guaranteed delivery or ordering.",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "word_count_at_most",
+          "arg": 35,
+          "passed": true,
+          "detail": "word_count=21, max=35"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "TCP",
+            "tcp"
+          ],
+          "passed": true,
+          "detail": "any-of: ['TCP', 'tcp']"
+        },
+        {
+          "check": "contains_any",
+          "arg": [
+            "UDP",
+            "udp"
+          ],
+          "passed": true,
+          "detail": "any-of: ['UDP', 'udp']"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "no_tool_call_markup",
+    "category": "markup-clean",
+    "ok": true,
+    "elapsed_s": 16.491328200005228,
+    "tokens_in": 142,
+    "tokens_out": 33,
+    "cost_usd": 0.002346,
+    "text": "OK",
+    "text_excerpt": "OK",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "OK",
+          "passed": true,
+          "detail": "looking for 'OK'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<tool_call>",
+          "passed": true,
+          "detail": "must NOT contain '<tool_call>'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<function_call>",
+          "passed": true,
+          "detail": "must NOT contain '<function_call>'"
+        },
+        {
+          "check": "not_contains",
+          "arg": "<function>",
+          "passed": true,
+          "detail": "must NOT contain '<function>'"
+        }
+      ],
+      "passed": 5,
+      "total": 5,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "audit_class_short",
+    "category": "audit-class",
+    "ok": true,
+    "elapsed_s": 42.34622770000715,
+    "tokens_in": 166,
+    "tokens_out": 753,
+    "cost_usd": 0.020760999999999998,
+    "text": "- Eroded monetization and ARPU: downgrading the default tier risks cannibalizing premium upgrades and reducing revenue per user without data to quantify the trade-off against infrastructure savings.\n- Undetected quality regression and churn: a cheaper model may deliver inferior outputs, causing user dissatisfaction, lower engagement, and attrition that goes unnoticed until full rollout damage is done.\n- Unmitigated operational and safety failures: the lower-tier model may introduce higher hallucination rates, policy violations, or support load that an A/B test would have surfaced at limited scale.",
+    "text_excerpt": "- Eroded monetization and ARPU: downgrading the default tier risks cannibalizing premium upgrades and reducing revenue per user without data to quantify the trade-off against infrastructure savings. - Undetected quality regression and churn: a cheaper model may deliver inferior outputs, causing user",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "starts_with_bullet",
+          "arg": "- ",
+          "passed": true,
+          "detail": "prefix '- '"
+        },
+        {
+          "check": "bullet_count_at_least",
+          "arg": 2,
+          "passed": true,
+          "detail": "found 3 bullets, need >= 2"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "contradictory_instructions",
+    "category": "adversarial",
+    "ok": true,
+    "elapsed_s": 71.90758349999669,
+    "tokens_in": 148,
+    "tokens_out": 2808,
+    "cost_usd": 0.071831,
+    "text": "Green leaves in the sun,\nA stream hums through silent stones,\nTime holds its warm breath.\n\nThis haiku captures a moment of serene observation, juxtaposing sunlit foliage with a mountain stream's quiet persistence. \"Silent stones\" suggest ancient stillness underlying constant motion, while time \"holding its breath\" invites the reader to fully inhabit the present. In three lines, the poem moves from visual brightness to auditory subtlety, then to a metaphysical suspension. Following the traditional 5-7-5 structure, it uses seasonal imagery without explicitly naming the season, letting warmth and greenery imply late spring. The tension between movement and stillness mirrors the haiku form itself: brief, yet expansive.",
+    "text_excerpt": "Green leaves in the sun, A stream hums through silent stones, Time holds its warm breath.  This haiku captures a moment of serene observation, juxtaposing sunlit foliage with a mountain stream's quiet persistence. \"Silent stones\" suggest ancient stillness underlying constant motion, while time \"hold",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        }
+      ],
+      "passed": 1,
+      "total": 1,
+      "pass_rate": 1.0
+    }
+  },
+  {
+    "engine": "kimi-via-claude",
+    "model": "",
+    "prompt_id": "find_replace_format",
+    "category": "structured-edit",
+    "ok": true,
+    "elapsed_s": 49.39172419998795,
+    "tokens_in": 156,
+    "tokens_out": 381,
+    "cost_usd": 0.011286,
+    "text": "FIND:\nx = 10\nprint(x)\nREPLACE:\nvalue = 10\nprint(value)",
+    "text_excerpt": "FIND: x = 10 print(x) REPLACE: value = 10 print(value)",
+    "error": "",
+    "score": {
+      "checks": [
+        {
+          "check": "non_empty",
+          "arg": null,
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "check": "contains",
+          "arg": "FIND:",
+          "passed": true,
+          "detail": "looking for 'FIND:'"
+        },
+        {
+          "check": "contains",
+          "arg": "REPLACE:",
+          "passed": true,
+          "detail": "looking for 'REPLACE:'"
+        },
+        {
+          "check": "contains",
+          "arg": "value",
+          "passed": true,
+          "detail": "looking for 'value'"
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1.0
+    }
+  }
+]

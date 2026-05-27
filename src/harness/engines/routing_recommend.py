@@ -88,20 +88,41 @@ def recommend(
     excluded = exclude or set()
 
     if tc == "default":
+        # W14-MIMO-PRODUCTION-VALIDATION 2026-05-26: on 10-prompt
+        # realistic corpus, MiMo scored 100% (31/31 checks) vs
+        # DeepSeek-flash 97% and Kimi 97%.  MiMo is also the
+        # cheapest.  The latency tradeoff (36.8s vs 10.2s) is
+        # accepted at default because most "default" callers value
+        # correctness + cost over latency; latency-critical
+        # callers should use the latency task class explicitly.
         primary = "mimo-via-claude"
-        alternates = ("kimi-via-claude", "deepseek-via-claude")
+        alternates = ("deepseek-via-claude", "kimi-via-claude")
         rationale = (
-            "MiMo-via-claude has the fastest mean latency (9.3s) and "
-            "most concise output of the three.  Either alternate "
-            "works equally well for routine code/reasoning tasks."
+            "MiMo-via-claude scored 100% (31/31 programmatic checks) "
+            "on a 10-prompt production corpus + is the cheapest of "
+            "the three.  Latency is 36.8s vs DeepSeek's 10.2s - "
+            "if you need speed pick the `latency` task class "
+            "instead (returns DeepSeek-flash)."
         )
     elif tc == "latency":
-        primary = "mimo-via-claude"
-        alternates = ("deepseek-via-claude",)
+        # W14-MIMO-PRODUCTION-VALIDATION 2026-05-26 RECALIBRATION:
+        # smoke-matrix data showed MiMo at 9.3s, but that was on
+        # trivial prompts (100-200 token outputs).  On realistic
+        # production-class prompts (50-300 word outputs across 10
+        # category corpus), MiMo averaged 36.8s and was SLOWEST on
+        # every single category.  DeepSeek-flash averaged 10.2s
+        # and won latency on every prompt.  Flipping primary from
+        # MiMo to DeepSeek-flash to match production reality.
+        primary = "deepseek-via-claude"
+        alternates = ("mimo-via-claude",)
         rationale = (
-            "MiMo at 9.3s avg.  DeepSeek 10.0s second.  Kimi has "
-            "high variance (long_context spikes to 50s) and is "
-            "not recommended for ≤ 15s budgets."
+            "DeepSeek-flash at 10.2s avg on 10-prompt production "
+            "corpus (W14-MIMO-PRODUCTION-VALIDATION).  Fastest on "
+            "every category.  MiMo averaged 36.8s on same corpus "
+            "- the smoke matrix's 9.3s was trivial-prompt only and "
+            "did not extrapolate to realistic workloads.  Kimi "
+            "averages 39.0s.  Use DeepSeek-flash when latency "
+            "matters."
         )
     elif tc == "verbose":
         primary = "kimi-via-claude"
@@ -112,19 +133,20 @@ def recommend(
             "the deliverable.  Accept the 18-50s latency."
         )
     elif tc == "cost":
-        # W14-MIMO-PRICE-CUT 2026-05-26 6PM PDT: MiMo-V2.5-Pro permanent
-        # price cut (-57%/-71%/-98%) makes MiMo the cost leader by ~2x
-        # over Kimi/DeepSeek.  Token Plan Pro $50/month → 38B credits
-        # ≈ 6200 audit-class dispatches.
+        # W14-MIMO-PRICE-CUT 2026-05-26 6PM PDT + W14-MIMO-PRODUCTION-
+        # VALIDATION evening: MiMo is cheapest on BOTH the smoke
+        # matrix ($0.033) AND the production corpus ($0.088 for 10
+        # realistic prompts vs DeepSeek $0.111 and Kimi $0.245).
+        # Plus highest quality score (100% vs 97%).
         primary = "mimo-via-claude"
         alternates = ("kimi-via-claude", "deepseek-via-claude")
         rationale = (
-            "MiMo-via-claude smoked at $0.033 total for 5 categories "
-            "(post-2026-05-26 price cut), 2x cheaper than Kimi $0.076 "
-            "and DeepSeek $0.055.  Token Plan Pro $50/month buys "
-            "~6,200 audit-class dispatches.  Note MiMo's tool-call "
-            "XML markup quirk on long structured prompts - see the "
-            "empirical doc."
+            "MiMo-via-claude cheapest on both smoke ($0.033/5-cat) "
+            "and production ($0.0875/10-prompt) corpora.  Token "
+            "Plan Pro $50/month buys ~6,200 audit-class dispatches.  "
+            "Latency penalty (36.8s realistic vs DeepSeek 10.2s) "
+            "accepted at this task class - if speed matters, use "
+            "the latency task class."
         )
     elif tc == "high-volume":
         # New task class for "batch dispatch, 100s-1000s of times"

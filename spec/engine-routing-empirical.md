@@ -12,13 +12,23 @@ This document supersedes the per-engine sections of [coord/dev_loop/dispatch-rul
 
 **All three Pattern B engines are production-ready across all 5 test categories.**  Post-`--tools` fix smoke matrix 2026-05-26 evening: 15/15 dispatches in 76s wall-clock, $0.16 total cost.
 
+**Smoke-matrix numbers** (5 trivial-ish prompts × 3 engines, 76s wall, $0.16 total):
+
 | Engine | Avg latency | Total cost | Tokens out | Cost / success | Default model |
 |---|---|---|---|---|---|
 | `kimi-via-claude` | 29.8s | $0.076 | 2,136 | $0.015 | `kimi-for-coding` |
 | `mimo-via-claude` | 10.9s | $0.033 | 299 | $0.0067 | (provider default) |
 | `deepseek-via-claude` | 5.0s | $0.055 | 591 | $0.011 | `deepseek-v4-flash` |
 
-MiMo is now the cost leader by a ~2× margin (was ~par with Kimi pre-price-cut).  DeepSeek-flash is the latency leader at 5.0s (Pattern B subprocess overhead dominates anything below).
+**Production-class corpus** (W14-MIMO-PRODUCTION-VALIDATION 2026-05-26 — 10 realistic prompts × 3 engines, 175s wall, $0.44 total):
+
+| Engine | OK | Score | Avg latency | Total cost | Avg tokens out |
+|---|---|---|---|---|---|
+| `mimo-via-claude` | 10/10 | **31/31 (100%)** | **36.8s** | $0.0875 | 110 |
+| `deepseek-via-claude` | 10/10 | 30/31 (97%) | **10.2s** | $0.1105 | 147 |
+| `kimi-via-claude` | 10/10 | 30/31 (97%) | 39.0s | $0.2452 | 839 |
+
+**Calibration update**: smoke-matrix latency rankings DON'T extrapolate to realistic workloads.  On the production corpus, MiMo is consistently the SLOWEST engine despite winning the smoke matrix.  But MiMo also scored highest on quality (100% programmatic pass rate) and lowest on cost — so it remains the cost-class primary, just not the latency-class primary.
 
 **Latency:** `mimo-via-claude` is fastest on average; `deepseek-via-claude` close second (since W14-CROSS-ENGINE-AUDIT flipped its default to v4-flash); `kimi-via-claude` has highest variance — fast on simple prompts (~8s), slow on long-context (50s).
 
@@ -43,11 +53,13 @@ MiMo handles all 5 test categories reliably with the fastest mean latency.  Outp
 When the operator is waiting and ≤ 15s matters:
 
 ```
-mimo-via-claude  (9.3s avg)        ← first choice
-deepseek-via-claude (10.0s avg)    ← second choice (v4-flash default)
+deepseek-via-claude (10.2s avg on 10-prompt production corpus)  ← first choice
+mimo-via-claude (36.8s avg, slower on every category)           ← second choice
 ```
 
-Kimi-via-claude has highest variance; avoid for latency-critical paths unless you've already paid the cost.
+**W14-MIMO-PRODUCTION-VALIDATION 2026-05-26 calibration**: the smoke matrix's "MiMo is fastest at 9.3s" finding was **trivial-prompt-only data** that did NOT extrapolate to realistic workloads.  On a 10-category production corpus (code-gen, reasoning, long-context bug-find, multi-step instructions, structured JSON, audit-class prompts, etc.), MiMo averaged 36.8s and was the SLOWEST engine on every category.  DeepSeek-flash averaged 10.2s and won every category.  Kimi averaged 39.0s.
+
+Use DeepSeek-flash when latency matters.  Use MiMo when cost matters and you have latency budget.
 
 ### Long-context / detailed explanation
 
