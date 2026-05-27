@@ -2575,12 +2575,23 @@ def lint_spec_cmd(spec_path: Path | None, spec_opt: Path | None, fmt: str) -> No
 @cli.command(name="doctor")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
               default="pretty")
-def doctor_cmd(fmt: str) -> None:
-    """Preflight: check git, python, DPAPI, secrets, coord/ perms, Task Scheduler."""
+@click.option("--probe", "with_probe", is_flag=True, default=False,
+              help="Also run a LIVE network probe against each configured "
+                   "engine (real ~5-token round-trips).  Catches expired / "
+                   "typo'd / quota-exhausted keys that the presence check "
+                   "cannot.  Costs a few cents per run, takes several "
+                   "seconds per engine.  P2 audit fix 2026-05-27.")
+def doctor_cmd(fmt: str, with_probe: bool) -> None:
+    """Preflight: check git, python, DPAPI, engine keys, coord/ perms, Task Scheduler.
+
+    By default this only checks key PRESENCE.  Use ``--probe`` to also
+    do a live network round-trip per engine (catches dead / expired /
+    typo'd keys that simple presence checks cannot).
+    """
     import dataclasses
     from harness.doctor import run_all, overall_severity
 
-    diagnoses = run_all()
+    diagnoses = run_all(with_probe=with_probe)
     overall = overall_severity(diagnoses)
 
     if fmt == "json":

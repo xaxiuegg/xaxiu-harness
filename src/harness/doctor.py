@@ -62,81 +62,157 @@ def _check_dpapi() -> Diagnosis:
                          "Run `harness install` to seed the secrets store")
 
 
-def _check_secrets() -> Diagnosis:
+# ---------------------------------------------------------------------------
+# P2 audit fix (2026-05-27): the pre-audit doctor had THREE near-duplicate
+# presence checks — _check_secrets, _check_engine_reachability, and
+# _check_env_var_inventory.  None of them did a network call, but the one
+# named "engine_reachability" promised reachability it never delivered.
+# The audit collapsed them into a single _check_engine_keys() PRESENCE
+# check; the real reachability path is the new --probe flag, which calls
+# probe_engine_live() (the same function keys_ui uses).
+# ---------------------------------------------------------------------------
+
+REQUIRED_KEY_VARS: tuple[str, ...] = (
+    "KIMI_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "MIMO_API_KEY",
+    "OPENAI_API_KEY",
+)
+
+
+def _check_engine_keys() -> Diagnosis:
+    """Single presence check for engine API keys (DPAPI + env).
+
+    Replaces the pre-P2 triplet:
+        _check_secrets / _check_engine_reachability / _check_env_var_inventory
+
+    Reports ``fail`` if NO key is configured, ``ok`` otherwise.  The
+    message carries a full per-key inventory (DPAPI / ENV / UNSET) plus
+    the MiMo Token-Plan / PAYG hint that used to live in the (misnamed)
+    reachability check.  The fix-hint tells the operator to run
+    ``harness doctor --probe`` if they want network validation.
+    """
+    required = set(REQUIRED_KEY_VARS) - {"OPENAI_API_KEY"}
     try:
         from harness.secrets import dpapi
-        names = set(dpapi.list_secrets())
+        dpapi_names = set(dpapi.list_secrets()) & required
     except Exception:
-        return Diagnosis("secrets", "warn", "couldn't enumerate secrets")
-    required_any = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
-                    "GEMINI_API_KEY", "MIMO_API_KEY"}
-    present_dpapi = names & required_any
-    present_env = {k for k in required_any if os.environ.get(k)}
-    if present_dpapi or present_env:
-        return Diagnosis(
-            "secrets", "ok",
-            f"engine keys available: dpapi={sorted(present_dpapi) or '(none)'} env={sorted(present_env) or '(none)'}",
-        )
-    return Diagnosis("secrets", "fail",
-                     "no engine API keys found (DPAPI or env)",
-                     "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY env vars")
+        dpapi_names = set()
+    env_names = {k for k in required if os.environ.get(k)}
 
-
-def _check_engine_reachability() -> Diagnosis:
-    required = {"KIMI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
-                "GEMINI_API_KEY", "MIMO_API_KEY"}
-    try:
-        from harness.secrets import dpapi
-        dpapi_count = sum(1 for s in dpapi.list_secrets() if s in required)
-    except Exception:
-        dpapi_count = 0
-    env_hits = [k for k in required if os.environ.get(k)]
-    if dpapi_count == 0 and not env_hits:
-        return Diagnosis(
-            "engine_reachability", "fail",
-            "no engine API keys found (DPAPI or env)",
-            "Run `harness install` or set DEEPSEEK_API_KEY / KIMI_API_KEY / MIMO_API_KEY env vars",
-        )
+    # Per-key inventory line: every required key, with its source tag.
     parts = []
-    if dpapi_count:
-        parts.append(f"dpapi={dpapi_count}")
-    if env_hits:
-        parts.append(f"env={env_hits[0]}")
-    # WIRE-MIMO-DOCTOR (2026-05-22): surface Token Plan subscription
-    # status when MIMO_API_KEY is set, so operators know the tp- key
-    # was recognised as "unlimited".
-    mimo_key = os.environ.get("MIMO_API_KEY", "")
-    if mimo_key.startswith("tp-"):
-        parts.append("mimo=tokenplan")
-    elif mimo_key.startswith("sk-"):
-        parts.append("mimo=payg")
-    return Diagnosis("engine_reachability", "ok", " ".join(parts))
-
-
-def _check_env_var_inventory() -> Diagnosis:
-    keys = [
-        "KIMI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "GEMINI_API_KEY",
-        "MIMO_API_KEY",
-        "OPENAI_API_KEY",
-    ]
-    parts = []
-    any_set = False
-    for k in keys:
-        if os.environ.get(k):
-            parts.append(f"{k}:SET")
-            any_set = True
+    for k in REQUIRED_KEY_VARS:
+        if k in dpapi_names:
+            parts.append(f"{k}:DPAPI")
+        elif os.environ.get(k):
+            parts.append(f"{k}:ENV")
         else:
             parts.append(f"{k}:UNSET")
-    severity = "ok" if any_set else "warn"
+    inventory = ", ".join(parts)
+
+    if not dpapi_names and not env_names:
+        return Diagnosis(
+            "engine_keys", "fail",
+            f"no engine API keys configured ({inventory})",
+            "Run `harness keys serve` to add at least one key via the "
+            "browser form, or set DEEPSEEK_API_KEY / KIMI_API_KEY / "
+            "MIMO_API_KEY env vars.",
+        )
+
+    # MiMo type tag (tp- = Token Plan subscription, sk- = pay-as-you-go).
+    # Never leak the actual key — only the 3-char prefix branches.
+    mimo_key = os.environ.get("MIMO_API_KEY", "")
+    mimo_tag = ""
+    if mimo_key.startswith("tp-"):
+        mimo_tag = " | mimo=tokenplan"
+    elif mimo_key.startswith("sk-"):
+        mimo_tag = " | mimo=payg"
+
     return Diagnosis(
-        "env_var_inventory",
-        severity,
-        ", ".join(parts),
-        "Set at least one engine API key in your environment",
+        "engine_keys", "ok",
+        f"{inventory}{mimo_tag} (run `harness doctor --probe` for live "
+        "network validation)",
     )
+
+
+# ---------------------------------------------------------------------------
+# Live network probe (opt-in; --probe flag)
+# ---------------------------------------------------------------------------
+
+
+# Required-var → engine name for probe_engine_live().  Anthropic + Gemini
+# are intentionally excluded for now because most operators reach them via
+# Pattern B subprocess wrappers (kimi-via-claude / etc.), not the direct
+# httpx engines; auto-probing the direct path on a Pattern-B key would
+# misleadingly flag the engine "down" when it's actually fine.
+_PROBEABLE_ENGINES: dict[str, str] = {
+    "KIMI_API_KEY": "kimi",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "MIMO_API_KEY": "mimo",
+}
+
+
+def _probe_engines_live() -> list[Diagnosis]:
+    """Run probe_engine_live() for each provider with a key configured.
+
+    Returns one Diagnosis per probed engine (or one ``warn`` if nothing
+    is configured to probe).  Each probe does a real ~5-token dispatch
+    via the same code path keys_ui uses (W14-PATTERN-B-* circuit), so a
+    typo'd / expired / quota-exhausted key shows up as fail here.
+
+    Excluded from default ``doctor`` runs (slow + costs a few cents);
+    surfaced only when the operator passes ``--probe``.
+    """
+    from harness.cli_helpers import probe_engine_live  # lazy: heavy import
+
+    required = set(_PROBEABLE_ENGINES) & set(REQUIRED_KEY_VARS)
+    try:
+        from harness.secrets import dpapi
+        dpapi_names = set(dpapi.list_secrets()) & required
+    except Exception:
+        dpapi_names = set()
+    env_names = {k for k in required if os.environ.get(k)}
+    configured = sorted(dpapi_names | env_names)
+
+    if not configured:
+        return [Diagnosis(
+            "engine_probe", "warn",
+            "no probeable keys configured (kimi/deepseek/mimo) — "
+            "nothing to probe",
+            "Configure at least one provider key, then re-run "
+            "`harness doctor --probe`.",
+        )]
+
+    results: list[Diagnosis] = []
+    for var in configured:
+        engine = _PROBEABLE_ENGINES[var]
+        try:
+            category, err = probe_engine_live(engine, log=False)
+        except Exception as exc:
+            results.append(Diagnosis(
+                f"probe:{engine}", "fail",
+                f"{engine} probe crashed: "
+                f"{type(exc).__name__}: {str(exc)[:120]}",
+                f"Re-check the {var} value (DPAPI store or .env).",
+            ))
+            continue
+        if category == "up":
+            results.append(Diagnosis(
+                f"probe:{engine}", "ok",
+                f"{engine} live probe OK",
+            ))
+        else:
+            err_snip = (err or "")[:120].replace("\n", " ")
+            results.append(Diagnosis(
+                f"probe:{engine}", "fail",
+                f"{engine} probe failed (category={category}): {err_snip}",
+                f"Re-check the {var} value or run "
+                f"`harness keys serve` to rotate.",
+            ))
+    return results
 
 
 def _check_coord_writable() -> Diagnosis:
@@ -215,19 +291,28 @@ def _check_task_scheduler() -> Diagnosis:
         return Diagnosis("task_scheduler", "warn", f"task scheduler probe error: {exc}")
 
 
-def run_all() -> list[Diagnosis]:
-    """Run every check and return the list of Diagnoses."""
-    return [
+def run_all(with_probe: bool = False) -> list[Diagnosis]:
+    """Run every check and return the list of Diagnoses.
+
+    Args:
+        with_probe: when True, append live network probes against each
+            provider with a configured key (real ~5-token round-trips).
+            Default False — probes are slow (several seconds per engine)
+            and cost a few cents per run.  Surfaced via ``harness doctor
+            --probe`` (P2 audit fix 2026-05-27).
+    """
+    diags = [
         _check_python_version(),
         _check_git(),
         _check_claude_binary(),  # W14-DEPLOY-FRICTION: required by Pattern B
         _check_dpapi(),
-        _check_secrets(),
-        _check_engine_reachability(),
-        _check_env_var_inventory(),
+        _check_engine_keys(),    # P2: consolidated presence check
         _check_coord_writable(),
         _check_task_scheduler(),
     ]
+    if with_probe:
+        diags.extend(_probe_engines_live())
+    return diags
 
 
 def overall_severity(diagnoses: list[Diagnosis]) -> str:

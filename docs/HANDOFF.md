@@ -65,12 +65,14 @@ to ask me if anything fails or needs my input:
 4. Run `python -m harness doctor` and show me the 9-check traffic-light output.
    If any check is red, walk me through fixing it before continuing.
 
-5. API keys.  Look at step 4's `secrets` and `engine_reachability` checks.
+5. API keys.  Look at step 4's `engine_keys` check (P2 audit fix
+   2026-05-27 consolidated the old `secrets` + `engine_reachability`
+   + `env_var_inventory` checks into one).
 
-   IF they were green (I already have at least one provider key configured):
+   IF it was green (I already have at least one provider key configured):
        Skip to step 7.  Just tell me which key(s) you saw + that we're moving on.
 
-   IF either was red or yellow:
+   IF it was red or yellow:
        Run `python -m harness keys serve --no-open`.
        Print the URL it shows + tell me to open it in my browser.
        Wait for me to confirm I've pasted my keys, clicked Test on each
