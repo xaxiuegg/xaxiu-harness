@@ -81,15 +81,25 @@ to ask me if anything fails or needs my input:
    tell me what's most likely wrong (usually: bad API key, expired Claude Code
    auth, or no MiMo key configured — try a different --engines value if so).
 
-8. When the verification dispatch succeeds, tell me:
+8. Ask me: "Do you want the harness available in ALL future Claude Code
+   sessions on this machine?  This appends a section to ~/.claude/CLAUDE.md
+   so every Claude Code session — in any project directory — knows the
+   harness is installed and how to use it.  Idempotent + uninstallable."
+   If I say yes: `python -m harness install-agent-instructions`
+   If I say no or "ask again later", skip — I can run it manually anytime
+   (or `--uninstall` to remove later).
+
+9. When everything succeeds, tell me:
    - The harness is set up and working
-   - The 3 most useful commands I should know:
+   - The 4 most useful commands I should know:
        * python -m harness ask "..."       (your daily driver)
        * python -m harness keys serve      (manage keys via browser)
        * python -m harness doctor          (verify health)
+       * python -m harness engines recommend <task-class>  (pick right engine)
    - Where outputs land: coord/reviews/ask-<timestamp>-<slug>/
-   - That docs/HARNESS_VISUAL_MANUAL.md is the screenshot walkthrough of
-     everything the harness can do
+   - That docs/HARNESS_VISUAL_MANUAL.md has the screenshot walkthrough
+   - That docs/USING_HARNESS_FROM_OTHER_PROJECTS.md explains using
+     the harness from any project directory
 
 CRITICAL: do NOT try to "fix" failures by running arbitrary commands or editing
 my .env / configuration files.  Tell me the error, suggest the most likely

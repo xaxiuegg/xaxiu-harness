@@ -6,6 +6,8 @@
 
 **Handing this to someone else?** → **[docs/HANDOFF.md](docs/HANDOFF.md)** is the one-page sharing kit: the URL, the message, and the exact prompt to paste into their Claude Code.  Recipient time: 15-25 min.
 
+**Using the harness from another project?** → [docs/USING_HARNESS_FROM_OTHER_PROJECTS.md](docs/USING_HARNESS_FROM_OTHER_PROJECTS.md) — once installed, the harness works from any directory; one command (`harness install-agent-instructions`) makes it discoverable to every Claude Code session on the machine.
+
 **Visual operator manual?** → **[docs/HARNESS_VISUAL_MANUAL.md](docs/HARNESS_VISUAL_MANUAL.md)** is the screenshot-driven walkthrough — what each command looks like + when to reach for each.  Refined by a 3-engine review panel.
 
 **Non-technical operator first-time setup?** → [docs/OPERATOR_QUICKSTART.md](docs/OPERATOR_QUICKSTART.md) is the 30-minute blank-machine-to-first-dispatch guide.

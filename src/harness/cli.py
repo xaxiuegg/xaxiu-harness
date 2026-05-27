@@ -401,6 +401,294 @@ def start_cmd(orchestrator: str | None, mode: str | None,
     sys.exit(0)
 
 
+@cli.command(name="agent-instructions")
+@click.option("--format", "fmt", type=click.Choice([
+    "claude-md", "prompt", "short",
+]), default="claude-md", help=(
+    "Output format.  'claude-md' = a CLAUDE.md section you can paste "
+    "into ~/.claude/CLAUDE.md (works for all sessions on this machine). "
+    "'prompt' = a one-shot prompt to paste into a new agent session. "
+    "'short' = a one-paragraph hint."
+))
+def agent_instructions_cmd(fmt: str) -> None:
+    """W14-AGENT-INSTRUCTIONS 2026-05-26: print a snippet that tells
+    an agent (Claude Code, Cursor, etc.) the harness is available and
+    how to use it.
+
+    Use cases:
+
+      \b
+      harness agent-instructions > ~/.claude/CLAUDE.md.harness.md
+        (then `cat` it into your user-level CLAUDE.md to have the
+         harness auto-available in every Claude Code session on
+         this machine)
+
+      \b
+      harness agent-instructions --format prompt | clip      (Windows)
+      harness agent-instructions --format prompt | pbcopy    (macOS)
+        (puts the prompt in your clipboard; paste into the next
+         agent session manually)
+
+      \b
+      harness agent-instructions --format short
+        (one-paragraph hint for embedding in a project's CLAUDE.md)
+    """
+    # Resolve the install path so the snippet has the right absolute
+    # path baked in
+    repo_root = Path(__file__).resolve().parents[2]
+    home_dir = Path.home()
+
+    if fmt == "claude-md":
+        click.echo(
+            f"## xaxiu-harness is available\n\n"
+            f"You have access to a cross-engine LLM dispatch tool "
+            f"installed at `{repo_root}`.  Use it for:\n\n"
+            f"- **Multi-engine review**: "
+            f"`python -m harness ask \"your question\"` fires 3 "
+            f"engines (Kimi / MiMo / DeepSeek) in parallel and saves "
+            f"all 3 responses to `{repo_root}\\coord\\reviews\\ask-"
+            f"<timestamp>-<slug>\\`.  Read `packet.md` from that "
+            f"directory for the concatenated synthesis-ready bundle.\n"
+            f"- **Engine health check**: `python -m harness doctor`\n"
+            f"- **Engine recommendation**: `python -m harness engines "
+            f"recommend <task-class>` where `<task-class>` is one of: "
+            f"`default`, `latency`, `verbose`, `cost`, `high-volume`, "
+            f"`multimodal`, `audit`.\n"
+            f"- **Key management**: `python -m harness keys serve` "
+            f"launches a browser form for managing per-provider API "
+            f"keys.\n\n"
+            f"**When to prefer `harness ask`**: when the user asks "
+            f"for \"a second opinion\", \"what does X think\", "
+            f"\"cross-engine review\", or for any high-stakes "
+            f"decision where independent perspectives matter.  "
+            f"Don't reach for it on every prompt — it costs $0.20-"
+            f"0.30 per panel and takes 30s-2min.\n\n"
+            f"**Output dir convention**: every `harness ask` saves "
+            f"to a timestamped + slugified directory.  The directory "
+            f"contains `question.md`, `<engine>.md` per engine, "
+            f"`packet.md` (synthesis-ready bundle), and "
+            f"`summary.json` (programmatic metadata).\n\n"
+            f"**Wrapper scripts**: per-provider Claude Code shortcuts "
+            f"live at `{home_dir}\\.harness\\bin\\` (claude-mimo, "
+            f"claude-kimi, claude-deepseek, etc.) — useful for "
+            f"interactive sessions routed to a specific provider.  "
+            f"Run `python -m harness engines list-wrappers` to see "
+            f"which are installed.\n\n"
+            f"**Visual reference**: `{repo_root}\\docs\\"
+            f"HARNESS_VISUAL_MANUAL.md` has screenshots + walkthrough "
+            f"of every verb.\n"
+        )
+    elif fmt == "prompt":
+        click.echo(
+            f"You have xaxiu-harness installed at {repo_root}.  Use it "
+            f"for cross-engine reviews:\n\n"
+            f"- For multi-engine opinion / second opinion / "
+            f"cross-engine review: run "
+            f"`python -m harness ask \"the question\"`.  Read the "
+            f"`packet.md` it produces under "
+            f"`{repo_root}\\coord\\reviews\\ask-<ts>-<slug>\\`.\n"
+            f"- For engine health: `python -m harness doctor`\n"
+            f"- For engine recommendation: "
+            f"`python -m harness engines recommend <task-class>`\n\n"
+            f"Don't reach for the harness on every prompt — only "
+            f"when independent perspectives genuinely matter.  Cost "
+            f"is $0.20-0.30 per panel, time 30s-2min."
+        )
+    elif fmt == "short":
+        click.echo(
+            f"xaxiu-harness ({repo_root}) provides "
+            f"`python -m harness ask \"question\"` for cross-engine "
+            f"review.  Fires 3 engines in parallel; saves to "
+            f"coord/reviews/ask-<ts>/.  Reach for it when the user "
+            f"wants \"a second opinion\" or \"what does X / Y / Z "
+            f"think\".  $0.20-0.30, 30s-2min per panel."
+        )
+    sys.exit(0)
+
+
+@cli.command(name="install-agent-instructions")
+@click.option("--target", "target_path", type=click.Path(
+    dir_okay=False, path_type=Path,
+), default=None, help=(
+    "Path to the CLAUDE.md to append into.  Default: "
+    "~/.claude/CLAUDE.md (Claude Code's user-level memory)."
+))
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print what would be appended without writing.")
+@click.option("--uninstall", is_flag=True, default=False,
+              help="Remove the harness section from the target file "
+                   "(matched by W14-HARNESS-AGENT-INSTRUCTIONS marker).")
+@click.option("--force", is_flag=True, default=False,
+              help="Re-append even if the marker already exists "
+                   "(replaces the existing section).")
+def install_agent_instructions_cmd(
+    target_path: Path | None,
+    dry_run: bool,
+    uninstall: bool,
+    force: bool,
+) -> None:
+    """W14-AGENT-INSTRUCTIONS 2026-05-26: append the harness snippet
+    to ~/.claude/CLAUDE.md so EVERY Claude Code session on this
+    machine knows the harness is available.
+
+    Idempotent: re-running is a no-op unless --force is given.
+    The appended section is wrapped in HTML comment markers
+    (``<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->``) so it
+    can be detected + removed cleanly.
+
+    Examples:
+
+      \b
+      harness install-agent-instructions
+        (appends to ~/.claude/CLAUDE.md, creating it if missing)
+
+      \b
+      harness install-agent-instructions --target ./CLAUDE.md
+        (appends to the current project's CLAUDE.md instead)
+
+      \b
+      harness install-agent-instructions --dry-run
+        (preview what would change)
+
+      \b
+      harness install-agent-instructions --uninstall
+        (remove the harness section, leaving the rest of
+         CLAUDE.md untouched)
+    """
+    # Resolve target
+    if target_path is None:
+        target_path = Path.home() / ".claude" / "CLAUDE.md"
+    target_path = Path(target_path).resolve()
+
+    # Markers for idempotent install / uninstall
+    start_marker = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->"
+    end_marker = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-END -->"
+
+    # Build the snippet
+    repo_root = Path(__file__).resolve().parents[2]
+    home_dir = Path.home()
+    snippet_body = (
+        f"## xaxiu-harness is available\n\n"
+        f"You have access to a cross-engine LLM dispatch tool "
+        f"installed at `{repo_root}`.  Use it for:\n\n"
+        f"- **Multi-engine review**: "
+        f"`python -m harness ask \"your question\"` fires 3 engines "
+        f"(Kimi / MiMo / DeepSeek) in parallel and saves all 3 "
+        f"responses to `{repo_root}\\coord\\reviews\\ask-"
+        f"<timestamp>-<slug>\\`.  Read `packet.md` from that "
+        f"directory for the concatenated synthesis-ready bundle.\n"
+        f"- **Engine health check**: `python -m harness doctor`\n"
+        f"- **Engine recommendation**: `python -m harness engines "
+        f"recommend <task-class>` (default / latency / verbose / "
+        f"cost / high-volume / multimodal / audit).\n"
+        f"- **Key management**: `python -m harness keys serve` "
+        f"launches a browser form for managing per-provider API keys.\n\n"
+        f"**When to prefer `harness ask`**: when the user asks for "
+        f"\"a second opinion\", \"what does X think\", \"cross-engine "
+        f"review\", or for any high-stakes decision where independent "
+        f"perspectives matter.  Don't reach for it on every prompt — "
+        f"costs $0.20-0.30 per panel; takes 30s-2min.\n\n"
+        f"**Visual reference**: `{repo_root}\\docs\\"
+        f"HARNESS_VISUAL_MANUAL.md` has screenshots + walkthrough of "
+        f"every verb.\n"
+    )
+    full_block = (
+        f"\n{start_marker}\n"
+        f"<!-- Auto-installed by `harness install-agent-instructions`. "
+        f"Edit the harness repo, not this block. -->\n\n"
+        f"{snippet_body}\n"
+        f"{end_marker}\n"
+    )
+
+    # Read current state
+    if target_path.exists():
+        current = target_path.read_text(encoding="utf-8")
+    else:
+        current = ""
+
+    # Locate existing block (if any) for idempotent + force + uninstall
+    has_block = start_marker in current and end_marker in current
+    if has_block:
+        start_idx = current.index(start_marker)
+        end_idx = current.index(end_marker) + len(end_marker)
+        # Include the leading \n if present
+        if start_idx > 0 and current[start_idx - 1] == "\n":
+            start_idx -= 1
+
+    # ---- Uninstall ----
+    if uninstall:
+        if not has_block:
+            click.echo(
+                f"  (no harness section found in {target_path})"
+            )
+            sys.exit(0)
+        new_content = current[:start_idx] + current[end_idx:]
+        # Strip trailing newlines we just orphaned
+        new_content = new_content.rstrip("\n") + "\n"
+        if dry_run:
+            click.echo(
+                f"  Would remove the harness section from {target_path}"
+            )
+            click.echo(f"  ({end_idx - start_idx} bytes)")
+            sys.exit(0)
+        target_path.write_text(new_content, encoding="utf-8")
+        click.echo(
+            click.style(
+                f"  ✓ removed harness section from {target_path}",
+                fg="green",
+            )
+        )
+        sys.exit(0)
+
+    # ---- Install / append ----
+    if has_block and not force:
+        click.echo(
+            f"  Harness section already present in {target_path}."
+        )
+        click.echo(
+            f"  Use --force to replace it, or --uninstall to remove."
+        )
+        sys.exit(0)
+
+    if has_block and force:
+        # Replace existing block
+        new_content = current[:start_idx] + full_block + current[end_idx:]
+        action = "replaced"
+    else:
+        # Append (with leading separator if file non-empty)
+        if current and not current.endswith("\n"):
+            current = current + "\n"
+        new_content = current + full_block
+        action = "appended to"
+
+    if dry_run:
+        click.echo(
+            f"  Would {'replace' if action == 'replaced' else 'append'} "
+            f"in: {target_path}"
+        )
+        click.echo()
+        click.echo("  ---- preview ----")
+        click.echo(full_block)
+        click.echo("  ---- end preview ----")
+        sys.exit(0)
+
+    # Ensure parent dir exists
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(new_content, encoding="utf-8")
+    click.echo(
+        click.style(
+            f"  ✓ harness section {action} {target_path}",
+            fg="green",
+        )
+    )
+    click.echo()
+    click.echo(
+        "  Every Claude Code session on this machine will now know "
+        "the harness is available + how to use it."
+    )
+    sys.exit(0)
+
+
 @cli.command(name="setup")
 @click.option("--non-interactive", is_flag=True, default=False,
               help="Accept safe defaults at every prompt + skip "
