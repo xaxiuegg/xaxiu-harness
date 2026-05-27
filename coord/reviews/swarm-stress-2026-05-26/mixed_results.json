@@ -1,0 +1,25 @@
+{
+  "wall_s": 39.10582179998164,
+  "total": 12,
+  "ok": 12,
+  "per_backend": {
+    "claude-mimo": {
+      "ok": 4,
+      "total": 4,
+      "avg_latency_s": 35.705676374993345,
+      "max_latency_s": 39.10296639997978
+    },
+    "claude-kimi": {
+      "ok": 4,
+      "total": 4,
+      "avg_latency_s": 35.93224627500604,
+      "max_latency_s": 37.54626490001101
+    },
+    "claude-deepseek": {
+      "ok": 4,
+      "total": 4,
+      "avg_latency_s": 31.79984357500507,
+      "max_latency_s": 32.836759099998744
+    }
+  }
+}
