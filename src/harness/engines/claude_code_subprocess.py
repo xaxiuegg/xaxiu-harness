@@ -639,6 +639,14 @@ class ClaudeCodeSubprocessEngine(Engine):
                     input=packet_content,
                     capture_output=True,
                     text=True,
+                    # W14-UNICODE-FIX 2026-05-26: force UTF-8 encoding
+                    # for stdin/stdout/stderr.  Without this, Windows
+                    # defaults to cp1252 which fails on Unicode arrows
+                    # (-> in pricing docs), em-dashes, CJK content,
+                    # emoji.  errors="replace" prevents crashes on
+                    # bytes the model returns that we can't decode.
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=timeout,
                     env=env,
                     # check=False so we can extract the error from stderr/stdout

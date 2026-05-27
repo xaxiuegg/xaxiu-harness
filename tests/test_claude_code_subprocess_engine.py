@@ -1173,3 +1173,68 @@ class TestModuleConstants:
         # Every endpoint has a default model
         for key in PROVIDER_ANTHROPIC_ENDPOINTS:
             assert key in DEFAULT_MODEL_PER_ENGINE
+
+
+class TestUnicodeSafety:
+    """W14-UNICODE-FIX 2026-05-26: subprocess.run with text=True on
+    Windows defaults to cp1252 which fails on non-ASCII content.
+    Verify we force UTF-8 explicitly.
+    """
+
+    def test_subprocess_called_with_utf8_encoding(self) -> None:
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x",
+            default_model="d", verify_binary=False,
+        )
+        captured_kwargs = {}
+
+        def fake_run(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return _make_subprocess_result(
+                stdout=_make_success_json(text="OK"),
+                stderr="",
+                returncode=0,
+            )
+
+        with patch(
+            "harness.engines.claude_code_subprocess.subprocess.run",
+            side_effect=fake_run,
+        ):
+            eng.dispatch("plain ascii", "m", {})
+
+        assert captured_kwargs.get("encoding") == "utf-8"
+        # errors="replace" prevents crashes on un-decodable response bytes
+        assert captured_kwargs.get("errors") == "replace"
+
+    def test_dispatch_with_unicode_prompt(self) -> None:
+        # The bug was: prompts containing ->/x/em-dash failed on Windows
+        # with UnicodeEncodeError before they even hit Claude Code.
+        # Now they should pass through cleanly.
+        eng = ClaudeCodeSubprocessEngine(
+            api_key="tp-x", base_url="https://x",
+            default_model="d", verify_binary=False,
+        )
+        captured_input = []
+
+        def fake_run(*args, **kwargs):
+            captured_input.append(kwargs.get("input", ""))
+            return _make_subprocess_result(
+                stdout=_make_success_json(text="OK"),
+                stderr="", returncode=0,
+            )
+
+        unicode_prompt = (
+            "Prices: $1.00 → $0.435 (cache miss).  "
+            "Categories: 5 × 3.  Cost: $0.16 ¥ €."
+        )
+        with patch(
+            "harness.engines.claude_code_subprocess.subprocess.run",
+            side_effect=fake_run,
+        ):
+            resp = eng.dispatch(unicode_prompt, "m", {})
+
+        # The input passed to subprocess.run contains the literal
+        # Unicode chars — no encoding errors raised.
+        assert "→" in captured_input[0]
+        assert "×" in captured_input[0]
+        assert resp.success is True
