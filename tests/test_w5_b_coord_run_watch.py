@@ -26,27 +26,40 @@ from harness.budget import _compute_cost
 # ---------------------------------------------------------------------------
 
 def test_compute_cost_mock_engine_silent(caplog: pytest.LogCaptureFixture) -> None:
-    """`mock` is documented free; should NOT log Unknown engine warning."""
+    """`mock` is documented free; should NOT log Unknown engine warning.
+
+    P3 audit fix (2026-05-27): ``_compute_cost`` now returns
+    ``(cost, cost_known)``.  Documented free engines stay silent AND
+    report cost_known=True (i.e. the $0 is known, not guessed).
+    """
     with caplog.at_level(logging.WARNING):
-        cost = _compute_cost("mock", input_tokens=100, output_tokens=50)
+        cost, cost_known = _compute_cost("mock", input_tokens=100, output_tokens=50)
     assert cost == 0.0
+    assert cost_known is True
     assert "Unknown engine" not in caplog.text
 
 
 def test_compute_cost_truly_unknown_engine_warns(caplog: pytest.LogCaptureFixture) -> None:
-    """Genuinely unknown engine should still log the warning."""
+    """Genuinely unknown engine should still log the warning AND
+    report ``cost_known=False`` so the ledger row is flagged
+    (P3 audit fix 2026-05-27)."""
     with caplog.at_level(logging.WARNING):
-        cost = _compute_cost("totally-fake-engine-xyz", input_tokens=100, output_tokens=50)
+        cost, cost_known = _compute_cost(
+            "totally-fake-engine-xyz", input_tokens=100, output_tokens=50,
+        )
     assert cost == 0.0
+    assert cost_known is False
     assert "Unknown engine" in caplog.text
     assert "totally-fake-engine-xyz" in caplog.text
 
 
 def test_compute_cost_mock_variants_all_silent(caplog: pytest.LogCaptureFixture) -> None:
-    """All documented mock spellings stay silent."""
+    """All documented mock spellings stay silent and report cost_known=True."""
     with caplog.at_level(logging.WARNING):
         for name in ["mock", "mock-engine", "mockengine"]:
-            _compute_cost(name, input_tokens=10, output_tokens=10)
+            cost, cost_known = _compute_cost(name, input_tokens=10, output_tokens=10)
+            assert cost == 0.0
+            assert cost_known is True
     assert "Unknown engine" not in caplog.text
 
 

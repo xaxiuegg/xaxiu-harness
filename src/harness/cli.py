@@ -5338,7 +5338,13 @@ def budget_group() -> None:
 @click.option("--engine", default=None)
 @click.option("--since", default=None, help="ISO timestamp filter")
 def budget_show(engine: Optional[str], since: Optional[str]) -> None:
-    """Tabular ledger output."""
+    """Tabular ledger output.
+
+    Rows where ``cost_known=False`` (unpriced engine — typically a model
+    rename that hasn't been added to the pricing table) are tagged
+    ``[UNPRICED]`` so the operator sees the meter is undercounting.
+    P3 audit fix 2026-05-27.
+    """
     entries = read_ledger(DEFAULT_LEDGER_PATH)
     if since:
         entries = [e for e in entries if e.timestamp >= since]
@@ -5347,8 +5353,20 @@ def budget_show(engine: Optional[str], since: Optional[str]) -> None:
     if not entries:
         click.echo("(no entries)")
         sys.exit(0)
+    unpriced_count = 0
     for e in entries:
-        click.echo(f"{e.timestamp}  {e.engine:12}  {e.task_id:20}  ${e.cost_usd:.6f}")
+        tag = " [UNPRICED]" if not e.cost_known else ""
+        if not e.cost_known:
+            unpriced_count += 1
+        click.echo(f"{e.timestamp}  {e.engine:12}  {e.task_id:20}  "
+                   f"${e.cost_usd:.6f}{tag}")
+    if unpriced_count:
+        click.echo()
+        click.echo(
+            f"WARN: {unpriced_count} of {len(entries)} dispatches show "
+            f"as UNPRICED (engine not in pricing table; cost meter "
+            f"undercounts).  See: harness budget summary"
+        )
     sys.exit(0)
 
 
@@ -5373,14 +5391,36 @@ def budget_summary_cmd(since: str | None, since_days: int | None) -> None:
         click.echo("(no dispatches)")
         sys.exit(0)
     total = 0.0
+    unpriced_total = 0
+    unpriced_engines: list[str] = []
     for eng, data in sorted(agg.items()):
+        # P3 audit fix 2026-05-27: surface unpriced dispatches inline so
+        # the operator sees the meter is undercounting per engine.
+        unpriced_n = int(data.get("unpriced_dispatches", 0))
+        unpriced_suffix = ""
+        if unpriced_n:
+            unpriced_suffix = (
+                f"  [{unpriced_n} UNPRICED - cost meter incomplete]"
+            )
+            unpriced_total += unpriced_n
+            unpriced_engines.append(eng)
         click.echo(
             f"{eng:12}  dispatches={int(data['dispatches'])}  "
             f"cost=${data['total_cost_usd']:.6f}  "
-            f"in={int(data['total_input_tokens'])}  out={int(data['total_output_tokens'])}"
+            f"in={int(data['total_input_tokens'])}  "
+            f"out={int(data['total_output_tokens'])}{unpriced_suffix}"
         )
         total += data["total_cost_usd"]
     click.echo(f"{'total':12}  ${total:.6f}")
+    if unpriced_total:
+        click.echo()
+        click.echo(
+            f"WARN: {unpriced_total} unpriced dispatch(es) across "
+            f"engine(s) {', '.join(unpriced_engines)} - cost meter "
+            f"under-reports total spend.  Add these engines to "
+            f"PRICING_USD_PER_M_TOKENS in src/harness/budget.py "
+            f"(or set HARNESS_BUDGET_PRICING_JSON) to fix."
+        )
     sys.exit(0)
 
 

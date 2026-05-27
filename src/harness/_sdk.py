@@ -747,6 +747,12 @@ def budget_status(*, since_hours: float | None = None,
     total_tokens = int(total_in + total_out)
     total_cost = round(sum(s["total_cost_usd"] for s in summary.values()), 6)
     dispatches = int(sum(s["dispatches"] for s in summary.values()))
+    # P3 audit fix (2026-05-27): surface unpriced dispatches so the
+    # operator knows the cost meter is undercounting when a model
+    # rename or new engine isn't in the pricing table yet.
+    unpriced_dispatches = int(
+        sum(s.get("unpriced_dispatches", 0) for s in summary.values())
+    )
 
     engines_used = {engine: int(s["dispatches"])
                     for engine, s in summary.items()}
@@ -783,4 +789,8 @@ def budget_status(*, since_hours: float | None = None,
         "avg_cost_per_token": avg_per_token,
         "cost_max_per_session_usd": cost_max,
         "window_hours": since_hours,
+        # P3 audit fix 2026-05-27: visible signal that the meter is
+        # undercounting because some engine names lack a pricing-table
+        # row.  Zero in a healthy steady-state.
+        "unpriced_dispatches": unpriced_dispatches,
     }

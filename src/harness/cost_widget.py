@@ -96,6 +96,10 @@ def cost_widget_dict(ledger_path: Path | None = None,
         "status": _status_from_pct(pct),
         # Keep token totals for dashboards that show them
         "tokens_total": bs["session_tokens_total"],
+        # P3 audit fix 2026-05-27: pass through the unpriced signal so
+        # the cost-today widget can flag the meter as undercounting
+        # without grepping the ledger.
+        "unpriced_dispatches": bs.get("unpriced_dispatches", 0),
     }
 
 
@@ -135,4 +139,13 @@ def format_cost_widget(ledger_path: Path | None = None,
         line += f"  [WARN: {pct}% of budget — approaching cap]"
     else:
         line += "  [ok]"
+    # P3 audit fix 2026-05-27: append visible warning when the meter is
+    # known to undercount.  Without this, a model rename silently shows
+    # all-green even though real spend may be uncapped.
+    unpriced = int(w.get("unpriced_dispatches", 0))
+    if unpriced:
+        line += (
+            f"  [WARN: {unpriced} UNPRICED dispatch(es) - cost meter "
+            f"undercounts; run `harness budget summary` for details]"
+        )
     return line

@@ -453,3 +453,171 @@ def test_record_dispatch_swarm_kimi_api_uses_moonshot_pricing(tmp_path: Path) ->
     expected = round(0.15 + (0.2 * 2.50), 6)
     assert entry.cost_usd == expected
     mock_logger.warning.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# P3 audit fix (2026-05-27) — visible unpriced-engine signal
+#
+# `_compute_cost` previously returned 0.0 for unknown engines with only a
+# `logger.warning` (which a non-technical operator never sees).  The
+# meter silently undercounted on every model rename.  Now ledger rows
+# carry `cost_known=False` and budget/cost-today surface that visibly.
+# ---------------------------------------------------------------------------
+
+
+class TestUnpricedEngineVisibility:
+    def test_known_engine_records_cost_known_true(
+        self, tmp_path: Path,
+    ) -> None:
+        ledger = tmp_path / "ledger.jsonl"
+        entry = record_dispatch(
+            task_id="t1", engine="kimi-api",
+            input_tokens=1_000_000, output_tokens=0,
+            ledger_path=ledger,
+        )
+        assert entry.cost_known is True
+        # And the priced cost was actually computed
+        assert entry.cost_usd > 0.0
+
+    def test_documented_free_engine_records_cost_known_true(
+        self, tmp_path: Path,
+    ) -> None:
+        """mock/mock-engine are KNOWN to be free; not unpriced."""
+        ledger = tmp_path / "ledger.jsonl"
+        entry = record_dispatch(
+            task_id="t1", engine="mock",
+            input_tokens=100, output_tokens=50,
+            ledger_path=ledger,
+        )
+        assert entry.cost_known is True
+        assert entry.cost_usd == 0.0
+
+    def test_unknown_engine_records_cost_known_false(
+        self, tmp_path: Path,
+    ) -> None:
+        ledger = tmp_path / "ledger.jsonl"
+        entry = record_dispatch(
+            task_id="t1", engine="future-rename-engine",
+            input_tokens=1_000_000, output_tokens=500_000,
+            ledger_path=ledger,
+        )
+        assert entry.cost_known is False
+        assert entry.cost_usd == 0.0
+
+    def test_summary_aggregates_unpriced_dispatches(
+        self, tmp_path: Path,
+    ) -> None:
+        ledger = tmp_path / "ledger.jsonl"
+        record_dispatch(task_id="a", engine="kimi-api",
+                        input_tokens=1_000_000, ledger_path=ledger)
+        record_dispatch(task_id="b", engine="unknown-new",
+                        input_tokens=100, ledger_path=ledger)
+        record_dispatch(task_id="c", engine="unknown-new",
+                        input_tokens=100, ledger_path=ledger)
+        agg = summary(ledger)
+        # Priced engine: 0 unpriced
+        assert agg["kimi-api"]["unpriced_dispatches"] == 0.0
+        # Unknown engine: both rows counted as unpriced
+        assert agg["unknown-new"]["dispatches"] == 2.0
+        assert agg["unknown-new"]["unpriced_dispatches"] == 2.0
+
+    def test_unpriced_engines_since_helper(self, tmp_path: Path) -> None:
+        from harness.budget import unpriced_engines_since
+        ledger = tmp_path / "ledger.jsonl"
+        record_dispatch(task_id="a", engine="kimi-api",
+                        input_tokens=1_000_000, ledger_path=ledger)
+        record_dispatch(task_id="b", engine="unknown-1",
+                        input_tokens=10, ledger_path=ledger)
+        record_dispatch(task_id="c", engine="unknown-2",
+                        input_tokens=10, ledger_path=ledger)
+        out = unpriced_engines_since(ledger)
+        # kimi-api priced, so absent; unknown-1 and unknown-2 both flagged
+        assert "kimi-api" not in out
+        assert out["unknown-1"] == 1
+        assert out["unknown-2"] == 1
+
+    def test_old_ledger_rows_default_to_cost_known_true(
+        self, tmp_path: Path,
+    ) -> None:
+        """Backward-compat: a ledger row written before P3 (no
+        ``cost_known`` field) deserializes with the default True
+        so historical rows aren't retroactively flagged."""
+        ledger = tmp_path / "ledger.jsonl"
+        # Hand-write a pre-P3 row (no cost_known field)
+        legacy_row = {
+            "timestamp": "2026-05-01T00:00:00+00:00",
+            "task_id": "old",
+            "engine": "deepseek",
+            "model": None,
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "latency_ms": 0,
+            "cost_usd": 0.001,
+        }
+        ledger.write_text(json.dumps(legacy_row) + "\n", encoding="utf-8")
+        entries = read_ledger(ledger)
+        assert len(entries) == 1
+        assert entries[0].cost_known is True
+
+    def test_budget_show_tags_unpriced_rows(
+        self, runner: CliRunner, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ledger = tmp_path / "ledger.jsonl"
+        record_dispatch(task_id="a", engine="kimi-api",
+                        input_tokens=1_000_000, ledger_path=ledger)
+        record_dispatch(task_id="b", engine="brand-new-engine",
+                        input_tokens=100, ledger_path=ledger)
+        monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", ledger)
+        monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", ledger)
+        result = runner.invoke(cli, ["budget", "show"])
+        assert result.exit_code == 0
+        # The unpriced row carries the tag
+        assert "[UNPRICED]" in result.output
+        # And the footer surfaces a visible warning
+        assert "UNPRICED" in result.output
+
+    def test_budget_summary_surfaces_unpriced_engine_warning(
+        self, runner: CliRunner, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ledger = tmp_path / "ledger.jsonl"
+        record_dispatch(task_id="a", engine="kimi-api",
+                        input_tokens=1_000_000, ledger_path=ledger)
+        record_dispatch(task_id="b", engine="brand-new-engine",
+                        input_tokens=100, ledger_path=ledger)
+        monkeypatch.setattr("harness.budget.DEFAULT_LEDGER_PATH", ledger)
+        monkeypatch.setattr("harness.cli.DEFAULT_LEDGER_PATH", ledger)
+        # Far-past since so both rows are included
+        result = runner.invoke(
+            cli, ["budget", "summary", "--since", "2020-01-01"],
+        )
+        assert result.exit_code == 0
+        # Per-engine inline marker
+        assert "UNPRICED" in result.output
+        # And the footer warning naming the engine
+        assert "brand-new-engine" in result.output
+
+    def test_budget_status_sdk_returns_unpriced_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ledger = tmp_path / "ledger.jsonl"
+        record_dispatch(task_id="a", engine="brand-new",
+                        input_tokens=100, ledger_path=ledger)
+        record_dispatch(task_id="b", engine="kimi-api",
+                        input_tokens=1_000_000, ledger_path=ledger)
+        import harness
+        status = harness.budget_status(
+            since_hours=None, ledger_path=ledger,
+        )
+        assert status["unpriced_dispatches"] == 1
+
+    def test_cost_widget_format_flags_unpriced(
+        self, tmp_path: Path,
+    ) -> None:
+        from harness.cost_widget import format_cost_widget
+        ledger = tmp_path / "ledger.jsonl"
+        record_dispatch(task_id="a", engine="brand-new-engine",
+                        input_tokens=100, ledger_path=ledger)
+        out = format_cost_widget(ledger_path=ledger, since_hours=None)
+        assert "UNPRICED" in out

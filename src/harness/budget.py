@@ -89,6 +89,14 @@ class CostEntry(BaseModel):
     output_tokens: int = Field(ge=0)
     latency_ms: int = Field(ge=0)
     cost_usd: float = Field(ge=0.0)
+    # P3 audit fix (2026-05-27): True iff cost_usd was computed from a
+    # populated pricing-table row.  False iff the engine name was unknown
+    # to the pricing table AND not a documented free engine (mock/etc).
+    # Old ledger rows lack this field and deserialize with the default
+    # True — strictly that's optimistic, but presence-known rows are
+    # rare in practice and the default avoids retroactively flagging
+    # the whole historical ledger as "incomplete".
+    cost_known: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -143,22 +151,40 @@ def _mimo_pricing_row(*, base: str) -> str:
 _KNOWN_FREE_ENGINES = frozenset({"mock", "mock-engine", "mockengine"})
 
 
-def _compute_cost(engine: str, input_tokens: int, output_tokens: int) -> float:
+def _compute_cost(
+    engine: str, input_tokens: int, output_tokens: int,
+) -> tuple[float, bool]:
+    """Compute the dispatch cost AND report whether the engine was priced.
+
+    Returns ``(cost_usd, cost_known)`` where ``cost_known`` is False iff
+    the engine name was unknown to the pricing table AND not a documented
+    free engine.  Callers persist ``cost_known`` to the ledger so the
+    operator-facing budget surfaces can flag the meter as undercounting
+    instead of silently returning $0.00.
+
+    P3 audit fix (2026-05-27): a ``logger.warning`` was previously the
+    only signal here — and a non-technical operator never sees log
+    output, so a renamed/unknown engine showed up as silent $0 forever.
+    """
     pricing = _load_pricing()
     canonical = _normalize_engine(engine)
     table = pricing.get(canonical)
     if table is None:
         # W5-G 2026-05-22: 'mock' is a documented free pseudo-engine used
         # by the v2 coord smoke test; warning on every dispatch was pure
-        # noise.  Stay silent for the documented free engines, warn only
-        # when something genuinely unknown shows up.
-        if canonical not in _KNOWN_FREE_ENGINES:
-            logger.warning("Unknown engine %r (normalized %r); recording cost=0",
-                           engine, canonical)
-        return 0.0
+        # noise.  Stay silent for the documented free engines.
+        if canonical in _KNOWN_FREE_ENGINES:
+            return 0.0, True  # known free engine — $0 is accurate
+        logger.warning(
+            "Unknown engine %r (normalized %r); recording cost=0 with "
+            "cost_known=False (operator: this dispatch will show as "
+            "UNPRICED in `harness budget summary`)",
+            engine, canonical,
+        )
+        return 0.0, False
     input_cost = (input_tokens / 1_000_000) * table.get("input", 0.0)
     output_cost = (output_tokens / 1_000_000) * table.get("output", 0.0)
-    return round(input_cost + output_cost, 6)
+    return round(input_cost + output_cost, 6), True
 
 
 def _ensure_dir(path: Path) -> None:
@@ -180,9 +206,14 @@ def record_dispatch(
     latency_ms: int = 0,
     ledger_path: Path | None = None,
 ) -> CostEntry:
-    """Append a CostEntry to the ledger and return it."""
+    """Append a CostEntry to the ledger and return it.
+
+    P3 audit fix (2026-05-27): ``cost_known`` is persisted on the entry
+    so downstream budget surfaces can flag unpriced dispatches instead
+    of silently aggregating them as $0.00.
+    """
     path = ledger_path or DEFAULT_LEDGER_PATH
-    cost_usd = _compute_cost(engine, input_tokens, output_tokens)
+    cost_usd, cost_known = _compute_cost(engine, input_tokens, output_tokens)
     entry = CostEntry(
         timestamp=datetime.now(timezone.utc).isoformat(),
         task_id=task_id,
@@ -192,6 +223,7 @@ def record_dispatch(
         output_tokens=output_tokens,
         latency_ms=latency_ms,
         cost_usd=cost_usd,
+        cost_known=cost_known,
     )
     line = entry.model_dump_json() + "\n"
     data = line.encode("utf-8")
@@ -233,7 +265,14 @@ def summary(
     ledger_path: Path | None = None,
     since_iso: str | None = None,
 ) -> dict[str, dict[str, float]]:
-    """Return {engine: {dispatches, total_cost_usd, total_input_tokens, total_output_tokens}}."""
+    """Return {engine: {dispatches, total_cost_usd, total_input_tokens,
+    total_output_tokens, unpriced_dispatches}}.
+
+    P3 audit fix (2026-05-27): added ``unpriced_dispatches`` per engine
+    counting rows where ``cost_known=False``.  Operators surfacing this
+    aggregate can show ``"unpriced dispatches: N (cost unknown)"``
+    instead of silently aggregating them as $0.
+    """
     entries = read_ledger(ledger_path)
     if since_iso:
         entries = [e for e in entries if e.timestamp >= since_iso]
@@ -244,15 +283,39 @@ def summary(
             "total_cost_usd": 0.0,
             "total_input_tokens": 0.0,
             "total_output_tokens": 0.0,
+            "unpriced_dispatches": 0.0,  # P3 audit fix
         })
         agg["dispatches"] += 1.0
         agg["total_cost_usd"] += e.cost_usd
         agg["total_input_tokens"] += e.input_tokens
         agg["total_output_tokens"] += e.output_tokens
+        if not e.cost_known:
+            agg["unpriced_dispatches"] += 1.0
     # Round for readability
     for engine in result:
         result[engine]["total_cost_usd"] = round(result[engine]["total_cost_usd"], 6)
     return result
+
+
+def unpriced_engines_since(
+    ledger_path: Path | None = None,
+    since_iso: str | None = None,
+) -> dict[str, int]:
+    """Return ``{engine_name: unpriced_dispatch_count}`` across the window.
+
+    Convenience helper for UIs surfacing unpriced-engine warnings.  Only
+    includes engines with at least one unpriced row.
+
+    P3 audit fix (2026-05-27).
+    """
+    entries = read_ledger(ledger_path)
+    if since_iso:
+        entries = [e for e in entries if e.timestamp >= since_iso]
+    out: dict[str, int] = {}
+    for e in entries:
+        if not e.cost_known:
+            out[e.engine] = out.get(e.engine, 0) + 1
+    return out
 
 
 def total_spent(
