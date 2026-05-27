@@ -2025,12 +2025,27 @@ def _suggest_fix_for_pydantic(field: str, err_type: str,
 
 @cli.command(name="dashboard-serve")
 @click.option("--port", default=7878, type=int, help="Dashboard server port.")
-@click.option("--host", default="127.0.0.1", help="Dashboard server bind address.")
+@click.option("--host", default="127.0.0.1",
+              help="Dashboard server bind address.  MUST be a loopback "
+                   "host (127.0.0.1 / ::1 / localhost).  P4 audit fix "
+                   "2026-05-27: the dashboard endpoints are unauthenticated, "
+                   "so binding non-loopback would expose operational state "
+                   "(engine activity, cost, observer flags, L5 events) to "
+                   "your LAN.  Non-loopback binds are refused with a "
+                   "clear error.")
 def dashboard_serve(port: int, host: str) -> None:
-    """Run the operator-facing dashboard."""
-    from harness.dashboard.server import serve
+    """Run the operator-facing dashboard.
 
-    serve(host=host, port=port)
+    Binds to 127.0.0.1 by default.  Attempting to override with a
+    non-loopback host raises ``NonLoopbackBindRefused`` and exits
+    non-zero (P4 audit fix 2026-05-27).
+    """
+    from harness.dashboard.server import serve, NonLoopbackBindRefused
+
+    try:
+        serve(host=host, port=port)
+    except NonLoopbackBindRefused as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.group(name="queue")

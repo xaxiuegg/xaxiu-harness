@@ -262,6 +262,88 @@ class TestCLI:
 
 
 # ---------------------------------------------------------------------------
+# P4 audit fix (2026-05-27) — refuse non-loopback dashboard binds
+#
+# The dashboard endpoints are unauthenticated.  Non-loopback binds
+# would expose operational state to the LAN.  Both the CLI and the
+# programmatic serve() entrypoint must refuse such hosts.
+# ---------------------------------------------------------------------------
+
+
+class TestNonLoopbackBindRefused:
+    @patch("harness.dashboard.server.uvicorn.run")
+    def test_serve_accepts_127_0_0_1(self, mock_run: MagicMock) -> None:
+        from harness.dashboard.server import serve
+        serve(host="127.0.0.1", port=7878)
+        mock_run.assert_called_once()
+
+    @patch("harness.dashboard.server.uvicorn.run")
+    def test_serve_accepts_localhost(self, mock_run: MagicMock) -> None:
+        from harness.dashboard.server import serve
+        serve(host="localhost", port=7878)
+        mock_run.assert_called_once()
+
+    @patch("harness.dashboard.server.uvicorn.run")
+    def test_serve_accepts_ipv6_loopback(self, mock_run: MagicMock) -> None:
+        from harness.dashboard.server import serve
+        serve(host="::1", port=7878)
+        mock_run.assert_called_once()
+
+    @patch("harness.dashboard.server.uvicorn.run")
+    def test_serve_refuses_0_0_0_0(self, mock_run: MagicMock) -> None:
+        from harness.dashboard.server import (
+            serve, NonLoopbackBindRefused,
+        )
+        with pytest.raises(NonLoopbackBindRefused) as exc:
+            serve(host="0.0.0.0", port=7878)
+        # uvicorn never called
+        mock_run.assert_not_called()
+        # Error message names the offending host AND explains why
+        msg = str(exc.value)
+        assert "0.0.0.0" in msg
+        assert "loopback" in msg.lower()
+        assert "unauthenticated" in msg.lower() or "auth" in msg.lower()
+
+    @patch("harness.dashboard.server.uvicorn.run")
+    def test_serve_refuses_lan_ip(self, mock_run: MagicMock) -> None:
+        from harness.dashboard.server import (
+            serve, NonLoopbackBindRefused,
+        )
+        with pytest.raises(NonLoopbackBindRefused):
+            serve(host="192.168.1.10", port=7878)
+        mock_run.assert_not_called()
+
+    @patch("harness.dashboard.server.uvicorn.run")
+    def test_cli_dashboard_serve_refuses_non_loopback(
+        self, mock_run: MagicMock,
+    ) -> None:
+        """CLI surface: --host 0.0.0.0 must exit non-zero with a
+        readable explanation."""
+        from harness.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["dashboard-serve", "--host", "0.0.0.0", "--port", "7878"],
+        )
+        assert result.exit_code != 0
+        # uvicorn never called
+        mock_run.assert_not_called()
+        # Error explains the refusal
+        assert "loopback" in result.output.lower()
+
+    def test_cli_dashboard_serve_help_documents_loopback_requirement(
+        self,
+    ) -> None:
+        from harness.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["dashboard-serve", "--help"])
+        assert result.exit_code == 0
+        # The --host help text should mention the requirement
+        assert "loopback" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
 # 10. W5-LL queue endpoint (autonomous-orchestrator visibility)
 # ---------------------------------------------------------------------------
 
