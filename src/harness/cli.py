@@ -401,6 +401,158 @@ def start_cmd(orchestrator: str | None, mode: str | None,
     sys.exit(0)
 
 
+@cli.command(name="ask")
+@click.argument("question", required=False)
+@click.option("--file", "question_file", type=click.Path(
+    exists=True, dir_okay=False, path_type=Path,
+), default=None,
+    help="Read the question from a file instead of an argument.")
+@click.option("--engines", default="", help=(
+    "Comma-separated engine list.  Default: all 3 Pattern B engines "
+    "(kimi-via-claude, mimo-via-claude, deepseek-via-claude)."
+))
+@click.option("--output", "output_dir", type=click.Path(
+    file_okay=False, path_type=Path,
+), default=None,
+    help="Output directory for per-engine responses.  Default: "
+         "coord/reviews/ask-<timestamp>-<slug>/")
+@click.option("--max-budget-usd", type=float, default=0.30, show_default=True,
+              help="Per-engine spend cap.")
+@click.option("--timeout-s", type=int, default=180, show_default=True,
+              help="Per-engine timeout in seconds.")
+@click.option("--no-save", is_flag=True, default=False,
+              help="Skip saving to disk; print to stdout only.")
+@click.option("--print-text", is_flag=True, default=False,
+              help="Print full response text to stdout (default: "
+                   "table + path only).")
+def ask_cmd(
+    question: str | None,
+    question_file: Path | None,
+    engines: str,
+    output_dir: Path | None,
+    max_budget_usd: float,
+    timeout_s: int,
+    no_save: bool,
+    print_text: bool,
+) -> None:
+    """W14-HARNESS-ASK 2026-05-26: daily-driver cross-engine panel.
+
+    Fires a 3-engine panel against the question, captures each
+    response in parallel, saves under coord/reviews/ask-<ts>/.
+
+    Examples:
+
+      \b
+      harness ask "should we deprecate the legacy swarm/kimi-api?"
+      harness ask --file question.md
+      harness ask "..." --engines deepseek-via-claude,kimi-via-claude
+
+    Cost: typical 3-engine audit-class panel is $0.20-0.30 total.
+    Time: 30s-2min depending on prompt depth + concurrency.
+
+    The harness does NOT auto-synthesize - it surfaces 3
+    independent perspectives + saves a packet.md ready for
+    operator review or in-session synthesis.
+    """
+    import datetime
+    from harness.ask import (
+        DEFAULT_ENGINES, _slugify, run_panel, save_panel,
+    )
+
+    # Resolve question source
+    if question_file is not None:
+        question_text = question_file.read_text(encoding="utf-8").strip()
+    elif question:
+        question_text = question.strip()
+    else:
+        click.echo(
+            click.style(
+                "ERROR: provide a question argument or --file path",
+                fg="red",
+            ), err=True,
+        )
+        sys.exit(2)
+
+    if not question_text:
+        click.echo(
+            click.style("ERROR: question is empty", fg="red"), err=True,
+        )
+        sys.exit(2)
+
+    # Resolve engines
+    engine_list: tuple[str, ...]
+    if engines:
+        engine_list = tuple(e.strip() for e in engines.split(",") if e.strip())
+    else:
+        engine_list = DEFAULT_ENGINES
+
+    # Resolve output dir
+    if output_dir is None and not no_save:
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        slug = _slugify(question_text)
+        repo_root = Path(__file__).resolve().parents[2]
+        output_dir = repo_root / "coord" / "reviews" / f"ask-{ts}-{slug}"
+
+    click.echo(
+        f"[ask] firing {len(engine_list)} engines in parallel "
+        f"(budget ${max_budget_usd:.2f} each, timeout {timeout_s}s)..."
+    )
+    if output_dir is not None and not no_save:
+        click.echo(f"      output: {output_dir}")
+
+    results = run_panel(
+        question_text,
+        engines=engine_list,
+        max_budget_usd=max_budget_usd,
+        timeout_s=timeout_s,
+    )
+
+    # Print summary table (always)
+    click.echo()
+    click.echo(
+        f"{'engine':<24} {'OK':<4} {'elapsed':<10} "
+        f"{'in':<6} {'out':<6} {'cost':<10} {'alias':<6}"
+    )
+    click.echo("-" * 75)
+    total_cost = 0.0
+    for r in results:
+        if r.ok:
+            ok_styled = click.style("OK", fg="green")
+        else:
+            ok_styled = click.style("FAIL", fg="red")
+        click.echo(
+            f"  {r.engine:<22} {ok_styled:<11} "
+            f"{r.elapsed_s:>5.1f}s   "
+            f"{r.tokens_in:<6} {r.tokens_out:<6} "
+            f"${r.cost_usd:<8.4f} {r.winning_alias or '—':<6}"
+        )
+        total_cost += r.cost_usd
+    click.echo()
+    click.echo(f"  total cost: ${total_cost:.4f}")
+
+    if not no_save and output_dir is not None:
+        save_panel(question_text, results, output_dir)
+        click.echo(f"  saved {len(results)} response files + "
+                   f"packet.md + summary.json")
+        click.echo()
+        click.echo(click.style(
+            f"  → review at {output_dir}",
+            fg="cyan",
+        ))
+
+    if print_text:
+        click.echo()
+        click.echo("=" * 75)
+        for r in results:
+            click.echo()
+            click.echo(click.style(f"### {r.engine}", fg="yellow", bold=True))
+            click.echo()
+            click.echo(r.text if r.ok else f"FAILED: {r.error}")
+
+    failed = [r for r in results if not r.ok]
+    sys.exit(1 if failed else 0)
+
+
 @cli.command(name="morning-brief")
 @click.option("--since-hours", type=int, default=12,
               help="Look back this many hours when building the brief (default 12).")
