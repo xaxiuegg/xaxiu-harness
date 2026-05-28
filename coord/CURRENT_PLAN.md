@@ -1,7 +1,7 @@
 # Current strategic plan — xaxiu-harness
 
 **Source**: 15-engine Round 2 strategic panel ([FINAL_VERDICT](reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md)) + Friday v1.0.0 release-gate ([FINAL_VERDICT](reviews/v1-release-gate/FINAL_VERDICT.md), 2/3 APPROVE).
-**Last updated**: 2026-05-25 (v1.0.0 tagged)
+**Last updated**: 2026-05-28 (agentic-operator roadmap shipped + CAPPED; engine-budget triad RESTORED as next-up after a track-swap detour).
 
 > **For agents**: this file is the active "what are we trying to ship right now" document. `coord/STATUS.csv` is the per-row task tracker; this file is the strategic narrative that explains why those rows exist. When the rows here disagree with `harness today`, trust `harness today` for current state and update this file.
 
@@ -22,6 +22,10 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 **Budget**: well under $5/session cap
 
 **Week 1 complete**: 11 W13 rows + v1.0.0 tagged at `d30bace` on 2026-05-25. Per-row detail in [coord/releases/v1.0.0.md](releases/v1.0.0.md). Audit infra now routes W12+ tasks to STATUS.csv via [W13-AUDIT-INFRA-W12-PLUS].
+
+**2026-05-28 — agentic-operator roadmap shipped + CAPPED** (15 commits, v0.5.5 → v0.6.3). A separate roadmap from the engine-budget triad below.  Tracked in memory at [project_agentic_operator_roadmap_2026_05_28](../../C:/Users/xaxiu/.claude/projects/D--xaxiu-harness-standalone/memory/project_agentic_operator_roadmap_2026_05_28.md).  Shipped: `harness proxy --upstream` (5 upstreams incl. TOS-compliant Claude-Code-subprocess), `harness engines describe` + `compatibility-matrix`, `harness introspect`, `harness ask --rerun --escalate {audit|panel}`, `harness ask-history` + `ask-show`, `harness self-update`, snippet auto-version-stamp + staleness detection, `harness ask --audit --auditors N` quorum, `harness ask --research <path>`, setup-wizard step 6 (snippet install).  Empirically validated by 7 fresh-session sub-agent tests (4 positive scenarios at 9/10, 3 Goodhart-aware tests at 8-9/10 with one bug surfaced + fixed: ask-history hyphen anti-trap).  Score ceiling reached for solo internal use per the Horizon C plan; **further iteration on this surface is diminishing-returns territory.**
+
+⚠ **Track-swap audit (the why-this-section-exists note)**: today's 15 commits shipped from the agentic-operator roadmap, **not from this plan's "What's next" engine-budget triad**.  The agentic-operator track had visible friction (transcript-grounded hiccups) + fast feedback loops + shippable surface; the engine-budget track was operator-blocked on DASHSCOPE_API_KEY acquisition.  Under full dev authority the easier track pulled all the gravity.  See new anti-pattern #8 below.  **The engine-budget triad below is now the live action chain.**
 
 ---
 
@@ -92,16 +96,21 @@ This commitment **reverses the previous "pause + observe" recommendation** ([EVA
 5. Don't build plugin architecture for a solo internal tool.
 6. Don't trust untested install paths. → ✅ W13-INSTALL-VERIFY now gates every PR.
 7. Don't ship features that hide what the harness is doing — the visible/overridable/auditable trio is mandatory.
+8. **Don't substitute easier tracks for the plan's stated Immediate row without surfacing the substitution.** (Added 2026-05-28 after a 15-commit day shipped agentic-operator roadmap polish while the engine-budget triad — the plan's stated "single most important action (live)" — sat at 0%.)  Under full dev authority, tracks with visible friction + fast feedback + shippable surface pull all the gravity; the harder operator-unblock-required track is what the strategic plan calls load-bearing.  When CURRENT_PLAN.md's Immediate row is operator-blocked (waiting on a key, a sign-up, or a decision), either (a) ship the *prerequisite-free portions* of that row (e.g. scaffold the adapter, build the budget meter that the blocked adapter will plug into) OR (b) explicitly surface the substitution in STATUS.csv with a row titled `STRATEGIC-DETOUR: <reason>` so the next planner sees the diversion.  See [feedback_velocity_vs_mandate_2026_05_28].
 
 ---
 
 ## Single most important action (live)
 
-**Acquire `DASHSCOPE_API_KEY` from [dashscope.aliyun.com](https://dashscope.aliyun.com) (PAYG, NOT Alibaba Coding Plan subscription), then ship W14-KIMI-REPLACEMENT-WITH-QWEN.** This is the unblocking move for the $195/mo engine-budget split — the harness can't enforce the 3rd-engine slot until Qwen is wired.
+**Acquire `DASHSCOPE_API_KEY` from [dashscope.aliyun.com](https://dashscope.aliyun.com) (PAYG, NOT Alibaba Coding Plan subscription).** This is the operator-blocked prerequisite for W14-KIMI-REPLACEMENT-WITH-QWEN.
+
+While the key is being acquired, the harness can ship the **prerequisite-free portions of the triad** (anti-pattern #8 application):
+
+- **W14-BUDGET-METER-PER-ENGINE** can ship NOW — extends the existing dispatch cost-tracking surface with per-engine accumulators + caps + 80%-spend observer flag.  The Qwen engine label gets registered as soon as the adapter ships, but the meter infrastructure doesn't depend on Qwen.
+- **W14-DISPATCH-HEALTH-AWARE-FALLBACK** can ship NOW — operates on whichever engines are currently configured.  Saves real money on the engines that are already paying (DeepSeek PAYG, MiMo Token Plan).
+- **W14-KIMI-REPLACEMENT-WITH-QWEN scaffold** can ship NOW — adapter class + dispatch path + tests can all be built against a mock; only LIVE validation needs the key.
 
 In parallel, decide the MiMo plan tier (Standard at $14.08/mo fits the $15 budget) and confirm whether to acquire a `sk-` PAYG MiMo key as fallback insurance (no cost until used).
-
-After Qwen ships: W14-BUDGET-METER-PER-ENGINE so the harness can actually enforce the $30/$15/$50 caps + alert at 80% spend.
 
 Kimi (`W14-KIMI-AUTH-RESTORE`) is no longer in the action chain — replaced by Qwen 3.6 Plus. The Kimi adapter stays in the codebase (TOS-compliant after W14-MIMO-TOS-COMPLIANCE) for any operator who later acquires a legitimate Moonshot-approved client license.
 
