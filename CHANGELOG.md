@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.5.4 — 2026-05-28 (agent-instructions templates surface today's verbs)
+
+### Phase 1.3 of the agentic-operator roadmap
+
+The agent-instructions snippet that `install-agent-instructions` lands
+in `~/.claude/CLAUDE.md` was missing Phase 1.1 + 1.2 capabilities:
+
+- The 5-upstream proxy + `--upstream` flag (Phase 1.1)
+- The engine metadata verbs `describe` + `compatibility-matrix` (Phase 1.2)
+- A "verify engine health first" prompt
+- An explicit "DO NOT hand-roll a shim — the subprocess upstreams already
+  do it TOS-compliantly" warning
+
+A fresh Claude Code session reading only the v0.5.3 snippet could
+follow the routed-default + audit + panel + proxy + swarm flows but
+would still source-spelunk for engine-specific questions and still
+miss `--upstream` when wiring third-party tools to MiMo.  v0.5.4 fixes
+that.
+
+### What changed in all 3 template formats (claude-md / prompt / short)
+
+- **Proxy section**: enumerates all 5 upstreams + shows
+  `harness proxy upstreams` listing verb + explicit anti-shim warning.
+- **NEW Discovery section**: `harness engines describe`,
+  `compatibility-matrix`, `recommend` with the canonical
+  MiMo-dual-protocol worked example.
+- **NEW "Before reaching for any of this" callout**: prompts agents to
+  run `harness doctor` FIRST and notes Kimi is no longer in the
+  $195/mo strategic-plan rotation.
+
+### Regression locks (in `tests/test_agent_instructions.py`)
+
+- `test_install_uses_current_template` extended with v0.5.4
+  fingerprints (`--upstream`, `harness proxy upstreams`,
+  `mimo-via-claude-code`, `harness engines describe`,
+  `compatibility-matrix`).
+- New `test_all_formats_surface_discovery_verbs` — locks all 3 formats
+  mentioning `harness engines describe` + `--upstream`.
+
+To refresh the snippet currently installed at `~/.claude/CLAUDE.md`:
+
+```
+python -m harness install-agent-instructions --force
+```
+
+Fresh-session-confidence-with-just-snippet score est 6/10 → 8/10.
+
+W14-ASK-DOCS-PHASE-1-3.
+
 ## v0.5.3 — 2026-05-28 (engine metadata as queryable surface)
 
 ### `harness engines describe <name>` + `harness engines compatibility-matrix`

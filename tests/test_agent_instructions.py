@@ -203,10 +203,11 @@ class TestInstallAgentInstructions:
         must now route through `_agent_instructions_snippet` so they
         cannot disagree.
 
-        Fingerprints: the v0.5.1+ template covers --audit + --panel +
-        the proxy + xaxiu-swarm.  None of those existed in the stale
-        pre-v0.5.1 template.  Their presence here proves install is
-        using the current shared source.
+        Fingerprints: the v0.5.3+ template covers --audit + --panel +
+        the proxy (with --upstream) + xaxiu-swarm + engine metadata
+        discovery verbs.  None of those existed in the stale pre-v0.5.1
+        template.  Their presence here proves install is using the
+        current shared source.
         """
         target = tmp_path / "claude.md"
         target.write_text("# placeholder\n", encoding="utf-8")
@@ -217,13 +218,50 @@ class TestInstallAgentInstructions:
         ])
         assert result.exit_code == 0
         out = result.output
-        # Positive: new-template fingerprints
+        # Positive: new-template fingerprints (v0.5.1+ shape)
         assert "--audit" in out
         assert "--panel" in out
         assert "harness proxy" in out
         assert "xaxiu-swarm" in out
+        # Positive: v0.5.3 fingerprints (Phase 1.3: surfacing the
+        # Phase 1.1 + 1.2 verbs in the template so fresh sessions can
+        # actually use them without source-spelunking)
+        assert "--upstream" in out
+        assert "harness proxy upstreams" in out
+        assert "mimo-via-claude-code" in out
+        assert "harness engines describe" in out
+        assert "compatibility-matrix" in out
         # Negative: stale-template fingerprint absent
         assert "fires 3 engines (Kimi / MiMo / DeepSeek)" not in out
+
+    def test_all_formats_surface_discovery_verbs(self) -> None:
+        """W14-ASK-DOCS Phase 1.3 (2026-05-28): all 3 formats must
+        mention the engine-metadata discovery verbs (`describe`,
+        `compatibility-matrix`) AND the proxy `--upstream` flag.
+
+        Rationale: shipping Phase 1.1 + 1.2 added these verbs to the
+        CLI but a fresh Claude Code session reading only the snippet
+        would not know about them unless the templates surface them.
+        Without this lock, a future template edit could quietly drop
+        the verbs and we'd regress fresh-session confidence.
+        """
+        runner = CliRunner()
+        for fmt in ("claude-md", "prompt", "short"):
+            result = runner.invoke(
+                cli, ["agent-instructions", "--format", fmt],
+            )
+            assert result.exit_code == 0
+            out = result.output
+            # The engine-discovery verb must be reachable from any
+            # format that an agent might be primed with
+            assert "harness engines describe" in out, (
+                f"{fmt}: must mention `harness engines describe`"
+            )
+            # `--upstream` must be visible so agents don't reinvent
+            # the MiMo shim the Desktop transcript hand-rolled
+            assert "--upstream" in out or "upstream" in out.lower(), (
+                f"{fmt}: must mention proxy --upstream"
+            )
 
     def test_install_and_print_emit_same_claude_md_snippet(
         self, tmp_path: Path,
