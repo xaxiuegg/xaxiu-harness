@@ -4513,6 +4513,65 @@ def audit_summary_cmd(since_hours: float, fmt: str) -> None:
     click.echo("Ledger: ~/.harness/audit.jsonl")
 
 
+@audit_group.command(name="verify")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty", help="Output format.")
+@click.option("--ledger", "ledger_path_str", type=click.Path(path_type=Path),
+              default=None,
+              help="Override audit ledger path (default ~/.harness/audit.jsonl).")
+def audit_verify_cmd(fmt: str, ledger_path_str: Optional[Path]) -> None:
+    """W14-AUDIT-CHAIN-HMAC: verify the chain integrity of the audit ledger.
+
+    Walks the ledger line-by-line, recomputing each entry's HMAC-SHA256
+    against the stored key + checking the prev_hash chain.  Reports the
+    first tampered entry (if any) by line number.
+
+    Exit codes:
+        0 — chain verifies OK (or ledger is empty)
+        1 — tampering detected, or HMAC key unavailable for verification
+        2 — ledger read failed (I/O error)
+
+    The HMAC key resolves via env var ``HARNESS_AUDIT_HMAC_KEY`` first,
+    then a DPAPI-stored secret of the same name on Windows.  Use
+    ``--format json`` to integrate with monitoring.
+    """
+    from harness.audit_chain import verify_chain
+    from harness.audit_jsonl import _ledger_path
+    path = _ledger_path(ledger_path_str)
+    result = verify_chain(path)
+    if fmt == "json":
+        payload = {
+            "ok": result.ok,
+            "total": result.total,
+            "chained": result.chained,
+            "legacy": result.legacy,
+            "chain_restarts": list(result.chain_restarts),
+            "first_tamper_line": result.first_tamper_line,
+            "reason": result.reason,
+            "key_available": result.key_available,
+            "ledger": str(path),
+        }
+        click.echo(json.dumps(payload, indent=2))
+    else:
+        status = "PASS" if result.ok else "FAIL"
+        click.echo(f"Audit chain verification: {status}")
+        click.echo(f"  ledger          : {path}")
+        click.echo(f"  total entries   : {result.total}")
+        click.echo(f"  chained         : {result.chained}")
+        click.echo(f"  legacy          : {result.legacy}")
+        click.echo(f"  chain restarts  : {len(result.chain_restarts)}"
+                   f"{' (lines: ' + ', '.join(str(n) for n in result.chain_restarts) + ')' if result.chain_restarts else ''}")
+        click.echo(f"  key available   : {result.key_available}")
+        if not result.ok:
+            click.echo(f"  first tamper    : line {result.first_tamper_line}")
+            click.echo(f"  reason          : {result.reason}")
+    if not result.ok:
+        raise SystemExit(1)
+    if not result.key_available and result.chained == 0:
+        # Empty ledger + no key — advisory, but not a hard fail
+        pass
+
+
 @cli.group(name="plan")
 def plan_group() -> None:
     """W13-HARNESS-PLAN-VERB: surface the active strategic plan.

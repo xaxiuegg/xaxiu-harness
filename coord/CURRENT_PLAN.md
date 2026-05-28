@@ -1,7 +1,7 @@
 # Current strategic plan — xaxiu-harness
 
 **Source**: 15-engine Round 2 strategic panel ([FINAL_VERDICT](reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md)) + Friday v1.0.0 release-gate ([FINAL_VERDICT](reviews/v1-release-gate/FINAL_VERDICT.md), 2/3 APPROVE).
-**Last updated**: 2026-05-28 (agentic-operator roadmap shipped AM + engine-budget triad shipped PM after audit-first reconciliation; live action chain shifts to Week 2 Operations Hardening starting with `W14-AUDIT-CHAIN-HMAC`).
+**Last updated**: 2026-05-28 (agentic-operator roadmap AM + engine-budget triad PM + audit-chain HMAC PM all shipped; live action chain shifts to auto-default guardrail CI framework or key-rotation playbook).
 
 > **For agents**: this file is the active "what are we trying to ship right now" document. `coord/STATUS.csv` is the per-row task tracker; this file is the strategic narrative that explains why those rows exist. When the rows here disagree with `harness today`, trust `harness today` for current state and update this file.
 
@@ -31,11 +31,13 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 | Triad row | Today's commit | What completed today |
 |---|---|---|
-| `W14-KIMI-REPLACEMENT-WITH-QWEN-SCAFFOLD` | `522df36` | `QwenConcrete` adapter + factory registration + budget pricing + 12 tests.  Live validation gated on operator acquiring `DASHSCOPE_API_KEY`. |
-| `W14-BUDGET-METER-PER-ENGINE-OBSERVER-HOOK` | `b646b3c` | Meter + caps + dispatch-skip already shipped weeks back.  Today: cheap local periodic check + `harness observer budget-watch` verb + MED/HIGH flag emit at 80%/100% thresholds + dedup via signature marker. |
-| `W14-DISPATCH-HEALTH-AWARE-FALLBACK-IN-ASK-FLOW` | `bcb2ae6` | `routing.py::filter_eligible_engines` already shipped + dispatcher already used it.  Today: `recommend_healthy()` wrapper + `harness ask` routed-default + `_pick_auditor_engines` walker both call it now. |
+| Qwen scaffold (W14 row) | `522df36` | `QwenConcrete` adapter + factory registration + budget pricing + 12 tests.  Live validation gated on operator acquiring `DASHSCOPE_API_KEY`. |
+| Budget meter observer hook (W14 row) | `b646b3c` | Meter + caps + dispatch-skip already shipped weeks back.  Today: cheap local periodic check + `harness observer budget-watch` verb + MED/HIGH flag emit at 80%/100% thresholds + dedup via signature marker. |
+| Dispatch health-aware fallback (W14 row) | `bcb2ae6` | `routing.py::filter_eligible_engines` already shipped + dispatcher already used it.  Today: `recommend_healthy()` wrapper + `harness ask` routed-default + `_pick_auditor_engines` walker both call it now. |
 
-Plan reconciliation itself shipped as `b503fcb` (`W14-PLAN-RECONCILE-2026-05-28`).  Engine-budget triad is now **done**; the live action chain shifts to Week 2 Operations Hardening below.
+Plan reconciliation itself shipped as `b503fcb` (the W14 plan-reconcile row).  Engine-budget triad is now **done**.
+
+**2026-05-28 PM (continued) — audit chain HMAC shipped** (1 commit). The security panel's #1 pick closed today.  `src/harness/audit_chain.py` (~290 LOC) adds SHA-256 + HMAC chain to every `~/.harness/audit.jsonl` entry; `harness audit verify` walks the chain and reports tampering by line number.  Best-effort policy: chain failures NEVER block dispatch.  Key resolves env-var → DPAPI → auto-generate-and-persist (Windows).  34 tests cover canonical JSON stability, HMAC reproducibility, tamper detection at hmac/prev_hash/payload fields, legacy-to-chained transitions, and post-prune chain restarts.  Existing 2289 ledger entries correctly identified as legacy without false-positive.  Live action chain now shifts to the remaining Week 2 rows below.
 
 ---
 
@@ -63,11 +65,12 @@ This commitment **reverses the previous "pause + observe" recommendation** ([EVA
 | 4 | Observer audits | ~200-500k tokens | DeepSeek V4 Flash |
 | 5 | Bulk batch / simple Q&A | 500k-2M tokens | DeepSeek V4 Flash (or Qwen3 Turbo via DashScope) |
 
-### Week 2 Operations Hardening (~6-8h, audit-first reconciled)
+### Week 2 Operations Hardening (~5-7h remaining, audit-first reconciled)
+
+The audit-chain HMAC row (security panel's #1 pick) shipped today — see the "audit chain HMAC shipped" paragraph in "Where we are right now" above.  Remaining Week 2 rows:
 
 | Row | Effort | Status & Why |
 |---|---|---|
-| W14-AUDIT-CHAIN-HMAC | M (3-4h) | **Truly zero** (grep'd `hmac\|HMAC\|audit_chain` — no matches in `src/harness/`).  Security panel's #1 pick (0.90/0.95 confidence).  The actual greenfield work. |
 | W13-BACKUP-ENCRYPTION (renamed from W14-BACKUP-MANAGER) | S (~3-4h) | **Was overcounted.**  `src/harness/backup.py` (347 LOC, create/list/prune/restore) shipped 2026-05-25 as the W13 backup work (see STATUS.csv for the shipped row).  No encryption code present (grep'd `encrypt\|cipher`).  Remaining work: AES-256 of the .tar.gz body, key derivation from DPAPI / system keyring, manifest stays cleartext.  Same `harness backup` surface, transparently encrypted. |
 | W14-KEY-ROTATION-PLAYBOOK + `harness env rotate <engine>` verb | S-M (2-3h) | **Truly zero for the verb.**  `harness env --help` confirms only `--show-set` flag; no rotate.  doctor/preflight touch the concept but no playbook doc.  Greenfield work: write the verb + a `docs/KEY_ROTATION_PLAYBOOK.md`. |
 | Auto-default guardrail CI framework | M (4-5h) | **Truly zero** (grep'd `auto.default.guardrail\|guardrail.*ci` — no matches).  Greenfield work. |
@@ -103,7 +106,9 @@ This commitment **reverses the previous "pause + observe" recommendation** ([EVA
 
 ## Single most important action (live)
 
-**Start `W14-AUDIT-CHAIN-HMAC`** — the security panel's #1 pick (0.90/0.95 confidence) and the only truly-zero Week 2 Operations Hardening row with no operator dependency. Greenfield M (3-4h): SHA-256 chained-hash of audit JSONL entries with HMAC keyed off DPAPI-stored secret. Closes the audit-integrity gap that lets a process with write access tamper with the ledger post-hoc.
+**Start the auto-default guardrail CI framework** — the largest remaining Week 2 row (M, 4-5h, truly zero per grep).  The harness now ships with several auto-defaults (auto-lens-set, auto-max-tokens, health-aware fallback, budget-watch thresholds); without a CI guardrail framework each default is one regression away from silently changing.  Greenfield: a test scaffold that snapshot-locks auto-default values + flags drift.
+
+**Or (cheaper)**: ship `W14-KEY-ROTATION-PLAYBOOK` (S-M, 2-3h, truly zero for the verb).  `harness env rotate <engine>` + a `docs/KEY_ROTATION_PLAYBOOK.md`.  Operationally useful for the live $195/mo PAYG pool.
 
 **In parallel (operator-blocked)**: acquire `DASHSCOPE_API_KEY` from [dashscope.aliyun.com](https://dashscope.aliyun.com) (PAYG, NOT Alibaba Coding Plan subscription) to unblock `W14-KIMI-REPLACEMENT-WITH-QWEN` live validation.  The `QwenConcrete` scaffold + tests are already in `522df36`; only the live smoke test gates on the key.
 

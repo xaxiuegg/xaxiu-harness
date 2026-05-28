@@ -211,6 +211,25 @@ def append_dispatch_event(*,
             "response_excerpt": _excerpt(response),
         }
 
+        # W14-AUDIT-CHAIN-HMAC 2026-05-28: chain the event into the
+        # tamper-evident ledger.  Best-effort — if the HMAC key isn't
+        # available (e.g. non-Windows host with no env override) the
+        # event still writes WITHOUT prev_hash/hmac fields, and the
+        # verifier treats it as a legacy entry.  Chain failures NEVER
+        # block dispatch.
+        try:
+            from harness.audit_chain import (
+                chain_event as _chain_event,
+                get_hmac_key as _get_hmac_key,
+                get_last_chain_hash as _get_last_chain_hash,
+            )
+            _key = _get_hmac_key()
+            if _key is not None:
+                _prev = _get_last_chain_hash(path)
+                event = _chain_event(event, _prev, _key)
+        except Exception:
+            pass  # Chain is best-effort; event still writes uncheained
+
         # Append + fsync.  Single open(append) call is atomic at the
         # OS level for writes under 4KB on most filesystems; a JSON line
         # of this shape is comfortably under that.
