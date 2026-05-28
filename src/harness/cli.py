@@ -516,6 +516,21 @@ def _agent_instructions_snippet(
             f"see #3 below)\n"
             f"- Sub-routine LLM calls from external tools (use the "
             f"proxy, see #2 below)\n\n"
+            f"**Auto-audit heuristic for your own claims:** when you "
+            f"(the agent) are about to commit to a specific, non-obvious, "
+            f"falsifiable factual claim — model versions, API behavior, "
+            f"protocol shapes, library invariants, project history — "
+            f"and your confidence is below ~80%, OR a downstream "
+            f"decision (a PR, a Slack post, a config change) hinges on "
+            f"the claim being right, wrap it in `--audit` BEFORE the "
+            f"user sees it.  This costs ~$0.05 and ~60s.  It is "
+            f"strictly cheaper than the wrong-path pivot caused by a "
+            f"hallucinated detail.  The canonical case where this "
+            f"would have saved real time: a recent agent claimed "
+            f"\"MiMo speaks Anthropic protocol only\" based on partial "
+            f"source reading; an `--audit` call at the moment of the "
+            f"claim would have surfaced the dual `/v1` + `/anthropic` "
+            f"surfaces in under a minute.\n\n"
             f"Outputs land at `{repo_root}\\coord\\reviews\\ask-"
             f"<ts>-<slug>\\` with `question.md`, per-engine `*.md`, "
             f"`packet.md` (panel/audit only), and `summary.json` (with "
@@ -1227,7 +1242,15 @@ _VALID_TASK_CLASSES = (
 ))
 @click.option("--audit-engine", "audit_engine_override", default="", help=(
     "Override the auditor engine pick (default: chosen by recommender).  "
-    "Implies --audit."
+    "Implies --audit.  Conflicts with --auditors >1."
+))
+@click.option("--auditors", "num_auditors", type=int, default=1,
+              show_default=True, help=(
+    "Number of auditors for --audit mode.  Default 1 (single auditor).  "
+    "Pass `--auditors 2` for a 2-engine quorum (PASS/PARTIAL/FAIL "
+    "computed by majority).  Capped at the number of distinct engines "
+    "available after excluding the producer — currently 2 max with the "
+    "Pattern B engine pool.  ~$0.10 for 2 auditors."
 ))
 @click.option("--rerun", "rerun_path", type=click.Path(
     exists=True, file_okay=False, path_type=Path,
@@ -1268,6 +1291,7 @@ def ask_cmd(
     panel_mode: bool,
     audit_mode: bool,
     audit_engine_override: str,
+    num_auditors: int,
     rerun_path: Path | None,
     escalate_mode: str | None,
     output_dir: Path | None,
@@ -1414,6 +1438,20 @@ def ask_cmd(
     # --audit-engine implies --audit.  Cheaper UX than requiring both.
     if audit_engine_override:
         audit_mode = True
+
+    # --auditors > 1 implies --audit and conflicts with --audit-engine
+    if num_auditors > 1:
+        audit_mode = True
+        if audit_engine_override:
+            click.echo(
+                click.style(
+                    "ERROR: --audit-engine pins a single engine; "
+                    "--auditors >1 requests a quorum.  These conflict.  "
+                    "Pick one.",
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
 
     # Conflict checks (mutually exclusive flag combinations)
     if audit_mode and panel_mode:
@@ -1569,25 +1607,44 @@ def ask_cmd(
             max_budget_usd=max_budget_usd,
             timeout_s=timeout_s,
             audit_engine_override=audit_engine_override,
+            num_auditors=num_auditors,
         )
-        if outcome.auditor is None:
-            # Producer failed; the audit step was skipped (auditing a
-            # non-response is meaningless).  Single result, no verdict.
+        if not outcome.auditors:
+            # Producer failed (or auditor selection failed); the audit
+            # step was skipped.  Single result, no verdict.
             results = [outcome.producer]
             roles = ["producer"]
             extra_summary.update({
                 "producer_engine": producer_engine_for_audit,
                 "auditor_engine": "",
+                "auditor_engines": [],
+                "num_auditors_requested": num_auditors,
                 "verdict": None,
-                "audit_skipped_reason": "producer dispatch failed",
+                "audit_skipped_reason": (
+                    "producer dispatch failed" if not outcome.producer.ok
+                    else "no audit engines available"
+                ),
             })
         else:
-            results = [outcome.producer, outcome.auditor]
-            roles = ["producer", "audit"]
+            results = [outcome.producer, *outcome.auditors]
+            # Multi-auditor: roles are producer + audit-1 + audit-2 ...
+            # For single-auditor (back-compat), keep the unsuffixed role.
+            if len(outcome.auditors) == 1:
+                roles = ["producer", "audit"]
+            else:
+                roles = ["producer"] + [
+                    f"audit-{i+1}" for i in range(len(outcome.auditors))
+                ]
             extra_summary.update({
                 "producer_engine": producer_engine_for_audit,
-                "auditor_engine": outcome.auditor_engine,
+                "auditor_engine": outcome.auditor_engine,  # back-compat: first
+                "auditor_engines": list(outcome.auditor_engines),
+                "num_auditors_requested": num_auditors,
+                "num_auditors_actual": len(outcome.auditors),
                 "verdict": outcome.verdict,
+                # Per-auditor breakdown is only useful for N > 1
+                **({"verdicts": outcome.verdicts}
+                   if len(outcome.auditors) > 1 else {}),
             })
     else:
         results = run_panel(

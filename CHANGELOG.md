@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.6.1 — 2026-05-28 (Phase 4.1 + 4.3: audit quorum + auto-audit heuristic)
+
+### `--audit --auditors N` quorum (Phase 4.1)
+
+`harness ask "..." --audit --auditors 2` runs 1 producer + 2 different-
+engine auditors IN PARALLEL, returns a majority verdict.
+
+Per-auditor scoring: PASS=2, PARTIAL=1, FAIL=0; UNKNOWN excluded from
+average.  Aggregate:
+- avg >= 1.5 → PASS
+- 0.5 < avg < 1.5 → PARTIAL
+- avg <= 0.5 → FAIL
+- all UNKNOWN → UNKNOWN
+
+Auditor engines are picked by walking `recommend("audit", exclude=...)`
+with growing excludes; capped at the number of distinct alternates
+available (2 max with the current Pattern B engine pool).
+
+Conflicts: `--auditors 2` with `--audit-engine X` is rejected (pin is
+1 engine; quorum requests N).
+
+Output dir for quorum:
+```
+ask-<ts>-<slug>/
+  question.md
+  producer-<engine>.md
+  audit-1-<engine>.md
+  audit-2-<engine>.md
+  packet.md
+  summary.json   # mode=audit, num_auditors_actual=2, verdict (aggregate), verdicts (per-auditor list)
+```
+
+`summary.json`'s `verdict` is the aggregate; `verdicts` is the per-
+auditor list with `auditor_breakdown` for diagnostics.
+
+### Agent-side auto-audit heuristic (Phase 4.3)
+
+`claude-md` template gains a new "Auto-audit heuristic for your own
+claims" paragraph: when an agent is about to commit to a specific,
+non-obvious, falsifiable factual claim with confidence < 80% (or where
+a downstream decision hinges on it), wrap it in `--audit` before the
+user sees it.  Includes the MiMo dual-protocol anecdote as the
+canonical "would have caught this in time" example.
+
+Pure prompt-engineering — no new code, but trains the right reflex in
+fresh-session agents.
+
+### Tests + module changes
+
+- `src/harness/ask.py` — new `_aggregate_verdicts` helper +
+  `_pick_auditor_engines` walker.  `run_audit` gains `num_auditors`
+  kwarg.  `AuditOutcome` gains `auditors`, `auditor_engines`,
+  `verdicts` list fields (back-compat with single-`auditor`/`verdict`
+  callers preserved).
+- `src/harness/cli.py` — new `--auditors` option (Choice 1+);
+  multi-auditor dispatch + role naming (`audit-1`, `audit-2`).
+- 11 new tests in `tests/test_ask.py` (TestAuditQuorum) covering
+  aggregation rules + engine-picker capping + run_audit multi-path
+  + CLI quorum end-to-end + conflict detection.
+
+Full non-slow suite: 3051 passed, 8 skipped (was 3040, +11).
+
+W14-AUDITORS-QUORUM + W14-AUTO-AUDIT-HEURISTIC.
+
 ## v0.6.0 — 2026-05-28 (Phase 3 complete: human-operator UX)
 
 ### `__version__` bumped to 0.6.0 (was stale at 0.1.0)

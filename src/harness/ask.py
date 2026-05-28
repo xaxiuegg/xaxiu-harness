@@ -178,20 +178,136 @@ def run_panel(
     return [results_by_engine[eng] for eng in engines]
 
 
+from dataclasses import field as _field
+
+
 @dataclass
 class AuditOutcome:
-    """W14-ASK-AUDIT 2026-05-27: result of a producer→auditor flow.
+    """W14-ASK-AUDIT 2026-05-27 / W14-AUDITORS-QUORUM 2026-05-28: result
+    of a producer→auditor(s) flow.
 
-    Either the producer failed (auditor is None, verdict is None) or
-    both ran (auditor is an AskResult; verdict is the parsed dict from
-    ``audit_prompt.parse_audit_verdict``).  When the auditor itself
-    failed to dispatch, ``auditor`` is the failed AskResult and
-    ``verdict["verdict"]`` is ``"UNKNOWN"``.
+    For single-auditor (default): ``auditors`` has 1 entry, ``verdict``
+    is the parsed verdict dict.
+
+    For multi-auditor (quorum): ``auditors`` has N entries (parallel
+    dispatch); ``verdicts`` has per-auditor parsed dicts; ``verdict``
+    is the AGGREGATE — a dict with ``verdict`` ∈ {PASS, PARTIAL, FAIL,
+    UNKNOWN} computed from the per-auditor scores (PASS=2, PARTIAL=1,
+    FAIL=0, UNKNOWN=null), plus an ``auditor_breakdown`` field listing
+    each auditor's per-engine verdict.
+
+    Backward compat: the legacy single-auditor ``auditor`` /
+    ``auditor_engine`` fields point at the FIRST auditor.
+
+    Producer failure: ``auditors`` is empty, ``verdict`` is None.
     """
     producer: AskResult
     auditor: Optional[AskResult]
     auditor_engine: str
     verdict: Optional[dict]
+    # Multi-auditor extension (W14-AUDITORS-QUORUM 2026-05-28).
+    # For N=1 these are also populated (1-entry lists); callers that
+    # only care about single-auditor can keep using `auditor` /
+    # `auditor_engine` / `verdict`.
+    auditors: list[AskResult] = _field(default_factory=list)
+    auditor_engines: list[str] = _field(default_factory=list)
+    verdicts: list[Optional[dict]] = _field(default_factory=list)
+
+
+def _aggregate_verdicts(verdicts: list[Optional[dict]]) -> dict:
+    """Compute a quorum-aggregate verdict across N auditor verdicts.
+
+    Scoring:  PASS=2, PARTIAL=1, FAIL=0, UNKNOWN=excluded-from-average.
+
+    Aggregate:
+      - All UNKNOWN → UNKNOWN
+      - avg >= 1.5 → PASS
+      - 0.5 < avg < 1.5 → PARTIAL
+      - avg <= 0.5 → FAIL
+
+    Returns a dict shaped like a single-auditor verdict:
+      {verdict, summary, corrections, missed, overall, raw,
+       auditor_breakdown}.
+
+    ``auditor_breakdown`` is a list of per-auditor mini-dicts so the
+    caller can see WHY the aggregate landed where it did.
+    """
+    score_map = {"PASS": 2, "PARTIAL": 1, "FAIL": 0}
+    scores = []
+    breakdown = []
+    summaries = []
+    corrections = []
+    missed = []
+    overalls = []
+    for i, v in enumerate(verdicts):
+        if v is None:
+            breakdown.append({"index": i, "verdict": "MISSING"})
+            continue
+        vv = (v.get("verdict") or "UNKNOWN").upper()
+        breakdown.append({"index": i, "verdict": vv})
+        if vv in score_map:
+            scores.append(score_map[vv])
+        if v.get("summary"):
+            summaries.append(f"({vv}) {v['summary']}")
+        if v.get("corrections") and v["corrections"].lower() != "none":
+            corrections.append(f"[auditor {i}] {v['corrections']}")
+        if v.get("missed") and v["missed"].lower() != "none":
+            missed.append(f"[auditor {i}] {v['missed']}")
+        if v.get("overall"):
+            overalls.append(f"[auditor {i}] {v['overall']}")
+
+    if not scores:
+        agg = "UNKNOWN"
+    else:
+        avg = sum(scores) / len(scores)
+        if avg >= 1.5:
+            agg = "PASS"
+        elif avg > 0.5:
+            agg = "PARTIAL"
+        else:
+            agg = "FAIL"
+
+    quorum_summary = f"Quorum of {len(verdicts)} auditors → {agg}"
+    if scores and len(set(scores)) > 1:
+        # Mixed verdicts: explicitly label
+        per = " / ".join(b["verdict"] for b in breakdown)
+        quorum_summary += f" (split: {per})"
+
+    return {
+        "verdict": agg,
+        "summary": quorum_summary,
+        "corrections": "\n".join(corrections) if corrections else "none",
+        "missed": "\n".join(missed) if missed else "none",
+        "overall": "\n\n".join(overalls),
+        "raw": "",  # aggregate has no raw text; per-auditor raws kept on verdicts
+        "auditor_breakdown": breakdown,
+    }
+
+
+def _pick_auditor_engines(
+    producer_engine: str,
+    num_auditors: int,
+) -> list[tuple[str, str]]:
+    """Walk the recommender to pick up to N distinct auditor engines.
+
+    Returns list of (engine_name, model_override) tuples in priority
+    order.  Capped at the number of unique alternates available — if
+    only 2 distinct engines remain after excluding producer, returning
+    2 even when N=3 is requested.
+    """
+    from harness.engines.routing_recommend import recommend
+    excludes = {producer_engine}
+    out: list[tuple[str, str]] = []
+    for _ in range(num_auditors):
+        try:
+            rec = recommend("audit", exclude=excludes)
+        except ValueError:
+            break  # exhausted candidates
+        if rec.engine in excludes:
+            break
+        out.append((rec.engine, rec.model_override or ""))
+        excludes.add(rec.engine)
+    return out
 
 
 def run_audit(
@@ -201,24 +317,25 @@ def run_audit(
     max_budget_usd: float = 0.30,
     timeout_s: int = 180,
     audit_engine_override: str = "",
+    num_auditors: int = 1,
 ) -> AuditOutcome:
-    """Run producer → auditor sequentially.
+    """Run producer → auditor(s).
 
     1. Dispatch ``producer_engine`` with the user's question.
-    2. If producer failed, return (producer_result, None, None, None)
-       — the audit step is skipped, since auditing a failed dispatch
-       is meaningless.
-    3. Otherwise pick the auditor: ``audit_engine_override`` if set,
-       else ``recommend('audit', exclude={producer_engine})``.  The
-       recommender returns a different engine label by construction
-       (D-i: engine-label dedup, not (engine,model) dedup).
-    4. Build the audit prompt via ``audit_prompt.build_audit_prompt``.
-    5. Dispatch the auditor with the audit prompt + any ``model_override``
-       from the recommender (e.g. ``deepseek-v4-pro``).
-    6. Parse the auditor response into a structured verdict.
+    2. If producer failed, return outcome with empty auditors list.
+    3. Pick auditor engine(s):
+       - If ``audit_engine_override`` set: single override engine.
+       - Else if ``num_auditors == 1``: ``recommend('audit',
+         exclude={producer})``.  Same as pre-v0.6.x behavior.
+       - Else: walk ``recommend`` N times, picking distinct alternates.
+         If fewer than N alternates exist, cap at what's available.
+    4. Build the audit prompt once (same producer answer for all
+       auditors).
+    5. Dispatch auditor(s) in PARALLEL via ThreadPoolExecutor.
+    6. Parse each auditor response.  For N>1, aggregate via majority
+       (PASS=2, PARTIAL=1, FAIL=0).
 
-    Returns an ``AuditOutcome``.  Cost is producer_cost + auditor_cost
-    (sequential, not parallel).
+    Returns an ``AuditOutcome``.  Cost ≈ producer + N×auditor.
     """
     from harness.audit_prompt import build_audit_prompt, parse_audit_verdict
 
@@ -226,51 +343,99 @@ def run_audit(
         producer_engine, question, max_budget_usd, timeout_s,
     )
     if not producer.ok:
-        # Audit a non-response is pointless — skip stage 2 entirely.
         return AuditOutcome(
             producer=producer, auditor=None,
             auditor_engine="", verdict=None,
+            auditors=[], auditor_engines=[], verdicts=[],
         )
 
-    # Resolve auditor + optional model override
-    auditor_model_override: str = ""
+    # Resolve auditor engine(s).  Override takes precedence and
+    # forces num_auditors=1 (overriding 1 engine + then needing N-1
+    # alternates is an inconsistent request).
     if audit_engine_override:
-        auditor_engine = audit_engine_override
-        # Operator override: leave model at engine default unless the
-        # operator separately specifies one.  (We don't expose a
-        # --audit-model flag yet; v4-pro override only applies via
-        # the recommender path.)
+        auditor_specs: list[tuple[str, str]] = [
+            (audit_engine_override, ""),
+        ]
     else:
-        from harness.engines.routing_recommend import recommend
-        audit_rec = recommend("audit", exclude={producer_engine})
-        auditor_engine = audit_rec.engine
-        auditor_model_override = audit_rec.model_override or ""
+        auditor_specs = _pick_auditor_engines(
+            producer_engine, num_auditors,
+        )
 
+    if not auditor_specs:
+        return AuditOutcome(
+            producer=producer, auditor=None,
+            auditor_engine="", verdict=None,
+            auditors=[], auditor_engines=[], verdicts=[],
+        )
+
+    # Build audit prompt once + dispatch each auditor in parallel
     audit_text = build_audit_prompt(
         question=question,
         producer_engine=producer_engine,
         producer_response=producer.text,
     )
-    auditor = _dispatch_one(
-        auditor_engine, audit_text, max_budget_usd, timeout_s,
-        model_override=auditor_model_override,
-    )
 
-    if auditor.ok:
-        verdict = parse_audit_verdict(auditor.text)
+    if len(auditor_specs) == 1:
+        # Single-auditor path — sequential, no thread-pool overhead
+        eng, model = auditor_specs[0]
+        auditor = _dispatch_one(
+            eng, audit_text, max_budget_usd, timeout_s,
+            model_override=model,
+        )
+        auditors = [auditor]
     else:
-        verdict = {
-            "verdict": "UNKNOWN",
-            "summary": f"Auditor dispatch failed: {auditor.error}",
-            "corrections": "",
-            "missed": "",
-            "overall": "",
-            "raw": "",
-        }
+        # Multi-auditor: fan out in parallel.  max_workers = N keeps
+        # the pool exactly sized to the work.
+        auditors_by_engine: dict[str, AskResult] = {}
+        with _cf.ThreadPoolExecutor(
+            max_workers=len(auditor_specs),
+        ) as pool:
+            future_to_eng = {
+                pool.submit(
+                    _dispatch_one, eng, audit_text,
+                    max_budget_usd, timeout_s,
+                    model_override=model,
+                ): eng
+                for eng, model in auditor_specs
+            }
+            for future in _cf.as_completed(future_to_eng):
+                r = future.result()
+                auditors_by_engine[r.engine] = r
+        # Preserve auditor_specs ordering in the returned list
+        auditors = [
+            auditors_by_engine[eng] for eng, _ in auditor_specs
+            if eng in auditors_by_engine
+        ]
+
+    # Parse each auditor's verdict
+    verdicts: list[Optional[dict]] = []
+    for a in auditors:
+        if a.ok:
+            verdicts.append(parse_audit_verdict(a.text))
+        else:
+            verdicts.append({
+                "verdict": "UNKNOWN",
+                "summary": f"Auditor dispatch failed: {a.error}",
+                "corrections": "",
+                "missed": "",
+                "overall": "",
+                "raw": "",
+            })
+
+    # Aggregate (trivial for N=1: aggregate IS the single verdict)
+    if len(verdicts) == 1:
+        verdict = verdicts[0]
+    else:
+        verdict = _aggregate_verdicts(verdicts)
 
     return AuditOutcome(
-        producer=producer, auditor=auditor,
-        auditor_engine=auditor_engine, verdict=verdict,
+        producer=producer,
+        auditor=auditors[0],                       # back-compat alias
+        auditor_engine=auditors[0].engine,         # back-compat alias
+        verdict=verdict,                           # aggregate for N>1
+        auditors=auditors,
+        auditor_engines=[a.engine for a in auditors],
+        verdicts=verdicts,
     )
 
 

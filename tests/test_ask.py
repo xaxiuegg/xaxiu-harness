@@ -998,6 +998,194 @@ class TestAuditCli:
         assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
         assert mock_dispatch.call_args_list[1].args[0] == "deepseek-via-claude"
 
+class TestAuditQuorum:
+    """W14-AUDITORS-QUORUM 2026-05-28: multi-auditor (--auditors N)
+    quorum support."""
+
+    def test_aggregate_all_pass(self) -> None:
+        from harness.ask import _aggregate_verdicts
+        agg = _aggregate_verdicts([
+            {"verdict": "PASS", "summary": "fine", "corrections": "none",
+             "missed": "none", "overall": ""},
+            {"verdict": "PASS", "summary": "fine", "corrections": "none",
+             "missed": "none", "overall": ""},
+        ])
+        assert agg["verdict"] == "PASS"
+        assert "Quorum of 2 auditors" in agg["summary"]
+
+    def test_aggregate_all_fail(self) -> None:
+        from harness.ask import _aggregate_verdicts
+        agg = _aggregate_verdicts([
+            {"verdict": "FAIL", "summary": "x", "corrections": "",
+             "missed": "", "overall": ""},
+            {"verdict": "FAIL", "summary": "x", "corrections": "",
+             "missed": "", "overall": ""},
+        ])
+        assert agg["verdict"] == "FAIL"
+
+    def test_aggregate_mixed_pass_fail_returns_partial(self) -> None:
+        from harness.ask import _aggregate_verdicts
+        agg = _aggregate_verdicts([
+            {"verdict": "PASS", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+            {"verdict": "FAIL", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+        ])
+        # PASS=2, FAIL=0, avg=1 → PARTIAL
+        assert agg["verdict"] == "PARTIAL"
+        assert "split" in agg["summary"].lower()
+
+    def test_aggregate_pass_partial_leans_pass(self) -> None:
+        from harness.ask import _aggregate_verdicts
+        agg = _aggregate_verdicts([
+            {"verdict": "PASS", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+            {"verdict": "PARTIAL", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+        ])
+        # PASS=2, PARTIAL=1, avg=1.5 → PASS (boundary)
+        assert agg["verdict"] == "PASS"
+
+    def test_aggregate_all_unknown(self) -> None:
+        from harness.ask import _aggregate_verdicts
+        agg = _aggregate_verdicts([
+            {"verdict": "UNKNOWN", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+            {"verdict": "UNKNOWN", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+        ])
+        assert agg["verdict"] == "UNKNOWN"
+
+    def test_aggregate_includes_per_auditor_breakdown(self) -> None:
+        from harness.ask import _aggregate_verdicts
+        agg = _aggregate_verdicts([
+            {"verdict": "PASS", "summary": "", "corrections": "",
+             "missed": "", "overall": ""},
+            {"verdict": "FAIL", "summary": "", "corrections": "x",
+             "missed": "", "overall": ""},
+        ])
+        assert "auditor_breakdown" in agg
+        assert len(agg["auditor_breakdown"]) == 2
+        verdicts_seen = {b["verdict"] for b in agg["auditor_breakdown"]}
+        assert verdicts_seen == {"PASS", "FAIL"}
+
+    def test_pick_auditor_engines_returns_up_to_n(self) -> None:
+        from harness.ask import _pick_auditor_engines
+        # 2 alternates available when producer is one of the 3 Pattern B
+        # engines: should return 2 entries when asked for N=2.
+        specs = _pick_auditor_engines("mimo-via-claude", num_auditors=2)
+        assert len(specs) == 2
+        # Each entry is (engine, model_override)
+        for eng, mo in specs:
+            assert eng != "mimo-via-claude"
+
+    def test_pick_auditor_engines_caps_at_available(self) -> None:
+        """If we ask for 3 auditors but only 2 alternates exist, cap at 2."""
+        from harness.ask import _pick_auditor_engines
+        specs = _pick_auditor_engines("mimo-via-claude", num_auditors=3)
+        # Currently 3 Pattern B engines → producer + 2 alternates → cap=2
+        assert len(specs) <= 2
+
+    def test_run_audit_num_auditors_2_dispatches_3_total(self) -> None:
+        """1 producer + 2 auditors = 3 dispatches."""
+        from harness.ask import run_audit
+        producer_resp = _mock_pool_result(text="answer")
+        a1 = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        a2 = _mock_pool_result(
+            text="VERDICT: PARTIAL\nONE-LINE SUMMARY: kinda\nOVERALL: ok\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                side_effect=[
+                    _mock_recommendation("deepseek-via-claude"),
+                    _mock_recommendation("kimi-via-claude"),
+                ],
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, a1, a2],
+            ) as mock_dispatch,
+        ):
+            outcome = run_audit(
+                "q", producer_engine="mimo-via-claude",
+                num_auditors=2,
+            )
+        # 3 total dispatches
+        assert mock_dispatch.call_count == 3
+        # 2 auditors in outcome
+        assert len(outcome.auditors) == 2
+        assert len(outcome.verdicts) == 2
+        # Aggregate verdict computed (PASS + PARTIAL → PASS, avg=1.5)
+        assert outcome.verdict["verdict"] == "PASS"
+        # auditor_engines list populated
+        assert set(outcome.auditor_engines) == {
+            "deepseek-via-claude", "kimi-via-claude",
+        }
+
+    def test_cli_auditors_2_writes_two_audit_files(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        producer_resp = _mock_pool_result(text="answer")
+        a1 = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        a2 = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                side_effect=[
+                    # Producer pick (routed default)
+                    _mock_recommendation("mimo-via-claude"),
+                    # Auditor pick 1
+                    _mock_recommendation("deepseek-via-claude"),
+                    # Auditor pick 2
+                    _mock_recommendation("kimi-via-claude"),
+                ],
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, a1, a2],
+            ),
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test question",
+                "--audit", "--auditors", "2",
+                "--output", str(tmp_path / "quorum-out"),
+            ])
+        assert result.exit_code == 0
+        out = tmp_path / "quorum-out"
+        # Three response files: producer + 2 auditors with -1 / -2 suffix
+        assert (out / "producer-mimo-via-claude.md").exists()
+        assert (out / "audit-1-deepseek-via-claude.md").exists()
+        assert (out / "audit-2-kimi-via-claude.md").exists()
+        # Summary carries quorum metadata
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["num_auditors_actual"] == 2
+        assert summary["verdict"]["verdict"] == "PASS"
+        assert "verdicts" in summary  # per-auditor breakdown
+
+    def test_cli_audit_engine_with_auditors_2_conflicts(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "ask", "test",
+            "--audit-engine", "kimi-via-claude",
+            "--auditors", "2",
+            "--no-save",
+        ])
+        assert result.exit_code == 2
+        combined = (result.output + (result.stderr or "")).lower()
+        assert "audit-engine" in combined
+        assert "auditors" in combined or "conflict" in combined
+
+
     def test_audit_producer_fail_returns_failed_exit(self) -> None:
         """When the producer fails, --audit exits 1 (failed result) and
         no auditor is run."""
