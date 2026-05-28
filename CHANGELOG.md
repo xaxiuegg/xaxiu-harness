@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.5.3 — 2026-05-28 (engine metadata as queryable surface)
+
+### `harness engines describe <name>` + `harness engines compatibility-matrix`
+
+New subcommands surface per-engine metadata that previously lived only in
+source docstrings, code comments, and scattered memory entries.  Closes
+three specific transcript hiccups by making 1 call do what previously
+needed 4-9 source-spelunking tool calls.
+
+```bash
+harness engines describe mimo-via-claude                # human-readable
+harness engines describe mimo-via-claude json           # JSON
+harness engines compatibility-matrix                    # N×M table
+harness engines compatibility-matrix --json             # machine-readable
+```
+
+The `describe` output covers: vendor, protocol surfaces (e.g. MiMo
+exposes BOTH `openai` and `anthropic` — the canonical confusion
+documented inline), key env + valid prefixes, UA-gating notes,
+default + available models, latency class, per-smoke cost, best-fit
+task classes, and consumption surfaces (HTTP direct / proxy upstream
+/ Pattern B / swarm).
+
+The `compatibility-matrix` answers the question "how can I reach
+engine X from context Y?" — a question that took an agent 9 tool
+calls to answer manually in the 2026-05-27 transcript.
+
+**New module**: `src/harness/engines/metadata.py` — `EngineMetadata`
+frozen dataclass + registry of 6 engines (mimo / deepseek / kimi /
+qwen via-claude, plus anthropic + gemini for reference) +
+`describe(name)` lookup + `compatibility_matrix()` builder.
+
+Storage shape is hardcoded for now; a future refactor could pull from
+an `@engine_metadata` decorator on each adapter class.  The
+dataclass shape is stable so that's an additive move.
+
+W14-ENGINE-METADATA.  Phase 1.2 of the agentic-operator roadmap.
+
 ## v0.5.2 — 2026-05-28 (harness proxy --upstream)
 
 ### `harness proxy start --upstream <name>` — multi-upstream proxy

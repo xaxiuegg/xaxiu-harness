@@ -4500,6 +4500,15 @@ def engines(subcmd: str | None, subcmd_args: tuple[str, ...],
       install-wrappers — install per-provider claude-* wrapper scripts
       list-wrappers    — show installed wrappers + their key status
       fallback-policy  — show effective fallback chain + skip reasons
+      describe <name>  — W14-ENGINE-METADATA 2026-05-28 — emit structured
+                         metadata for an engine: protocol surfaces, key
+                         prefixes, UA gating, recommended task classes,
+                         latency class, cost, consumption surfaces.
+                         Pass `json` as the 2nd arg for JSON output.
+      compatibility-matrix
+                       — N×M table of engines × consumption surfaces
+                         (http_direct / proxy_upstream / pattern_b /
+                         swarm).  Pass `--json` for machine output.
       recommend <cls>  — W14-CROSS-ENGINE-AUDIT 2026-05-26 — print the
                          recommended Pattern B engine for a task class.
                          Valid classes: default/latency/verbose/cost/
@@ -4607,6 +4616,133 @@ def engines(subcmd: str | None, subcmd_args: tuple[str, ...],
             click.echo("Skipped engines:")
             for eng, reason in sorted(policy['skipped'].items()):
                 click.echo(f"  ✗ {eng}: {reason}")
+        sys.exit(0)
+    elif subcmd == "describe":
+        # W14-ENGINE-METADATA 2026-05-28: queryable per-engine metadata.
+        # Replaces N tool-calls of source-spelunking with 1 call.
+        # Surfaces protocol surfaces, UA gating, key prefixes,
+        # recommended task classes, latency class, cost reference,
+        # consumption-surface compatibility.
+        from harness.engines.metadata import describe as _describe
+        engine_name = subcmd_args[0] if subcmd_args else ""
+        if not engine_name:
+            from harness.engines.metadata import list_engine_metadata
+            click.echo(
+                click.style(
+                    "ERROR: harness engines describe requires an engine "
+                    "name argument.  Known: "
+                    + ", ".join(sorted(list_engine_metadata())),
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
+        # JSON via --format flag would be nice; for now just check the
+        # arg has "--json" or "json" as second positional
+        as_json = "--json" in subcmd_args or "json" in subcmd_args[1:2]
+        try:
+            md = _describe(engine_name)
+        except ValueError as e:
+            click.echo(click.style(f"ERROR: {e}", fg="red"), err=True)
+            sys.exit(2)
+        if as_json:
+            import json
+            from dataclasses import asdict
+            click.echo(json.dumps(asdict(md), indent=2))
+            sys.exit(0)
+        # Human-readable text format
+        click.echo(click.style(f"# {md.name}", fg="cyan", bold=True))
+        click.echo(f"  vendor:       {md.vendor}")
+        click.echo(f"  description:  {md.description}")
+        click.echo()
+        click.echo(click.style("Protocol + key", fg="yellow", bold=True))
+        click.echo(f"  surfaces:     {', '.join(md.protocol_surfaces)}")
+        click.echo(f"  key env:      {md.key_env}")
+        if md.key_prefixes:
+            click.echo(
+                f"  key prefixes: {', '.join(md.key_prefixes)}"
+            )
+        if md.ua_gating:
+            click.echo()
+            click.echo(click.style(
+                "⚠ UA gating:", fg="yellow", bold=True,
+            ))
+            for line in md.ua_gating.splitlines():
+                click.echo(f"  {line}")
+        click.echo()
+        click.echo(click.style("Models", fg="yellow", bold=True))
+        click.echo(f"  default:      {md.default_model}")
+        if md.available_models:
+            click.echo(
+                f"  available:    {', '.join(md.available_models)}"
+            )
+        click.echo()
+        click.echo(click.style("Performance", fg="yellow", bold=True))
+        click.echo(f"  latency:      {md.latency_class}")
+        if md.cost_per_smoke_usd:
+            click.echo(
+                f"  cost/smoke:   ${md.cost_per_smoke_usd:.4f}"
+            )
+        if md.recommended_task_classes:
+            click.echo(
+                f"  best for:     {', '.join(md.recommended_task_classes)}"
+            )
+        click.echo()
+        click.echo(click.style("How to reach", fg="yellow", bold=True))
+        for surface, note in md.consumption_surfaces.items():
+            click.echo(f"  {surface:<18} {note}")
+        if md.notes:
+            click.echo()
+            click.echo(click.style("Notes", fg="yellow", bold=True))
+            for line in md.notes.splitlines():
+                click.echo(f"  {line}")
+        sys.exit(0)
+    elif subcmd == "compatibility-matrix":
+        from harness.engines.metadata import compatibility_matrix
+        rows = compatibility_matrix()
+        as_json = "--json" in subcmd_args
+        if as_json:
+            import json
+            click.echo(json.dumps(rows, indent=2))
+            sys.exit(0)
+        # Render text table
+        click.echo(
+            click.style(
+                "Engine compatibility matrix (engines × consumption "
+                "surfaces)",
+                fg="cyan", bold=True,
+            )
+        )
+        click.echo()
+        for r in rows:
+            ua_badge = (
+                click.style(" [UA-gated]", fg="yellow") if r["ua_gated"]
+                else ""
+            )
+            click.echo(
+                click.style(f"  {r['engine']}", bold=True)
+                + f"  ({r['vendor']}; protocols: "
+                + ", ".join(r["protocols"]) + ")" + ua_badge
+            )
+            click.echo(
+                f"    http_direct      {r['http_direct']}"
+            )
+            click.echo(
+                f"    proxy_upstream   {r['proxy_upstream']}"
+            )
+            click.echo(
+                f"    pattern_b        {r['pattern_b']}"
+            )
+            click.echo(
+                f"    swarm            {r['swarm']}"
+            )
+            click.echo()
+        click.echo(
+            click.style(
+                "  Tip: `harness engines describe <name>` for full "
+                "metadata on any engine.",
+                fg="white", dim=True,
+            )
+        )
         sys.exit(0)
     elif subcmd == "recommend":
         # W14-CROSS-ENGINE-AUDIT 2026-05-26: programmatic routing
