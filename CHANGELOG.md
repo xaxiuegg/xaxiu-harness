@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.6.3 — 2026-05-28 (Goodhart-aware sub-agent testing → ask-history hyphen anti-trap)
+
+Round 5 sub-agent tests designed to surface friction the prior 4-test
+matrix would not catch.  Rules: no snippet vocabulary in prompts (no
+"audit", "TOS", "second opinion"); include scenarios where the right
+answer is NOT to use the harness; probe novel verb compositions.
+
+### Test results (round 5)
+
+| Test | Goodhart probe | Result |
+|---|---|---|
+| 5A (add docstring to function) | Over-reach for trivial task | ✅ Agent correctly chose NOT to use harness.  9/10. |
+| 5B (Slack thumbs-up on Python claim) | Auto-audit heuristic false-positive | ✅ Agent rejected `--audit` despite the heuristic's bias.  Caught actual factual error in the claim.  9/10. |
+| 5C (analyze past audits — verb chain) | Novel composition without snippet recipe | ❌ Round 1: agent typed `harness ask history` (with space) — fired a new ask, wasted $0.004.  Fell back to filesystem inspection.  7/10. |
+| 5C (round 2, after fix) | Same scenario, anti-trap callout added | ✅ Agent ran `harness ask-history --mode audit --last 0 --format json` first try, chained to `ask-show`.  7.5/8. |
+
+### Fix applied
+
+The verbs `ask-history` and `ask-show` use hyphens to be sibling
+commands of `ask`, but agents reading them pattern-match to "ask + a
+subcommand" and type `harness ask history` (with a space) — which
+fires a new routed ask with `history` as the question.
+
+Added an explicit anti-trap callout in BOTH:
+
+- The cheat-sheet line, inline:
+  `harness ask-history    List past asks (note the HYPHEN — `ask
+  history` with a space fires a NEW ask)`
+
+- Section 5 (Past asks), a dedicated `⚠ Note the hyphen:` paragraph
+  citing the round-1 sub-agent failure as the canonical case.
+
+Pattern: this is the same class of bug as W14-PROXY-UNHIDE — agents
+verifying their understanding against the CLI surface lose if the
+snippet says X and the surface says Y.  In this case the surface is
+right; the snippet just didn't make the trap visible enough.
+
+### Other observations
+
+- 5A and 5B prove the "when NOT to reach for harness ask" guidance
+  works — agents correctly suppressed harness use for tasks below
+  the threshold.
+- 5B specifically proves the auto-audit heuristic (Phase 4.3) does
+  NOT cause false-positive over-reach for casual "thumbs up?"
+  questions — agents read the user's urgency cues correctly.
+- 5C round 2 surfaced a different observation: agent's report
+  almost wrote "3 engines" for bare `harness ask`.  Old training-
+  data residue persists despite the v0.5.1 redesign.  Agents
+  caught the error via real data, but worth flagging.
+
+W14-ASK-HISTORY-HYPHEN-ANTI-TRAP.
+
 ## v0.6.2 — 2026-05-28 (Phase 4.2: --research for cost-shifted synthesis)
 
 `harness ask "..." --research <path>` prepends a markdown file of
