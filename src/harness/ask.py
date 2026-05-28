@@ -1,61 +1,63 @@
-"""W14-HARNESS-ASK 2026-05-26: daily-driver cross-engine panel CLI.
+"""W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED 2026-05-27: daily-driver
+cross-engine LLM call.
 
-The operator types ONE command:
+THREE modes (low → high cost, low → high diversity):
 
-    harness ask "should we deprecate the legacy swarm/kimi-api backend?"
+  routed (default)       1 engine via routing recommender, ~$0.01-0.05
+  --audit                producer → auditor (2 engines), ~$0.05
+  --panel                3-engine parallel fanout, ~$0.20-0.30
 
-The harness fires a 3-engine panel in parallel (Kimi + MiMo + DeepSeek-flash
-via Pattern B), captures each response, prints a summary table, and saves
-the full responses + a synthesis-ready packet under
-``coord/reviews/ask-<timestamp>/``.
+The operator's daily driver is the routed default.  It uses
+``harness engines recommend <task-class>`` to pick the best engine
+for the task, dispatches a single call, and saves the response under
+``coord/reviews/ask-YYYYMMDD-HHMMSS-<slug>/``.
 
-This is the operator's daily driver for strategic decisions.  It packages
-everything we built today: pool-aware dispatch, health-aware key
-selection, automatic engine failover, routing recommender.
+The legacy 3-engine panel ("ask 3 LLMs the same question") was the
+bare default before v0.5.x.  It is now opt-in via ``--panel`` and
+reserved for high-stakes design crossroads where cross-vendor
+diversity actually matters.
 
 Design choices
 ==============
 
-- Always fires all 3 Pattern B engines unless ``--engines`` overrides.
-  Cross-engine diversity is the entire point of asking three; using
-  only one defeats the purpose.
+- Bare ``harness ask`` calls ``recommend("default")`` → mimo-via-claude
+  (currently empirically best on the production validation corpus).
+  ``--task <class>`` overrides; ``--engines X,Y,Z`` pins explicitly.
 
-- Uses ``dispatch_with_pool`` so each engine's multi-key pool is
-  consulted + health-aware failover applies automatically.
+- ``--audit`` runs producer → auditor sequentially.  Producer is the
+  routed default (or ``--engines`` / ``--task``); auditor is picked by
+  ``recommend("audit", exclude={producer})`` so the auditor is always
+  a different engine label.  Designed for catching hallucinations
+  and stress-testing factual claims.
 
-- Saves under ``coord/reviews/ask-YYYYMMDD-HHMMSS-<slug>/`` so the
-  operator has a forever-record of every panel question + the
-  3 responses it produced.
+- ``--panel`` preserves the pre-v0.5.x behavior: fire all 3 Pattern B
+  engines in parallel via ``run_panel``.  Output shape unchanged.
 
-- Prints a table + opens the directory so the operator can hand the
-  3 responses to in-session Claude for synthesis, or just read them.
+- ``--engines`` pinning ALWAYS wins.  Used by callers that need a
+  specific engine (HANDOFF.md step 7, batch scripts, regression tests).
 
-- The harness does NOT auto-synthesize.  Synthesis benefits from
-  human judgment; we surface 3 perspectives and let the operator
-  decide.  An auto-synthesis option could be added later if the
-  operator's workflow demands it.
+- ``dispatch_with_pool`` for every engine call, so multi-key + health-
+  aware failover applies.
+
+- Output dir convention is constant: ``coord/reviews/ask-<ts>-<slug>/``.
+  Contents vary by mode; ``summary.json`` carries a ``mode`` field
+  for machine readers.
 
 CLI usage
 =========
 
-    harness ask "your question here"
-
-    harness ask "..." --engines kimi-via-claude,deepseek-via-claude
-
-    harness ask --file question.md             # question from a file
-
-    harness ask "..." --output mypanel/        # custom output dir
-
-    harness ask "..." --no-save               # don't write to disk
-
-    harness ask "..." --max-budget-usd 0.50    # per-engine cost cap
+    harness ask "your question"                    # routed, 1 engine
+    harness ask "..." --task latency               # routed to deepseek-flash
+    harness ask "..." --audit                      # producer + auditor
+    harness ask "..." --panel                      # 3-engine fanout
+    harness ask "..." --engines mimo-via-claude    # explicit pin
 
 Cost
 ====
 
-Typical 3-engine audit-class panel: $0.20-0.30 total.  MiMo at TP
-rates is ~$0.01 per dispatch; DeepSeek-flash ~$0.05-0.10; Kimi
-~$0.05-0.10.  Total runtime ~30s-2min depending on prompt depth.
+  routed default      $0.01-0.05  / ~30s
+  --audit             $0.05       / ~60s
+  --panel             $0.20-0.30  / ~60-120s
 """
 from __future__ import annotations
 
@@ -172,9 +174,31 @@ def save_panel(
     question: str,
     results: list[AskResult],
     out_dir: Path,
+    *,
+    mode: str = "panel",
+    extra_summary: dict | None = None,
 ) -> None:
-    """Write per-engine .md files + question.md + summary.json + a
-    synthesis-ready packet.md under ``out_dir``."""
+    """Write per-engine .md files + question.md + summary.json (+ packet.md
+    for multi-engine modes) under ``out_dir``.
+
+    Parameters
+    ----------
+    question
+        The user's question (rendered into ``question.md``).
+    results
+        Per-engine AskResult list.  One file is written per result.
+    out_dir
+        Output directory.  Created if missing.
+    mode
+        Output mode.  ``"routed"`` (single engine, no packet),
+        ``"panel"`` (current 3-engine behavior, with packet),
+        ``"audit"`` (producer + auditor, with packet), or any other
+        string (treated as panel-style for forward-compat).  Stored
+        in ``summary.json`` so machine readers can tell.
+    extra_summary
+        Additional keys to merge into ``summary.json``.  Used by
+        ``--audit`` to surface the parsed verdict.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Question file (for replay / re-runs)
@@ -207,9 +231,11 @@ def save_panel(
             "\n".join(body), encoding="utf-8",
         )
 
-    # Summary JSON for programmatic re-use
+    # Summary JSON for programmatic re-use.  ``mode`` is the load-
+    # bearing field for downstream tools (forensic scans, dashboards).
     summary = {
         "question": question,
+        "mode": mode,
         "timestamp": datetime.datetime.now(
             datetime.timezone.utc,
         ).isoformat(),
@@ -233,14 +259,21 @@ def save_panel(
             (r.elapsed_s for r in results), default=0.0,
         ),
     }
+    if extra_summary:
+        summary.update(extra_summary)
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
 
-    # Synthesis-ready packet: question + 3 responses concatenated.
-    # The operator (or in-session Claude) can read this single file
-    # to synthesize.
+    # Synthesis-ready packet.  Routed (single-engine) mode skips this
+    # because there is nothing to concatenate — the lone per-engine
+    # file IS the synthesis-ready artifact.  Panel + audit modes write
+    # packet.md so callers can hand a single file to a synthesizing
+    # agent.
+    if mode == "routed":
+        return
+
     packet_lines = [
         f"# Cross-engine panel for synthesis",
         "",

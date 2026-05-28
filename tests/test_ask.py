@@ -1,4 +1,5 @@
-"""W14-HARNESS-ASK 2026-05-26: tests for the daily-driver panel CLI."""
+"""W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED 2026-05-27: tests for the
+daily-driver ask CLI (routed default + --task + --panel modes)."""
 from __future__ import annotations
 
 import json
@@ -21,6 +22,7 @@ from harness.engines.pool_dispatch import (
     PoolAttempt,
     PoolDispatchResult,
 )
+from harness.engines.routing_recommend import Recommendation
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +220,64 @@ class TestSavePanel:
         assert out.exists()
         assert (out / "question.md").exists()
 
+    def test_default_mode_is_panel(self, tmp_path: Path) -> None:
+        """Backward compat: callers that don't pass mode= get panel."""
+        save_panel("q", [self._make_result()], tmp_path)
+        summary = json.loads(
+            (tmp_path / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["mode"] == "panel"
+        # Panel writes packet.md
+        assert (tmp_path / "packet.md").exists()
+
+    def test_routed_mode_skips_packet_md(self, tmp_path: Path) -> None:
+        """W14-ASK-ROUTED: single-engine routed mode = no packet.md.
+
+        The lone per-engine file IS the synthesis-ready artifact; a
+        packet.md wrapping one engine's output adds zero value.
+        """
+        save_panel(
+            "q", [self._make_result("mimo-via-claude", "answer")],
+            tmp_path, mode="routed",
+        )
+        assert (tmp_path / "question.md").exists()
+        assert (tmp_path / "mimo-via-claude.md").exists()
+        assert (tmp_path / "summary.json").exists()
+        # KEY: no packet.md in routed mode
+        assert not (tmp_path / "packet.md").exists()
+
+    def test_summary_mode_field_routed(self, tmp_path: Path) -> None:
+        save_panel(
+            "q", [self._make_result()], tmp_path, mode="routed",
+        )
+        summary = json.loads(
+            (tmp_path / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["mode"] == "routed"
+
+    def test_summary_mode_field_panel(self, tmp_path: Path) -> None:
+        save_panel(
+            "q", [self._make_result()], tmp_path, mode="panel",
+        )
+        summary = json.loads(
+            (tmp_path / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["mode"] == "panel"
+
+    def test_extra_summary_merges(self, tmp_path: Path) -> None:
+        """extra_summary keys are surfaced in summary.json (used by --audit)."""
+        save_panel(
+            "q", [self._make_result()], tmp_path,
+            mode="audit",
+            extra_summary={"verdict": "PASS", "auditor_engine": "deepseek-via-claude"},
+        )
+        summary = json.loads(
+            (tmp_path / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["verdict"] == "PASS"
+        assert summary["auditor_engine"] == "deepseek-via-claude"
+        assert summary["mode"] == "audit"
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -320,3 +380,234 @@ class TestAskCli:
                 "--engines", "kimi-via-claude",
             ])
         assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# W14-ASK-ROUTED 2026-05-27: routed default + --task + --panel + pin precedence
+# ---------------------------------------------------------------------------
+
+
+def _mock_recommendation(
+    engine: str = "mimo-via-claude",
+    rationale: str = "Test rationale.",
+    alternates: tuple[str, ...] = ("deepseek-via-claude",),
+) -> Recommendation:
+    return Recommendation(
+        engine=engine, alternates=alternates, rationale=rationale,
+    )
+
+
+class TestAskRoutedDefault:
+    """Bare `harness ask "..."` (no flags) routes through the recommender
+    and dispatches ONE engine."""
+
+    def test_bare_ask_uses_routed_default(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="routed-answer"),
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test question", "--no-save",
+            ])
+        assert result.exit_code == 0
+        # Recommender consulted exactly once for task="default"
+        mock_rec.assert_called_once()
+        args, kwargs = mock_rec.call_args
+        assert (args and args[0] == "default") or kwargs.get("task_class") == "default"
+        # Dispatch fired exactly once (single engine, not 3-panel)
+        assert mock_dispatch.call_count == 1
+        # Banner mentions routed mode
+        assert "routed" in result.output.lower()
+        # Per-engine row visible
+        assert "mimo-via-claude" in result.output
+
+    def test_task_flag_passes_through_to_recommender(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("deepseek-via-claude"),
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="fast-answer"),
+            ),
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--no-save", "--task", "latency",
+            ])
+        assert result.exit_code == 0
+        mock_rec.assert_called_once()
+        args, kwargs = mock_rec.call_args
+        assert (args and args[0] == "latency") or kwargs.get("task_class") == "latency"
+        assert "deepseek-via-claude" in result.output
+
+    def test_invalid_task_rejected_by_click(self, tmp_path: Path) -> None:
+        """Click.Choice surfaces clean error on typo; recommender is
+        not silently invoked with fallback."""
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "ask", "test", "--no-save", "--task", "fastest",
+        ])
+        # Click exit code for invalid value is 2
+        assert result.exit_code == 2
+        # Message names the bad value
+        assert "fastest" in (result.output + (
+            result.stderr_bytes.decode("utf-8", errors="replace")
+            if hasattr(result, "stderr_bytes") else ""
+        )).lower()
+
+    def test_routed_mode_writes_no_packet_md(self, tmp_path: Path) -> None:
+        """End-to-end: bare ask saves question.md + <engine>.md +
+        summary.json but NOT packet.md."""
+        runner = CliRunner()
+        out = tmp_path / "panel"
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="answer"),
+            ),
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--output", str(out),
+            ])
+        assert result.exit_code == 0
+        assert (out / "question.md").exists()
+        assert (out / "mimo-via-claude.md").exists()
+        assert (out / "summary.json").exists()
+        assert not (out / "packet.md").exists()
+        # summary.json carries mode="routed"
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["mode"] == "routed"
+
+
+class TestAskPanelFlag:
+    """`--panel` preserves the legacy 3-engine parallel fanout."""
+
+    def test_panel_flag_uses_three_engines(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="response"),
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--no-save", "--panel",
+            ])
+        assert result.exit_code == 0
+        # Recommender is NOT consulted for --panel mode
+        mock_rec.assert_not_called()
+        # All 3 Pattern B engines were dispatched
+        assert mock_dispatch.call_count == 3
+        engines_called = {
+            call.args[0] for call in mock_dispatch.call_args_list
+        }
+        assert engines_called == set(DEFAULT_ENGINES)
+
+    def test_panel_mode_writes_packet_md(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        out = tmp_path / "panel"
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(text="resp"),
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--output", str(out), "--panel",
+            ])
+        assert result.exit_code == 0
+        # Panel mode writes packet.md
+        assert (out / "packet.md").exists()
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["mode"] == "panel"
+
+
+class TestAskEnginesPin:
+    """`--engines X` pinning ALWAYS wins.  HANDOFF.md step 7 + scripted
+    callers depend on this — must not regress."""
+
+    def test_pin_overrides_task(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="pinned"),
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--no-save",
+                "--task", "latency",  # would pick deepseek if recommender ran
+                "--engines", "kimi-via-claude",  # pinned
+            ])
+        assert result.exit_code == 0
+        # Pin short-circuits recommender entirely
+        mock_rec.assert_not_called()
+        # Only the pinned engine dispatched
+        assert mock_dispatch.call_count == 1
+        assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
+
+    def test_pin_overrides_panel(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(text="pinned"),
+        ) as mock_dispatch:
+            result = runner.invoke(cli, [
+                "ask", "test", "--no-save",
+                "--panel",  # ignored
+                "--engines", "kimi-via-claude",
+            ])
+        assert result.exit_code == 0
+        # Only the pinned engine dispatched (panel ignored)
+        assert mock_dispatch.call_count == 1
+        assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
+
+    def test_handoff_step7_invocation_unchanged(
+        self, tmp_path: Path,
+    ) -> None:
+        """HANDOFF.md step 7 verifies setup with:
+
+            harness ask "Reply with the single word OK." \\
+                --engines mimo-via-claude --no-save --max-budget-usd 0.05
+
+        Must exit 0 and call dispatch exactly once with mimo-via-claude.
+        Any future redesign must keep this surface working.
+        """
+        runner = CliRunner()
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(text="OK"),
+        ) as mock_dispatch:
+            result = runner.invoke(cli, [
+                "ask", "Reply with the single word OK.",
+                "--engines", "mimo-via-claude",
+                "--no-save",
+                "--max-budget-usd", "0.05",
+            ])
+        assert result.exit_code == 0
+        assert mock_dispatch.call_count == 1
+        assert mock_dispatch.call_args_list[0].args[0] == "mimo-via-claude"
+        assert "mimo-via-claude" in result.output

@@ -724,6 +724,12 @@ def setup_cmd(non_interactive: bool) -> None:
     sys.exit(run_wizard(non_interactive=non_interactive))
 
 
+_VALID_TASK_CLASSES = (
+    "default", "latency", "verbose", "cost", "high-volume",
+    "multimodal", "audit",
+)
+
+
 @cli.command(name="ask")
 @click.argument("question", required=False)
 @click.option("--file", "question_file", type=click.Path(
@@ -731,8 +737,21 @@ def setup_cmd(non_interactive: bool) -> None:
 ), default=None,
     help="Read the question from a file instead of an argument.")
 @click.option("--engines", default="", help=(
-    "Comma-separated engine list.  Default: all 3 Pattern B engines "
-    "(kimi-via-claude, mimo-via-claude, deepseek-via-claude)."
+    "Comma-separated engine list.  Pinning overrides --task and --panel "
+    "(used by scripts that need a specific engine, e.g. HANDOFF step 7)."
+))
+@click.option("--task", "task_class",
+              type=click.Choice(_VALID_TASK_CLASSES, case_sensitive=False),
+              default="default", show_default=True, help=(
+    "Routing task class for the bare (routed) default.  Picks one engine "
+    "via `harness engines recommend <class>`.  Ignored if --engines or "
+    "--panel is passed."
+))
+@click.option("--panel", "panel_mode", is_flag=True, default=False, help=(
+    "Fire the legacy 3-engine cross-engine panel "
+    "(kimi-via-claude + mimo-via-claude + deepseek-via-claude) in parallel.  "
+    "Was the bare default before v0.5.x; now opt-in.  Use for high-stakes "
+    "design crossroads where vendor diversity matters."
 ))
 @click.option("--output", "output_dir", type=click.Path(
     file_okay=False, path_type=Path,
@@ -752,30 +771,41 @@ def ask_cmd(
     question: str | None,
     question_file: Path | None,
     engines: str,
+    task_class: str,
+    panel_mode: bool,
     output_dir: Path | None,
     max_budget_usd: float,
     timeout_s: int,
     no_save: bool,
     print_text: bool,
 ) -> None:
-    """W14-HARNESS-ASK 2026-05-26: daily-driver cross-engine panel.
+    """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED 2026-05-27: daily-driver
+    cross-engine LLM call.
 
-    Fires a 3-engine panel against the question, captures each
-    response in parallel, saves under coord/reviews/ask-<ts>/.
+    THREE modes:
+
+    \b
+      routed (default)   1 engine via routing recommender,   ~$0.01-0.05
+      --panel            3-engine parallel cross-engine fanout, ~$0.20-0.30
+      --engines X,Y,Z    pin specific engine(s), bypass recommender
 
     Examples:
 
       \b
       harness ask "should we deprecate the legacy swarm/kimi-api?"
+      harness ask "..." --task latency               # → deepseek-via-claude
+      harness ask "..." --panel                      # 3-engine fanout
+      harness ask "..." --engines mimo-via-claude    # pin explicit
       harness ask --file question.md
-      harness ask "..." --engines deepseek-via-claude,kimi-via-claude
 
-    Cost: typical 3-engine audit-class panel is $0.20-0.30 total.
-    Time: 30s-2min depending on prompt depth + concurrency.
+    NOTE: bare `harness ask` was a 3-engine panel before v0.5.x.
+    Pass `--panel` to keep that behavior.  The routed default uses
+    `harness engines recommend <task-class>` to pick one engine.
 
-    The harness does NOT auto-synthesize - it surfaces 3
-    independent perspectives + saves a packet.md ready for
-    operator review or in-session synthesis.
+    Cross-engine PANEL output: question.md + <engine>.md per engine
+    + packet.md (synthesis-ready) + summary.json.
+    Routed output: question.md + <engine>.md + summary.json
+    (no packet.md — the lone engine file IS the synthesis-ready artifact).
     """
     import datetime
     from harness.ask import (
@@ -802,12 +832,37 @@ def ask_cmd(
         )
         sys.exit(2)
 
-    # Resolve engines
+    # Resolve engines + mode.  Precedence is --engines > --panel > --task
+    # (the routed default).
+    #
+    # Mode semantics:
+    #   routed  → recommender-picked single engine; question.md +
+    #             <engine>.md + summary.json (no packet.md).
+    #   panel   → user-pinned engines (via --engines) OR --panel mode;
+    #             question.md + <engine>.md per engine + packet.md +
+    #             summary.json.  Pin path stays panel-shape even for
+    #             1 engine, so HANDOFF.md step 7 + scripted callers see
+    #             no output-shape drift.
     engine_list: tuple[str, ...]
+    mode: str
+    rationale: str = ""
     if engines:
-        engine_list = tuple(e.strip() for e in engines.split(",") if e.strip())
-    else:
+        engine_list = tuple(
+            e.strip() for e in engines.split(",") if e.strip()
+        )
+        # Explicit pin = panel-shape output regardless of engine count.
+        # Preserves backward compat with the pre-v0.5.x pin behavior.
+        mode = "panel"
+    elif panel_mode:
         engine_list = DEFAULT_ENGINES
+        mode = "panel"
+    else:
+        # Routed default — use the empirical recommender.
+        from harness.engines.routing_recommend import recommend
+        rec = recommend(task_class)
+        engine_list = (rec.engine,)
+        mode = "routed"
+        rationale = rec.rationale
 
     # Resolve output dir
     if output_dir is None and not no_save:
@@ -816,10 +871,30 @@ def ask_cmd(
         repo_root = Path(__file__).resolve().parents[2]
         output_dir = repo_root / "coord" / "reviews" / f"ask-{ts}-{slug}"
 
-    click.echo(
-        f"[ask] firing {len(engine_list)} engines in parallel "
-        f"(budget ${max_budget_usd:.2f} each, timeout {timeout_s}s)..."
-    )
+    # Mode-specific dispatch banner
+    if mode == "routed":
+        click.echo(
+            f"[ask] routed (task={task_class}) → {engine_list[0]}  "
+            f"(budget ${max_budget_usd:.2f}, timeout {timeout_s}s)"
+        )
+        if rationale:
+            short = rationale.replace("\n", " ").strip()
+            if len(short) > 110:
+                short = short[:107] + "..."
+            click.echo(f"      {short}")
+    elif engines:
+        # --engines pinning (single or multiple)
+        click.echo(
+            f"[ask] pinned: firing {len(engine_list)} engine(s) "
+            f"({','.join(engine_list)})  "
+            f"(budget ${max_budget_usd:.2f} each, timeout {timeout_s}s)..."
+        )
+    else:
+        # --panel
+        click.echo(
+            f"[ask] panel: firing {len(engine_list)} engines in parallel  "
+            f"(budget ${max_budget_usd:.2f} each, timeout {timeout_s}s)..."
+        )
     if output_dir is not None and not no_save:
         click.echo(f"      output: {output_dir}")
 
@@ -854,9 +929,16 @@ def ask_cmd(
     click.echo(f"  total cost: ${total_cost:.4f}")
 
     if not no_save and output_dir is not None:
-        save_panel(question_text, results, output_dir)
-        click.echo(f"  saved {len(results)} response files + "
-                   f"packet.md + summary.json")
+        save_panel(question_text, results, output_dir, mode=mode)
+        if mode == "routed":
+            click.echo(
+                f"  saved {len(results)} response file + summary.json"
+            )
+        else:
+            click.echo(
+                f"  saved {len(results)} response files + "
+                f"packet.md + summary.json"
+            )
         click.echo()
         click.echo(click.style(
             f"  → review at {output_dir}",

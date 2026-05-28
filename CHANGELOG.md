@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.5.1 — 2026-05-27 (harness ask redesign)
+
+### Breaking: `harness ask` default changed from 3-engine panel → routed single engine
+
+Bare `harness ask "..."` is now a single-engine call routed through
+`harness engines recommend default` (→ mimo-via-claude, ~$0.01-0.05,
+~30s).  Three modes:
+
+- **routed (default)** — 1 engine via recommender.  Daily-driver.
+- **`--task <class>`** — routed default with a different task class
+  (latency / verbose / cost / high-volume / multimodal / audit).
+- **`--panel`** — preserves the pre-v0.5.x 3-engine parallel fanout
+  (~$0.20-0.30, ~60-120s).  Opt-in for high-stakes design crossroads.
+- **`--engines X,Y,Z`** — explicit pin, unchanged.  HANDOFF.md step 7
+  + scripted callers still work.
+
+`summary.json` gained a `mode` field (`"routed"` / `"panel"` /
+`"audit"`).  Routed mode writes question.md + `<engine>.md` +
+summary.json (no packet.md — the lone engine file IS the synthesis-
+ready artifact).  Panel + audit modes write packet.md as before.
+
+W14-ASK-ROUTED-DEFAULT.
+
 ## v0.5 — 2026-05-21 (autonomous session arc)
 
 22 sequential commits, 50+ shipped STATUS rows, tests 711 → 1106 (+395).
