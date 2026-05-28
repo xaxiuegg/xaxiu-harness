@@ -1,7 +1,7 @@
 # Current strategic plan — xaxiu-harness
 
 **Source**: 15-engine Round 2 strategic panel ([FINAL_VERDICT](reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md)) + Friday v1.0.0 release-gate ([FINAL_VERDICT](reviews/v1-release-gate/FINAL_VERDICT.md), 2/3 APPROVE).
-**Last updated**: 2026-05-28 (agentic-operator roadmap shipped + CAPPED; engine-budget triad RESTORED as next-up after a track-swap detour).
+**Last updated**: 2026-05-28 (agentic-operator roadmap shipped AM + engine-budget triad shipped PM after audit-first reconciliation; live action chain shifts to Week 2 Operations Hardening starting with `W14-AUDIT-CHAIN-HMAC`).
 
 > **For agents**: this file is the active "what are we trying to ship right now" document. `coord/STATUS.csv` is the per-row task tracker; this file is the strategic narrative that explains why those rows exist. When the rows here disagree with `harness today`, trust `harness today` for current state and update this file.
 
@@ -23,9 +23,19 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 **Week 1 complete**: 11 W13 rows + v1.0.0 tagged at `d30bace` on 2026-05-25. Per-row detail in [coord/releases/v1.0.0.md](releases/v1.0.0.md). Audit infra now routes W12+ tasks to STATUS.csv via [W13-AUDIT-INFRA-W12-PLUS].
 
-**2026-05-28 — agentic-operator roadmap shipped + CAPPED** (15 commits, v0.5.5 → v0.6.3). A separate roadmap from the engine-budget triad below.  Tracked in memory at [project_agentic_operator_roadmap_2026_05_28](../../C:/Users/xaxiu/.claude/projects/D--xaxiu-harness-standalone/memory/project_agentic_operator_roadmap_2026_05_28.md).  Shipped: `harness proxy --upstream` (5 upstreams incl. TOS-compliant Claude-Code-subprocess), `harness engines describe` + `compatibility-matrix`, `harness introspect`, `harness ask --rerun --escalate {audit|panel}`, `harness ask-history` + `ask-show`, `harness self-update`, snippet auto-version-stamp + staleness detection, `harness ask --audit --auditors N` quorum, `harness ask --research <path>`, setup-wizard step 6 (snippet install).  Empirically validated by 7 fresh-session sub-agent tests (4 positive scenarios at 9/10, 3 Goodhart-aware tests at 8-9/10 with one bug surfaced + fixed: ask-history hyphen anti-trap).  Score ceiling reached for solo internal use per the Horizon C plan; **further iteration on this surface is diminishing-returns territory.**
+**2026-05-28 AM — agentic-operator roadmap shipped + CAPPED** (15 commits, v0.5.5 → v0.6.3). A separate roadmap from the engine-budget triad.  Tracked in memory at [project_agentic_operator_roadmap_2026_05_28](../../C:/Users/xaxiu/.claude/projects/D--xaxiu-harness-standalone/memory/project_agentic_operator_roadmap_2026_05_28.md).  Shipped: `harness proxy --upstream` (5 upstreams incl. TOS-compliant Claude-Code-subprocess), `harness engines describe` + `compatibility-matrix`, `harness introspect`, `harness ask --rerun --escalate {audit|panel}`, `harness ask-history` + `ask-show`, `harness self-update`, snippet auto-version-stamp + staleness detection, `harness ask --audit --auditors N` quorum, `harness ask --research <path>`, setup-wizard step 6 (snippet install).  Empirically validated by 7 fresh-session sub-agent tests (4 positive scenarios at 9/10, 3 Goodhart-aware tests at 8-9/10 with one bug surfaced + fixed: ask-history hyphen anti-trap).  Score ceiling reached for solo internal use per the Horizon C plan; **further iteration on this surface is diminishing-returns territory.**
 
-⚠ **Track-swap audit (the why-this-section-exists note)**: today's 15 commits shipped from the agentic-operator roadmap, **not from this plan's "What's next" engine-budget triad**.  The agentic-operator track had visible friction (transcript-grounded hiccups) + fast feedback loops + shippable surface; the engine-budget track was operator-blocked on DASHSCOPE_API_KEY acquisition.  Under full dev authority the easier track pulled all the gravity.  See new anti-pattern #8 below.  **The engine-budget triad below is now the live action chain.**
+⚠ **Track-swap audit (the why-this-section-exists note)**: the morning's 15 commits shipped from the agentic-operator roadmap, **not from this plan's stated "What's next" engine-budget triad**.  The agentic-operator track had visible friction (transcript-grounded hiccups) + fast feedback loops + shippable surface; the engine-budget track was operator-blocked on DASHSCOPE_API_KEY acquisition.  Under full dev authority the easier track pulled all the gravity.  See new anti-pattern #8 below.
+
+**2026-05-28 PM — engine-budget triad ALSO shipped** (4 commits, after the audit caught the track-swap). Audit-first reconciliation found 2 of 3 rows substantially shipped weeks back under different row IDs; today's commits closed the remaining gaps.  See [feedback_grep_before_declare_greenfield_2026_05_28](../../C:/Users/xaxiu/.claude/projects/D--xaxiu-harness-standalone/memory/feedback_grep_before_declare_greenfield_2026_05_28.md) for the lesson on why strategic-panel synthesis under-detects already-shipped capability.
+
+| Triad row | Today's commit | What completed today |
+|---|---|---|
+| `W14-KIMI-REPLACEMENT-WITH-QWEN-SCAFFOLD` | `522df36` | `QwenConcrete` adapter + factory registration + budget pricing + 12 tests.  Live validation gated on operator acquiring `DASHSCOPE_API_KEY`. |
+| `W14-BUDGET-METER-PER-ENGINE-OBSERVER-HOOK` | `b646b3c` | Meter + caps + dispatch-skip already shipped weeks back.  Today: cheap local periodic check + `harness observer budget-watch` verb + MED/HIGH flag emit at 80%/100% thresholds + dedup via signature marker. |
+| `W14-DISPATCH-HEALTH-AWARE-FALLBACK-IN-ASK-FLOW` | `bcb2ae6` | `routing.py::filter_eligible_engines` already shipped + dispatcher already used it.  Today: `recommend_healthy()` wrapper + `harness ask` routed-default + `_pick_auditor_engines` walker both call it now. |
+
+Plan reconciliation itself shipped as `b503fcb` (`W14-PLAN-RECONCILE-2026-05-28`).  Engine-budget triad is now **done**; the live action chain shifts to Week 2 Operations Hardening below.
 
 ---
 
@@ -53,23 +63,14 @@ This commitment **reverses the previous "pause + observe" recommendation** ([EVA
 | 4 | Observer audits | ~200-500k tokens | DeepSeek V4 Flash |
 | 5 | Bulk batch / simple Q&A | 500k-2M tokens | DeepSeek V4 Flash (or Qwen3 Turbo via DashScope) |
 
-### Immediate — Engine-budget-enablement (~8-10h)
+### Week 2 Operations Hardening (~6-8h, audit-first reconciled)
 
-| Row | Effort | Why |
+| Row | Effort | Status & Why |
 |---|---|---|
-| **W14-KIMI-REPLACEMENT-WITH-QWEN** (renamed from -WITH-GLM) | M (~5h) | The $50/mo 3rd-engine slot. Qwen 3.6 Plus PAYG via DashScope endpoint (NOT Alibaba Coding Plan subscription). Structurally identical to a GLM adapter — both use the existing `StreamingTransport` base + OpenAI-compat chat-completions schema. |
-| **W14-BUDGET-METER-PER-ENGINE** | M (~3-4h) | Per-engine monthly caps ($30 deepseek / $15 mimo / $50 qwen) + 80%-spend observer flag + dispatch-time enforcement. Extends existing `harness budget set-cap`. |
-| W14-DISPATCH-HEALTH-AWARE-FALLBACK | M (4-5h) | Saves real money now that the operator is paying real money — skip dead engines, don't waste tokens on terminated Kimi / no-key Anthropic-Gemini-direct |
-
-### Then — Week 2 Operations Hardening (~6-8h)
-
-| Row | Effort | Why |
-|---|---|---|
-| W14-AUDIT-CHAIN-HMAC | M (3-4h) | Forensic integrity, security panel's #1 pick (0.90/0.95 confidence) |
-| W14-BACKUP-MANAGER (folds W13-BACKUP-SECRETS-REDACT + W13-BACKUP-INTEGRITY + W13-BACKUP-DRY-RUN + W14-BACKUP-PREFLIGHT-SCAN) | L (5-6h) | Multi-lens convergent pick — backup tar may contain API keys |
-| W14-PARALLEL-DISPATCH-RETRY-FIX | S (2h) | Production-evidenced bug (MiMo race in panels) |
-| W14-KEY-ROTATION-PLAYBOOK | S (2h) | Direct Kimi-termination response — `harness env rotate <engine>` |
-| Auto-default guardrail CI framework | M (4-5h) | Every new auto-default must ship with a "what would happen if this were wrong" test |
+| W14-AUDIT-CHAIN-HMAC | M (3-4h) | **Truly zero** (grep'd `hmac\|HMAC\|audit_chain` — no matches in `src/harness/`).  Security panel's #1 pick (0.90/0.95 confidence).  The actual greenfield work. |
+| W13-BACKUP-ENCRYPTION (renamed from W14-BACKUP-MANAGER) | S (~3-4h) | **Was overcounted.**  `src/harness/backup.py` (347 LOC, create/list/prune/restore) shipped 2026-05-25 as the W13 backup work (see STATUS.csv for the shipped row).  No encryption code present (grep'd `encrypt\|cipher`).  Remaining work: AES-256 of the .tar.gz body, key derivation from DPAPI / system keyring, manifest stays cleartext.  Same `harness backup` surface, transparently encrypted. |
+| W14-KEY-ROTATION-PLAYBOOK + `harness env rotate <engine>` verb | S-M (2-3h) | **Truly zero for the verb.**  `harness env --help` confirms only `--show-set` flag; no rotate.  doctor/preflight touch the concept but no playbook doc.  Greenfield work: write the verb + a `docs/KEY_ROTATION_PLAYBOOK.md`. |
+| Auto-default guardrail CI framework | M (4-5h) | **Truly zero** (grep'd `auto.default.guardrail\|guardrail.*ci` — no matches).  Greenfield work. |
 
 ### Week 3 — Polish + Nice-to-haves (~4-6h, optional)
 
@@ -102,15 +103,11 @@ This commitment **reverses the previous "pause + observe" recommendation** ([EVA
 
 ## Single most important action (live)
 
-**Acquire `DASHSCOPE_API_KEY` from [dashscope.aliyun.com](https://dashscope.aliyun.com) (PAYG, NOT Alibaba Coding Plan subscription).** This is the operator-blocked prerequisite for W14-KIMI-REPLACEMENT-WITH-QWEN.
+**Start `W14-AUDIT-CHAIN-HMAC`** — the security panel's #1 pick (0.90/0.95 confidence) and the only truly-zero Week 2 Operations Hardening row with no operator dependency. Greenfield M (3-4h): SHA-256 chained-hash of audit JSONL entries with HMAC keyed off DPAPI-stored secret. Closes the audit-integrity gap that lets a process with write access tamper with the ledger post-hoc.
 
-While the key is being acquired, the harness can ship the **prerequisite-free portions of the triad** (anti-pattern #8 application):
+**In parallel (operator-blocked)**: acquire `DASHSCOPE_API_KEY` from [dashscope.aliyun.com](https://dashscope.aliyun.com) (PAYG, NOT Alibaba Coding Plan subscription) to unblock `W14-KIMI-REPLACEMENT-WITH-QWEN` live validation.  The `QwenConcrete` scaffold + tests are already in `522df36`; only the live smoke test gates on the key.
 
-- **W14-BUDGET-METER-PER-ENGINE** can ship NOW — extends the existing dispatch cost-tracking surface with per-engine accumulators + caps + 80%-spend observer flag.  The Qwen engine label gets registered as soon as the adapter ships, but the meter infrastructure doesn't depend on Qwen.
-- **W14-DISPATCH-HEALTH-AWARE-FALLBACK** can ship NOW — operates on whichever engines are currently configured.  Saves real money on the engines that are already paying (DeepSeek PAYG, MiMo Token Plan).
-- **W14-KIMI-REPLACEMENT-WITH-QWEN scaffold** can ship NOW — adapter class + dispatch path + tests can all be built against a mock; only LIVE validation needs the key.
-
-In parallel, decide the MiMo plan tier (Standard at $14.08/mo fits the $15 budget) and confirm whether to acquire a `sk-` PAYG MiMo key as fallback insurance (no cost until used).
+In parallel (decision-blocked): decide the MiMo plan tier (Standard at $14.08/mo fits the $15 budget) and confirm whether to acquire a `sk-` PAYG MiMo key as fallback insurance (no cost until used).
 
 Kimi (`W14-KIMI-AUTH-RESTORE`) is no longer in the action chain — replaced by Qwen 3.6 Plus. The Kimi adapter stays in the codebase (TOS-compliant after W14-MIMO-TOS-COMPLIANCE) for any operator who later acquires a legitimate Moonshot-approved client license.
 
