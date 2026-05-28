@@ -6054,6 +6054,66 @@ def observer_flags(severity: str) -> None:
     sys.exit(0)
 
 
+@observer.command(name="budget-watch")
+@click.option("--dry-run", is_flag=True, default=False, help=(
+    "Don't write flags to pending files; just print what WOULD be raised."
+))
+@click.option("--skip-dedup", is_flag=True, default=False, help=(
+    "Re-raise flags even if a signature for this month already exists.  "
+    "Useful for forcing a re-check or testing."
+))
+def observer_budget_watch_cmd(dry_run: bool, skip_dedup: bool) -> None:
+    """W14-BUDGET-METER-PER-ENGINE 2026-05-28: check per-engine spend
+    against caps + raise observer flags when crossing thresholds.
+
+    Cheap + local — no LLM dispatch.  Inspects the on-disk per-engine
+    ledger + caps config and emits MED flags at the alert threshold
+    (default 80%) + HIGH flags at the cap (100%).
+
+    Idempotent: a given (category, engine, threshold) signature is
+    raised at most once per month.  Re-running surfaces no new flags
+    unless spend has crossed a new threshold.
+
+    Run on a cron-schedule via `harness observer install-scheduler
+    --include-budget-watch` (or call ad-hoc).
+    """
+    from harness.observer.budget_watch import (
+        check_budget_caps, run_budget_watch,
+    )
+    if dry_run:
+        flags = check_budget_caps(skip_dedup=skip_dedup)
+        if not flags:
+            click.echo("(no new budget flags would be raised)")
+            sys.exit(0)
+        click.echo(
+            f"Would raise {len(flags)} flag(s):"
+        )
+        for f in flags:
+            color = "red" if f.severity == "high" else "yellow"
+            click.echo(
+                click.style(
+                    f"  [{f.severity.upper()}] {f.summary}",
+                    fg=color, bold=True,
+                )
+            )
+        sys.exit(0)
+    flags = run_budget_watch()
+    if not flags:
+        click.echo("(no new budget flags raised — all engines under threshold "
+                   "OR flags already raised this month)")
+        sys.exit(0)
+    click.echo(f"Raised {len(flags)} flag(s):")
+    for f in flags:
+        color = "red" if f.severity == "high" else "yellow"
+        click.echo(
+            click.style(
+                f"  [{f.severity.upper()}] {f.id} — {f.summary}",
+                fg=color, bold=True,
+            )
+        )
+    sys.exit(0)
+
+
 @observer.command(name="ack")
 @click.argument("flag_id")
 def observer_ack(flag_id: str) -> None:

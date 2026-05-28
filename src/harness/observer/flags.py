@@ -90,13 +90,21 @@ def write_pending_flags(
     flags: list[Flag],
     observer_dir: Path | None = None,
 ) -> list[Path]:
-    """Write HIGH and CRITICAL flags to their pending files.
+    """Write MED, HIGH, and CRITICAL flags to their pending files.
 
     Returns the paths of files that were written or updated.
+
+    W14-BUDGET-METER-PER-ENGINE 2026-05-28: MED was added to the
+    pending-writer set so MED-severity alerts (e.g. budget-cap-alert
+    at 80% spend) are visible to the operator instead of being
+    silently lost.  HIGH/CRITICAL retain their interrupt-priority
+    semantics; MED is "look when convenient."  LOW is still suppressed
+    (intentional noise floor).
     """
     base = observer_dir or DEFAULT_OBSERVER_DIR
     written: list[Path] = []
     by_severity: dict[FlagSeverity, list[Flag]] = {
+        FlagSeverity.MED: [],
         FlagSeverity.HIGH: [],
         FlagSeverity.CRITICAL: [],
     }

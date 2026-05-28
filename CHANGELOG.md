@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.6.4 — 2026-05-28 (Tier 1B: budget-meter-per-engine observer hook)
+
+### Audit-find first — most of the row was already shipped
+
+When I started Tier 1B I assumed I was building the per-engine budget
+meter from scratch (per the strategic agent's "not started" finding).
+Grep-deeper revealed substantial infrastructure had already shipped
+weeks back: `harness budget set-engine-cap`, `harness budget caps`,
+`check_engine_cap()` in `budget.py`, dispatch-time skip in
+`engines/routing.py` (`skip_over_budget=True`).  The actual gap was
+**the observer-side hook**: a cheap local check that periodically
+inspects per-engine spend + emits flags when crossing thresholds.
+
+### New verb + module
+
+`harness observer budget-watch [--dry-run] [--skip-dedup]` — read-
+only, zero-cost.  Inspects ledger + caps, emits flags:
+
+- **MED** at the configured alert threshold (default 80%)
+- **HIGH** at the cap itself (100%)
+
+Idempotent: a `(category, engine, threshold)` signature only raises
+once per month (signature persists across cron ticks via embedded
+regex marker in the flag's detail string).
+
+Designed to run as a fast cron-tick hook; no LLM dispatch, no
+network calls.
+
+### Supporting fix in observer/flags.py
+
+`write_pending_flags` previously suppressed MED — the entire MED
+severity tier was silently dropped because only HIGH/CRITICAL got
+pending-MD treatment.  Now MED is included.  This is generally
+useful (not just for budget): MED-severity findings from any source
+will now surface in `MED_FLAG_PENDING.md`.  LOW is still suppressed
+as intentional noise floor.
+
+### Tests + verification
+
+12 new tests in `tests/test_observer_budget_watch.py` covering: no-
+caps no-flags / below-threshold / at-alert-threshold / over-cap /
+multiple-engines / dedup-prevents-duplicates / skip-dedup-bypass /
+pending-MD writes (MED + HIGH) / CLI help + dry-run + alert path.
+
+Full non-slow suite: 3067 passed, 8 skipped (was 3055, +12).
+
+W14-BUDGET-METER-PER-ENGINE-OBSERVER-HOOK.
+
 ## v0.6.3 — 2026-05-28 (Goodhart-aware sub-agent testing → ask-history hyphen anti-trap)
 
 Round 5 sub-agent tests designed to surface friction the prior 4-test
