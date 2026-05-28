@@ -293,6 +293,80 @@ def delete_secret(name: str) -> None:
         _save_data(data)
 
 
+def rotate_secret(name: str, new_value: str, *,
+                  keep_previous: bool = True) -> dict[str, object]:
+    """W14-KEY-ROTATION 2026-05-28: atomically rotate a DPAPI secret.
+
+    Reads the current value (if present), writes the new value, and
+    optionally preserves the old value as ``<name>_PREVIOUS_<ts>`` so
+    the operator has an emergency rollback window.
+
+    Args:
+        name: The secret identifier (e.g. ``"DEEPSEEK_API_KEY"``).
+        new_value: The new plaintext secret.  Never logged.
+        keep_previous: If True (default), store the previous value
+            under ``<name>_PREVIOUS_<YYYYMMDDhhmmss>`` so the operator
+            has a one-step rollback if the new key turns out broken.
+            Set False for unrecoverable rotations (suspected key
+            compromise — destroy the old key immediately).
+
+    Returns:
+        Dict describing the rotation:
+            ``rotated``: the secret name
+            ``previous_kept_as``: the backup secret name, or None
+            ``timestamp_utc``: ISO timestamp of the rotation
+            ``had_previous_value``: True iff the secret existed before
+                rotation (False ⇒ first-time write disguised as rotate)
+
+    Raises:
+        NotImplementedError: On non-Windows platforms.
+        ValueError: If *name* is empty OR *new_value* is empty.
+        OSError: If DPAPI encryption fails.
+
+    Security notes:
+      - The new value never appears in logs, exceptions, or this dict.
+      - The previous value is NOT returned (only the storage name).
+      - Two-phase store: previous is written first, then new value.
+        If the previous-store fails, rotation aborts before touching
+        the live key (no half-state).
+      - The audit ledger gets a separate ``key_rotation`` event via
+        :func:`harness.audit_jsonl.append_key_rotation_event`.
+    """
+    _require_windows()
+    if not name:
+        raise ValueError("Secret name must not be empty")
+    if not new_value:
+        raise ValueError("New value must not be empty")
+
+    from datetime import datetime as _dt, timezone as _tz
+
+    ts = _dt.now(_tz.utc).strftime("%Y%m%d%H%M%S")
+
+    # Read current value (None if first-time write).  Never logged.
+    try:
+        existing = decrypt_secret(name)
+    except Exception:
+        existing = None
+
+    previous_kept_as: Optional[str] = None
+
+    if existing is not None and keep_previous:
+        # Two-phase: write the backup FIRST so a crash mid-rotation
+        # leaves a recoverable state.
+        previous_kept_as = f"{name}_PREVIOUS_{ts}"
+        encrypt_secret(previous_kept_as, existing)
+
+    # Now write the new value (overwrites existing).
+    encrypt_secret(name, new_value)
+
+    return {
+        "rotated": name,
+        "previous_kept_as": previous_kept_as,
+        "timestamp_utc": _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "had_previous_value": existing is not None,
+    }
+
+
 def list_secrets() -> list[str]:
     """Return a list of secret **names** stored in the DPAPI file.
 

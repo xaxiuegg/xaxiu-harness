@@ -1,7 +1,7 @@
 # Current strategic plan — xaxiu-harness
 
 **Source**: 15-engine Round 2 strategic panel ([FINAL_VERDICT](reviews/strategic-planning-panel15-final-verdict/FINAL_VERDICT.md)) + Friday v1.0.0 release-gate ([FINAL_VERDICT](reviews/v1-release-gate/FINAL_VERDICT.md), 2/3 APPROVE).
-**Last updated**: 2026-05-28 (agentic-operator roadmap AM + engine-budget triad PM + audit-chain HMAC PM all shipped; live action chain shifts to auto-default guardrail CI framework or key-rotation playbook).
+**Last updated**: 2026-05-28 (agentic-operator roadmap AM + engine-budget triad PM + audit-chain HMAC PM + key-rotation playbook PM all shipped; auto-default guardrail framework dropped per 10-engine panel; only Week 2 row left is `W13-BACKUP-ENCRYPTION`).
 
 > **For agents**: this file is the active "what are we trying to ship right now" document. `coord/STATUS.csv` is the per-row task tracker; this file is the strategic narrative that explains why those rows exist. When the rows here disagree with `harness today`, trust `harness today` for current state and update this file.
 
@@ -37,7 +37,11 @@ Drop everything multi-user / plugin-marketplace / VPS-hosted / best-of-N-cost-mu
 
 Plan reconciliation itself shipped as `b503fcb` (the W14 plan-reconcile row).  Engine-budget triad is now **done**.
 
-**2026-05-28 PM (continued) — audit chain HMAC shipped** (1 commit). The security panel's #1 pick closed today.  `src/harness/audit_chain.py` (~290 LOC) adds SHA-256 + HMAC chain to every `~/.harness/audit.jsonl` entry; `harness audit verify` walks the chain and reports tampering by line number.  Best-effort policy: chain failures NEVER block dispatch.  Key resolves env-var → DPAPI → auto-generate-and-persist (Windows).  34 tests cover canonical JSON stability, HMAC reproducibility, tamper detection at hmac/prev_hash/payload fields, legacy-to-chained transitions, and post-prune chain restarts.  Existing 2289 ledger entries correctly identified as legacy without false-positive.  Live action chain now shifts to the remaining Week 2 rows below.
+**2026-05-28 PM (continued) — audit chain HMAC shipped** (1 commit). The security panel's #1 pick closed today.  `src/harness/audit_chain.py` (~290 LOC) adds SHA-256 + HMAC chain to every `~/.harness/audit.jsonl` entry; `harness audit verify` walks the chain and reports tampering by line number.  Best-effort policy: chain failures NEVER block dispatch.  Key resolves env-var → DPAPI → auto-generate-and-persist (Windows).  34 tests cover canonical JSON stability, HMAC reproducibility, tamper detection at hmac/prev_hash/payload fields, legacy-to-chained transitions, and post-prune chain restarts.  Existing 2289 ledger entries correctly identified as legacy without false-positive.
+
+**2026-05-28 PM (continued) — key rotation playbook shipped** (1 commit).  The 10-engine master-plan panel's #4 row (0.83 confidence).  `harness env-rotate <engine>` verb + atomic `rotate_secret` DPAPI primitive + `docs/KEY_ROTATION_PLAYBOOK.md`.  The verb maps friendly engine names (`deepseek`, `mimo`, `qwen`, ...) to canonical env-vars (`DEEPSEEK_API_KEY`, ...), reads the new key from hidden prompt or stdin, and preserves the old value as `<NAME>_PREVIOUS_<UTC-ts>` for 24h emergency rollback.  Rotation events flow through the W14-AUDIT-CHAIN-HMAC chain (no key value logged).  21 tests cover the rotate primitive (Windows DPAPI), the audit event integration (cross-platform), and the Click CLI surface (unknown engine / dry-run / scripted stdin / no-keep-previous / first-time-write / case-insensitive engine names).
+
+**2026-05-28 PM (audit-first reconciliation)** — the 10-engine master-plan panel from 2026-05-25 explicitly **dropped** four rows that the older 15-engine panel had kept (7-9 of 10 voices): CI doc-sync gate, `--did-you-mean`, hallucination test harness, and **auto-default guardrail framework**.  CURRENT_PLAN.md still listed the guardrail framework as Week 2 Hardening; that recommendation was itself stale.  Removed from Week 2 below per the panel-of-panels consensus.
 
 ---
 
@@ -65,15 +69,13 @@ This commitment **reverses the previous "pause + observe" recommendation** ([EVA
 | 4 | Observer audits | ~200-500k tokens | DeepSeek V4 Flash |
 | 5 | Bulk batch / simple Q&A | 500k-2M tokens | DeepSeek V4 Flash (or Qwen3 Turbo via DashScope) |
 
-### Week 2 Operations Hardening (~5-7h remaining, audit-first reconciled)
+### Week 2 Operations Hardening (~3-4h remaining)
 
-The audit-chain HMAC row (security panel's #1 pick) shipped today — see the "audit chain HMAC shipped" paragraph in "Where we are right now" above.  Remaining Week 2 rows:
+Today's PM commits closed the security-panel #1 row (audit-chain HMAC) and the operator-UX #4 row (key-rotation playbook).  Auto-default guardrail framework removed per the 10-engine panel drop list (see audit-first reconciliation paragraph above).  Remaining Week 2 row:
 
 | Row | Effort | Status & Why |
 |---|---|---|
 | W13-BACKUP-ENCRYPTION (renamed from W14-BACKUP-MANAGER) | S (~3-4h) | **Was overcounted.**  `src/harness/backup.py` (347 LOC, create/list/prune/restore) shipped 2026-05-25 as the W13 backup work (see STATUS.csv for the shipped row).  No encryption code present (grep'd `encrypt\|cipher`).  Remaining work: AES-256 of the .tar.gz body, key derivation from DPAPI / system keyring, manifest stays cleartext.  Same `harness backup` surface, transparently encrypted. |
-| W14-KEY-ROTATION-PLAYBOOK + `harness env rotate <engine>` verb | S-M (2-3h) | **Truly zero for the verb.**  `harness env --help` confirms only `--show-set` flag; no rotate.  doctor/preflight touch the concept but no playbook doc.  Greenfield work: write the verb + a `docs/KEY_ROTATION_PLAYBOOK.md`. |
-| Auto-default guardrail CI framework | M (4-5h) | **Truly zero** (grep'd `auto.default.guardrail\|guardrail.*ci` — no matches).  Greenfield work. |
 
 ### Week 3 — Polish + Nice-to-haves (~4-6h, optional)
 
@@ -106,11 +108,11 @@ The audit-chain HMAC row (security panel's #1 pick) shipped today — see the "a
 
 ## Single most important action (live)
 
-**Start the auto-default guardrail CI framework** — the largest remaining Week 2 row (M, 4-5h, truly zero per grep).  The harness now ships with several auto-defaults (auto-lens-set, auto-max-tokens, health-aware fallback, budget-watch thresholds); without a CI guardrail framework each default is one regression away from silently changing.  Greenfield: a test scaffold that snapshot-locks auto-default values + flags drift.
-
-**Or (cheaper)**: ship `W14-KEY-ROTATION-PLAYBOOK` (S-M, 2-3h, truly zero for the verb).  `harness env rotate <engine>` + a `docs/KEY_ROTATION_PLAYBOOK.md`.  Operationally useful for the live $195/mo PAYG pool.
+**Start `W13-BACKUP-ENCRYPTION`** — the only remaining Week 2 Operations Hardening row (S, 3-4h).  AES-256 of the `harness backup` tar.gz body, key derivation from DPAPI/system keyring, manifest stays cleartext.  Same `harness backup` surface, transparently encrypted.  Strategic-panel #2 security pick (after audit-chain-HMAC which shipped today).
 
 **In parallel (operator-blocked)**: acquire `DASHSCOPE_API_KEY` from [dashscope.aliyun.com](https://dashscope.aliyun.com) (PAYG, NOT Alibaba Coding Plan subscription) to unblock `W14-KIMI-REPLACEMENT-WITH-QWEN` live validation.  The `QwenConcrete` scaffold + tests are already in `522df36`; only the live smoke test gates on the key.
+
+When Week 2 is closed, the live action chain shifts to Week 3 polish (schema versioning when first data-structure change happens, hallucination test harness, Tier-2 shifts) — none are load-bearing.
 
 In parallel (decision-blocked): decide the MiMo plan tier (Standard at $14.08/mo fits the $15 budget) and confirm whether to acquire a `sk-` PAYG MiMo key as fallback insurance (no cost until used).
 

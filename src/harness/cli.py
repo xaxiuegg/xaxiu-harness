@@ -2978,6 +2978,143 @@ def _suggest_fix_for_pydantic(field: str, err_type: str,
     return f"Fix field `{field}` per spec/adapter-schema.md."
 
 
+# W14-KEY-ROTATION-PLAYBOOK 2026-05-28: provider → env-var lookup for
+# the env-rotate verb.  The full pattern of "what env var does this
+# engine use" lives in harness._constants.API_KEY_ENV_VARS but that's
+# keyed by engine name (lower-case); the operator-facing rotate verb
+# accepts a friendlier short name.
+_ROTATE_ENGINE_TO_ENV: dict[str, str] = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "kimi": "KIMI_API_KEY",
+    "mimo": "MIMO_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+}
+
+
+@cli.command(name="env-rotate")
+@click.argument("engine", required=True)
+@click.option("--no-keep-previous", is_flag=True, default=False,
+              help="Don't preserve the old key as a *_PREVIOUS_<ts> backup.  "
+                   "Use for known-compromised keys you want gone immediately.  "
+                   "Default: keep for 24h emergency rollback.")
+@click.option("--from-stdin", is_flag=True, default=False,
+              help="Read the new key from stdin instead of prompting "
+                   "(for scripted rotation).")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print what would happen without touching DPAPI.")
+def env_rotate_cmd(engine: str, no_keep_previous: bool,
+                    from_stdin: bool, dry_run: bool) -> None:
+    """W14-KEY-ROTATION-PLAYBOOK: rotate the API key for ENGINE.
+
+    Reads the new key from a hidden prompt (or stdin with --from-stdin),
+    atomically replaces the DPAPI-stored secret, and preserves the
+    previous value as ``<NAME>_PREVIOUS_<timestamp>`` for 24h emergency
+    rollback unless ``--no-keep-previous``.
+
+    ENGINE is the short engine name (deepseek, kimi, mimo, anthropic,
+    gemini, qwen).  The verb maps it to the canonical env-var name
+    and rotates the matching DPAPI secret.
+
+    The audit ledger gets a ``key_rotation`` event (no key value) via
+    the W14-AUDIT-CHAIN-HMAC tamper-evident chain.
+
+    See ``docs/KEY_ROTATION_PLAYBOOK.md`` for the full operator workflow
+    (when to rotate, smoke-test after, rollback procedure).
+
+    Exit codes:
+        0 — rotation succeeded
+        1 — engine name unknown
+        2 — empty key / user cancelled
+        3 — DPAPI unavailable (non-Windows host) — use env var directly
+    """
+    eng_lower = engine.lower().strip()
+    if eng_lower not in _ROTATE_ENGINE_TO_ENV:
+        click.echo(
+            f"Unknown engine: {engine!r}.  Supported: "
+            f"{', '.join(sorted(_ROTATE_ENGINE_TO_ENV))}",
+            err=True,
+        )
+        raise SystemExit(1)
+    env_name = _ROTATE_ENGINE_TO_ENV[eng_lower]
+
+    if dry_run:
+        click.echo(f"[dry-run] Would rotate {env_name} via DPAPI.")
+        click.echo(f"[dry-run] keep_previous={not no_keep_previous}")
+        click.echo("[dry-run] No prompt for key; no DPAPI write.")
+        return
+
+    # Read the new key.
+    if from_stdin:
+        new_value = sys.stdin.read().rstrip("\n").rstrip("\r")
+    else:
+        new_value = click.prompt(
+            f"Paste new {env_name}",
+            hide_input=True,
+            confirmation_prompt=False,
+        )
+    new_value = new_value.strip()
+    if not new_value:
+        click.echo("Empty key — rotation cancelled.", err=True)
+        raise SystemExit(2)
+
+    try:
+        from harness.secrets.dpapi import rotate_secret
+        from harness.audit_jsonl import append_key_rotation_event
+    except (ImportError, NotImplementedError) as exc:
+        click.echo(
+            f"Key rotation requires Windows DPAPI ({exc}).\n"
+            f"On Linux/macOS, set the env var directly:\n"
+            f"  export {env_name}=<new-value>",
+            err=True,
+        )
+        raise SystemExit(3)
+
+    try:
+        result = rotate_secret(
+            env_name, new_value,
+            keep_previous=not no_keep_previous,
+        )
+    except NotImplementedError as exc:
+        click.echo(
+            f"Key rotation requires Windows DPAPI ({exc}).\n"
+            f"On Linux/macOS, set the env var directly:\n"
+            f"  export {env_name}=<new-value>",
+            err=True,
+        )
+        raise SystemExit(3)
+    except Exception as exc:
+        click.echo(f"Rotation failed: {exc}", err=True)
+        raise SystemExit(2)
+
+    # Log the rotation (no key value) into the chained audit ledger.
+    append_key_rotation_event(
+        provider=eng_lower,
+        previous_kept_as=result.get("previous_kept_as"),
+        had_previous_value=bool(result.get("had_previous_value")),
+    )
+
+    click.echo(f"Rotated {env_name}.")
+    prev = result.get("previous_kept_as")
+    if prev:
+        click.echo(f"  previous kept as: {prev} (delete after smoke test)")
+    elif result.get("had_previous_value"):
+        click.echo("  previous value: DISCARDED (--no-keep-previous)")
+    else:
+        click.echo("  (first-time write — no previous value existed)")
+
+    click.echo(
+        "\nNext steps:\n"
+        f"  1. Smoke-test: harness ask --engines {eng_lower} \"Reply OK.\"\n"
+        f"  2. If working, delete the backup: "
+        f"`python -c \"from harness.secrets.dpapi import delete_secret; "
+        f"delete_secret('{prev}')\"`\n"
+        if prev else
+        f"\nNext: smoke-test with `harness ask --engines {eng_lower} \"Reply OK.\"`"
+    )
+
+
 @cli.command(name="dashboard-serve")
 @click.option("--port", default=7878, type=int, help="Dashboard server port.")
 @click.option("--host", default="127.0.0.1",

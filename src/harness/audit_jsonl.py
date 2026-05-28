@@ -253,6 +253,72 @@ def append_dispatch_event(*,
         return False  # Audit is best-effort; never block dispatch
 
 
+def append_key_rotation_event(*,
+                                provider: str,
+                                previous_kept_as: Optional[str],
+                                had_previous_value: bool,
+                                ledger_path: Optional[Path] = None) -> bool:
+    """W14-KEY-ROTATION 2026-05-28: append a key-rotation event.
+
+    Records that a provider's stored secret was rotated.  Never stores
+    the key value itself — only the provider name + whether a previous
+    value was preserved.
+
+    Participates in the W14-AUDIT-CHAIN-HMAC chain via the same
+    best-effort mechanism as :func:`append_dispatch_event`.  Failure
+    NEVER raises; returns False on I/O error.
+
+    Args:
+        provider: API provider name (e.g. ``"deepseek"``, ``"mimo"``).
+            Lower-case convention.
+        previous_kept_as: Name of the backup secret holding the old
+            value, or None if no backup was kept.
+        had_previous_value: True iff a secret existed prior to the
+            rotation (False ⇒ first-time write disguised as rotate).
+        ledger_path: Override audit ledger path.
+
+    Returns:
+        Bool indicating successful write.
+    """
+    try:
+        path = _ledger_path(ledger_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        event: dict[str, Any] = {
+            "ts": _now_iso(),
+            "event": "key_rotation",
+            "provider": provider,
+            "previous_kept_as": previous_kept_as,
+            "had_previous_value": bool(had_previous_value),
+        }
+
+        # Chain it via the existing W14-AUDIT-CHAIN-HMAC infrastructure.
+        try:
+            from harness.audit_chain import (
+                chain_event as _chain_event,
+                get_hmac_key as _get_hmac_key,
+                get_last_chain_hash as _get_last_chain_hash,
+            )
+            _key = _get_hmac_key()
+            if _key is not None:
+                _prev = _get_last_chain_hash(path)
+                event = _chain_event(event, _prev, _key)
+        except Exception:
+            pass
+
+        line = json.dumps(event, ensure_ascii=False) + "\n"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+            try:
+                fh.flush()
+                os.fsync(fh.fileno())
+            except (OSError, AttributeError):
+                pass
+        return True
+    except Exception:
+        return False
+
+
 def _excerpt(text: str | None) -> str | None:
     """Truncate + redact a prompt/response excerpt for the ledger."""
     if text is None:
