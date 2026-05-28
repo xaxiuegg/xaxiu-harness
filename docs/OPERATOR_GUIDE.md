@@ -329,45 +329,115 @@ The browser opens to:
 
 The footer documents the protection model: values single-quoted to neutralize shell expansion on `source .env`, newlines/single-quotes in pasted keys rejected, server binds loopback only, idle-shuts after 10 min, token-gated.
 
-### 2.5 `harness ask` — your daily-driver cross-engine panel
+### 2.5 `harness ask` — your daily-driver LLM verb
 
-The single command you'll run most often.
+The single command you'll run most often.  Four shapes, picked by flag.
+
+**Default — routed (1 engine, ~$0.01-0.05, ~30s):**
 
 ```
-$ python -m harness ask "Name three benefits of cross-engine LLM panels in one bullet each."
-[ask] firing 3 engines in parallel (budget $0.30 each, timeout 180s)...
-      output: D:\xaxiu-harness-standalone\coord\reviews\ask-20260526-220035-name-three-benefits...
+$ python -m harness ask "Why is mimo-via-claude the empirical default for routing class default?"
+[ask] routed (task=default) → mimo-via-claude  (budget $0.30, timeout 180s)
+      MiMo-via-claude scored 100% (31/31 programmatic checks) on a 10-prompt production corpus...
+      output: D:\xaxiu-harness-standalone\coord\reviews\ask-20260527-...
 
 engine                   OK   elapsed    in     out    cost       alias
 ---------------------------------------------------------------------------
-  kimi-via-claude        OK   18.2s    694    287    $0.0091   k1
-  mimo-via-claude        OK   81.6s    427    179    $0.0078   k1
-  deepseek-via-claude    OK   10.9s   1052    243    $0.0188   k1
+  mimo-via-claude        OK   23.4s    427    179    $0.0078   k1
 
-  total cost: $0.0357
-  saved 3 response files + packet.md + summary.json
+  total cost: $0.0078
+  saved 1 response file + summary.json
 ```
 
-**What it does**:
+The routed default picks one engine per `harness engines recommend default` (currently → `mimo-via-claude`).  Cheap enough to be a reasonable subroutine call, not a meeting-stopper.
 
-1. Fires 3 Pattern B engines in parallel: `kimi-via-claude`, `mimo-via-claude`, `deepseek-via-claude`.
-2. Each dispatched via `dispatch_with_pool` — automatic multi-key failover if a key is unhealthy.
-3. Records outcomes to `coord/key_health.jsonl` so future selection consults real data.
-4. Saves to `coord/reviews/ask-<ts>-<slug>/` with `question.md`, per-engine `*.md`, `packet.md` (synthesis-ready), and `summary.json`.
-
-**Key flags**:
+**`--task <class>` — routed default with a different class:**
 
 ```bash
-harness ask "..."                              # default: 3 engines, full save
+harness ask "..." --task latency      # → deepseek-via-claude (~$0.02, ~10s)
+harness ask "..." --task verbose      # → kimi-via-claude  (longer outputs)
+harness ask "..." --task cost         # → mimo-via-claude  (cheapest)
+```
+
+Valid classes: `default | latency | verbose | cost | high-volume | multimodal | audit`.
+
+**`--audit` — producer → auditor (2 engines, ~$0.05, ~60s):**
+
+```
+$ python -m harness ask "Is MiMo Anthropic-only?" --audit
+[ask] audit: producer = mimo-via-claude  (budget $0.30, timeout 180s)
+      output: .../ask-20260527-...
+
+engine                          OK   elapsed    in     out    cost       alias
+---------------------------------------------------------------------------
+  producer:mimo-via-claude      OK   28.1s    412    298    $0.0091   k1
+  audit:deepseek-via-claude     OK   34.7s   1023    487    $0.0277   k1
+
+  total cost: $0.0368
+
+  VERDICT: PARTIAL
+    Mostly right; missed that MiMo also exposes an OpenAI-compatible surface.
+```
+
+Producer answers; a DIFFERENT engine (picked via `recommend('audit', exclude={producer})`) audits the answer in a structured rubric (VERDICT / CORRECTIONS / MISSED CONSIDERATIONS / OVERALL) and the verdict surfaces in `summary.json` for programmatic consumers.  Designed for catching hallucinations + stress-testing factual claims.
+
+**`--panel` — legacy 3-engine fanout (3 engines, ~$0.20-0.30, ~60-120s):**
+
+```bash
+harness ask "..." --panel
+```
+
+Fires `kimi-via-claude + mimo-via-claude + deepseek-via-claude` in parallel.  Was the pre-v0.5.x default; now opt-in.  Use for cross-cutting design crossroads where vendor diversity genuinely matters.
+
+**`--engines X,Y,Z` — explicit pin (unchanged):**
+
+```bash
+harness ask "..." --engines mimo-via-claude                  # pin one
+harness ask "..." --engines mimo-via-claude,kimi-via-claude  # pin a subset
+```
+
+Pinning ALWAYS wins (overrides `--task`, `--panel`, `--audit-engine-pick`).  HANDOFF.md step 7 + scripted callers depend on this; do not regress.
+
+**All flags:**
+
+```bash
+harness ask "..."                              # routed (1 engine, default)
+harness ask "..." --task <class>               # routed with different task class
+harness ask "..." --audit                      # producer + auditor (2 engines)
+harness ask "..." --audit-engine X             # implies --audit; override auditor
+harness ask "..." --panel                      # 3-engine parallel fanout
+harness ask "..." --engines X,Y,Z              # explicit pin
 harness ask --file question.md                 # read question from file
-harness ask "..." --engines mimo-via-claude    # single engine
 harness ask "..." --max-budget-usd 0.50        # raise per-engine spend cap
-harness ask "..." --print-text                 # dump full response to stdout
+harness ask "..." --timeout-s 300              # per-engine timeout
+harness ask "..." --print-text                 # dump full response text
 harness ask "..." --no-save                    # skip saving to disk
 harness ask "..." --output /tmp/my-panel       # custom output dir
 ```
 
-Typical 3-engine audit-class panel: **$0.20-0.30 total**, 30s-2min.
+**Output dir shape** (always under `coord/reviews/ask-<ts>-<slug>/`; mode field in `summary.json` for machine readers):
+
+| Mode | Files written |
+|---|---|
+| `routed` | `question.md`, `<engine>.md`, `summary.json` |
+| `audit` | `question.md`, `producer-<engine>.md`, `audit-<engine>.md`, `packet.md`, `summary.json` (with `verdict` field) |
+| `panel` | `question.md`, `<engine>.md` × N, `packet.md`, `summary.json` |
+
+**Cost / latency by mode**:
+
+| Mode | Typical cost | Typical latency |
+|---|---|---|
+| `routed` (default) | $0.01-0.05 | ~30s |
+| `--audit` | ~$0.05 | ~60s |
+| `--panel` | $0.20-0.30 | 60-120s |
+
+**Worked example — hallucination self-check (`--audit`):**
+
+In a recent agent session, an agent read part of `concrete.py` and confidently concluded "MiMo speaks Anthropic protocol, not OpenAI" — based on partial source reading.  Real source has TWO MiMo surfaces (`/v1/chat/completions` is OpenAI-shape; `/anthropic` is Anthropic-shape).  The agent eventually self-corrected after ~30 minutes on the wrong implementation path.
+
+A single `harness ask "<original claim>" --audit` at the moment of the claim would have routed the claim to a producer engine, then DeepSeek v4-pro as auditor.  Auditor sees the full producer answer + question + rubric, returns `VERDICT: PARTIAL` with `CORRECTIONS: MiMo has TWO surfaces, not one — the /v1/chat/completions endpoint IS OpenAI-shape`.  Cost: ~$0.05, ~60s.  Wrong-path pivot avoided.
+
+This is the canonical use case for `--audit`: any time an agent or operator commits to a non-obvious factual claim that downstream decisions will hinge on.
 
 ### 2.6 `harness engines recommend` — empirical routing
 
@@ -458,17 +528,22 @@ harness dashboard-serve                # FastAPI dashboard on 127.0.0.1:7878
 
 The harness has three operating modes. Pick by autonomy level — how much you want to delegate vs supervise.
 
-### 3.1 Cross-engine panel (low autonomy)
+### 3.1 Cross-engine LLM call (low autonomy)
 
-**Verb**: `harness ask "..."`
+**Verb**: `harness ask "..."` (see § 2.5 for the full flag surface)
 
-**When**: high-stakes decisions, design reviews, "second opinion" on a piece of code, anything where one engine's blind spot could cost you. Routine prompts don't need this — it costs $0.20-0.30 per panel.
+Four shapes, picked by flag:
 
-**How it works**: same prompt to 3 engines in parallel, outputs saved side-by-side as comparable .md files. `packet.md` concatenates all 3 (hand to a Claude Code session for synthesis, or read directly).
+| Shape | Engines | Cost | Use for |
+|---|---|---|---|
+| routed (bare ask) | 1 | $0.01-0.05 | Routine LLM second opinions, code questions, sanity checks |
+| `--audit` | 2 (producer + auditor) | ~$0.05 | Catching hallucinations, fact-checking own claims |
+| `--panel` | 3 in parallel | $0.20-0.30 | High-stakes design crossroads, cross-vendor diversity matters |
+| `--engines X,Y,Z` | N pinned | varies | Scripted callers, pinned engine for known constraint |
 
-**What you control**: which engines (`--engines`), budget cap (`--max-budget-usd`), output destination (`--output`).
+**What you control**: routing (`--task`), engines (`--engines`), audit pick (`--audit-engine`), budget cap (`--max-budget-usd`), output destination (`--output`).
 
-This is the mode most operators use 90% of the time.
+The routed default is the 90% mode.  `--audit` is the right primitive whenever an agent or operator is about to commit to a non-obvious factual claim.  `--panel` is reserved for the few-per-month genuinely cross-cutting design questions.
 
 ### 3.2 Agentic dev manager (medium autonomy)
 
@@ -925,7 +1000,15 @@ Production-corpus measured prices (2026-05-26, post MiMo V2.5 price cut):
 | `deepseek-via-claude` (flash) | ~$0.015 | ~$0.28 |
 | `kimi-via-claude` | ~$0.025 | ~$2.30 |
 
-Typical 3-engine `harness ask` panel on a substantive audit-class prompt (~1500 tokens in, ~500 out per engine): **$0.20-0.30 total**. At $50/mo MiMo Token Plan Pro that's ~6,200 panels.
+Typical `harness ask` costs by mode (post-v0.5.1 routed default):
+
+| Mode | Typical cost | Typical latency | Use case |
+|---|---|---|---|
+| routed (bare ask) | $0.01-0.05 | ~30s | The 90% case |
+| `--audit` | ~$0.05 | ~60s | Catch a hallucination, fact-check a claim |
+| `--panel` | $0.20-0.30 | 60-120s | Cross-cutting design crossroads |
+
+At $50/mo MiMo Token Plan Pro: ~6,200 panels OR ~50,000 routed-default calls per month.  The cheap routed default makes `harness ask` a reasonable subroutine call, not a meeting-stopper.
 
 ### 8.3 Where to look next
 

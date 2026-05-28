@@ -24,9 +24,12 @@ https://github.com/xaxiuegg/xaxiu-harness
 ### Piece B: a short orientation message
 
 ```
-xaxiu-harness is a personal tool that lets you ask 3 AI models the same question
-in parallel from your shell, then compare their answers.  Runs entirely on your
-laptop, no server.
+xaxiu-harness is a personal multi-engine LLM tool.  Bare `harness ask "..."`
+routes through an empirical recommender to ONE engine (~$0.01-0.05, ~30s) —
+cheap enough to be a daily-driver.  `--audit` adds a second engine to critique
+the answer for catching hallucinations (~$0.05, ~60s).  `--panel` fires 3
+engines in parallel for high-stakes decisions (~$0.20-0.30, ~60-120s).  Runs
+entirely on your laptop, no server.
 
 You'll need: Python 3.11+, Git, Claude Code CLI (https://docs.claude.com/en/docs/claude-code/setup),
 and at least one provider API key (Kimi, MiMo, or DeepSeek work; the keys UI will
@@ -35,11 +38,12 @@ walk you through getting whichever ones you want).
 Setup: clone the repo, open Claude Code in that directory, paste the prompt below.
 Claude Code will guide you through the rest in 15-25 minutes.
 
-Once it's set up, your daily-driver command is:
-    python -m harness ask "your question here"
+Once it's set up, your daily-driver commands:
+    python -m harness ask "your question here"               # routed, 1 engine
+    python -m harness ask "<a factual claim>" --audit        # fact-check it
+    python -m harness ask "..." --panel                      # 3-engine fanout
 
-That fires 3 engines in parallel and saves all 3 responses for you to compare.
-Typical cost is $0.20-0.30 per panel.
+Each `ask` call saves to coord/reviews/ask-<ts>-<slug>/ for forever-reference.
 
 When you're ready, paste this into Claude Code (with the harness repo as your
 working directory):

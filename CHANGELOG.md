@@ -38,6 +38,34 @@ them as PASS).
 
 W14-ASK-ROUTED-DEFAULT + W14-ASK-AUDIT.
 
+### Docs sweep + `agent-instructions` templates (W14-ASK-DOCS)
+
+Docs updated end-to-end to reflect the new ask shape:
+
+- `docs/OPERATOR_GUIDE.md` § 2.5 — full rewrite with 4-shape table,
+  per-mode sample outputs, cost-by-mode table, AND a worked example
+  for the hallucination self-check pattern (MiMo conflation scenario
+  from a real transcript review).
+- `docs/OPERATOR_GUIDE.md` § 3.1 — drops "90% of the time" framing;
+  shows the four ask shapes side-by-side.
+- `docs/OPERATOR_GUIDE.md` § 8.2 — cost table refreshed by mode.
+- `docs/AGENT_REFERENCE.md` § 8 — full rewrite.  New subsections:
+  routed default, `--audit` (with programmatic verdict-access code
+  example), `--panel`, when NOT to reach for `harness ask`, the
+  proxy at 127.0.0.1:7879 (Gap A), `xaxiu-swarm` sibling repo
+  (Gap A), empirical routing.
+- `docs/HANDOFF.md` Piece B — drops "ask 3 AI models the same
+  question in parallel" framing; shows the three daily-driver
+  commands.
+- `src/harness/cli.py` `agent-instructions` templates (all 3
+  formats: claude-md / prompt / short) — full rewrite.  Templates
+  now cover BOTH `harness ask` (with the 3 modes + when NOT to
+  use) AND the proxy AND xaxiu-swarm.  The harness proxy and
+  sibling swarm repo were undocumented in agent instructions
+  before W14; both are now first-class.  Re-run
+  `python -m harness install-agent-instructions --force` to
+  refresh the installed snippet at `~/.claude/CLAUDE.md`.
+
 ## v0.5 — 2026-05-21 (autonomous session arc)
 
 22 sequential commits, 50+ shipped STATUS rows, tests 711 → 1106 (+395).

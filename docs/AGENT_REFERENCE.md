@@ -176,9 +176,17 @@ harness cost-today
 
 ---
 
-## 8. The 3-engine cross-engine panel from your agent
+## 8. Reaching for `harness ask` from your agent
 
-When your agent hits a non-trivial decision and wants a second opinion:
+`harness ask` is the daily-driver LLM verb.  As of v0.5.1, bare `ask` is a single-engine routed call (~$0.01-0.05, ~30s), cheap enough to be a reasonable subroutine call.  Three modes worth knowing, picked by flag:
+
+| Use case | Verb | Cost | Latency |
+|---|---|---|---|
+| Routine second opinion, code question, sanity check | `harness ask "..."` | $0.01-0.05 | ~30s |
+| **Catch hallucinations, fact-check a claim you just made** | `harness ask "<claim>" --audit` | ~$0.05 | ~60s |
+| High-stakes design crossroads, cross-vendor diversity needed | `harness ask "..." --panel` | $0.20-0.30 | 60-120s |
+
+### 8.1 Routed default — the cheap subroutine
 
 ```python
 import subprocess
@@ -186,22 +194,93 @@ import subprocess
 result = subprocess.run([
     "python", "-m", "harness", "ask",
     "should this side-project use sqlite or postgres? trade-offs?",
-    "--no-save",  # or omit to keep coord/reviews/ output
-    "--max-budget-usd", "0.50",
-], capture_output=True, text=True, timeout=300)
+    "--no-save",
+    "--max-budget-usd", "0.10",
+], capture_output=True, text=True, timeout=180)
 print(result.stdout)
 ```
 
-Or in shell-out form:
+Picks one engine via `harness engines recommend default` (→ `mimo-via-claude`).  Use `--task latency | verbose | cost | high-volume | multimodal | audit` to route by task class.
+
+### 8.2 `--audit` — the hallucination self-check
+
+When your agent is about to commit to a non-obvious factual claim that downstream decisions will hinge on, audit it FIRST:
 
 ```bash
-harness ask "your question" --output /tmp/panel
+harness ask "<the claim or question>" --audit --output /tmp/audit
+# then inspect /tmp/audit/summary.json for the parsed verdict:
+#   summary["verdict"]["verdict"]  ∈ {"PASS", "PARTIAL", "FAIL", "UNKNOWN"}
+#   summary["verdict"]["corrections"]  ← what the auditor caught
+```
+
+Programmatic verdict access:
+
+```python
+import json, subprocess
+from pathlib import Path
+
+out_dir = Path("/tmp/audit-{ts}")  # capture from --output
+subprocess.run([
+    "python", "-m", "harness", "ask",
+    "<your factual claim or question>",
+    "--audit",
+    "--output", str(out_dir),
+], check=True)
+
+verdict = json.loads((out_dir / "summary.json").read_text())["verdict"]
+if verdict["verdict"] == "FAIL":
+    # Producer's answer was rejected — don't proceed on it
+    raise RuntimeError(f"Audit FAIL: {verdict['summary']}")
+elif verdict["verdict"] == "PARTIAL":
+    # Course-correct using verdict["corrections"]
+    ...
+```
+
+### 8.3 `--panel` — 3 engines in parallel
+
+```bash
+harness ask "your question" --panel --output /tmp/panel
 # then read /tmp/panel/packet.md for synthesis
 ```
 
-Cost: ~$0.20-0.30 per 3-engine panel. Use sparingly — not every prompt needs this.
+Use sparingly — only when cross-vendor diversity is the whole point (genuinely cross-cutting design crossroads).  Cost: $0.20-0.30 / 60-120s.
 
-For empirical engine routing (which engine is best for what task):
+### 8.4 When NOT to reach for `harness ask`
+
+- **Routine implementation work** (writing code, applying patches) — you're already an LLM; do it.
+- **Factual lookups** (definitions, syntax) — `WebSearch` / `WebFetch` are faster + free.
+- **Multi-file refactors / agentic dispatch** — use `xaxiu-swarm dispatch` (see § 8.6 below).
+- **Sub-routine LLM calls inside ApplyPilot / external tools** — use the harness proxy (§ 8.5).
+
+### 8.5 The harness proxy — OpenAI-compatible LLM endpoint
+
+If you need an OpenAI-compatible LLM HTTP endpoint (for third-party tools like `litellm`-based agents), the harness exposes one:
+
+```bash
+python -m harness proxy start                  # daemon on 127.0.0.1:7879
+python -m harness proxy status                 # pool size, in-flight stats
+python -m harness proxy stop                   # graceful shutdown
+```
+
+`POST http://127.0.0.1:7879/v1/chat/completions` with standard OpenAI request shape.  Default upstream is Kimi (Moonshot); set `OPENAI_API_BASE=http://127.0.0.1:7879/v1` in the consuming tool.  Multi-key pool + circuit breaker apply automatically.
+
+### 8.6 `xaxiu-swarm` — agentic multi-file dispatch
+
+The sibling project at `https://github.com/xaxiuegg/xaxiu-swarm` handles agentic dispatch — multi-turn tool use, in-place file edits across many files.  NOT required for `harness ask` or `harness proxy`; clone separately if you need it:
+
+```bash
+xaxiu-swarm dispatch \
+  --backend kimi \
+  --deliverable /path/to/output.md \
+  --add-dir /path/to/repo \
+  --context-file CLAUDE.md \
+  --timeout 420 \
+  --packet packet.md
+```
+
+Backends: `kimi` (CLI, agentic), `kimi-api`, `deepseek`, `qwen` (per the strategic plan), `mimo` (TOS-compliant via Claude Code subprocess), `claude-*` (per-provider wrappers).
+
+### 8.7 Empirical engine routing
 
 ```bash
 harness engines recommend default   # → mimo-via-claude
@@ -209,7 +288,7 @@ harness engines recommend audit     # → deepseek-via-claude (v4-pro override)
 harness engines recommend latency   # → deepseek-via-claude
 ```
 
-Engine name goes to **stdout** (pipe-friendly); rationale goes to **stderr**.
+Engine name goes to **stdout** (pipe-friendly); rationale goes to **stderr**.  Same data backs the routed default in `harness ask`.
 
 ---
 
