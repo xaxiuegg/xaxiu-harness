@@ -195,3 +195,70 @@ class TestInstallAgentInstructions:
         assert result.exit_code == 0
         # Should reference the .claude path in the dry-run preview
         assert ".claude" in result.output or "CLAUDE.md" in result.output
+
+    def test_install_uses_current_template(self, tmp_path: Path) -> None:
+        """W14-ASK-DOCS regression: prior to the helper refactor,
+        install-agent-instructions carried its OWN inline snippet that
+        drifted from `harness agent-instructions` output.  Both commands
+        must now route through `_agent_instructions_snippet` so they
+        cannot disagree.
+
+        Fingerprints: the v0.5.1+ template covers --audit + --panel +
+        the proxy + xaxiu-swarm.  None of those existed in the stale
+        pre-v0.5.1 template.  Their presence here proves install is
+        using the current shared source.
+        """
+        target = tmp_path / "claude.md"
+        target.write_text("# placeholder\n", encoding="utf-8")
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "install-agent-instructions", "--target", str(target),
+            "--force", "--dry-run",
+        ])
+        assert result.exit_code == 0
+        out = result.output
+        # Positive: new-template fingerprints
+        assert "--audit" in out
+        assert "--panel" in out
+        assert "harness proxy" in out
+        assert "xaxiu-swarm" in out
+        # Negative: stale-template fingerprint absent
+        assert "fires 3 engines (Kimi / MiMo / DeepSeek)" not in out
+
+    def test_install_and_print_emit_same_claude_md_snippet(
+        self, tmp_path: Path,
+    ) -> None:
+        """Regression: extract the snippet from install --dry-run's
+        wrapped output and confirm it matches `agent-instructions`
+        verbatim.  Single source of truth via the helper function."""
+        runner = CliRunner()
+        # Print path
+        print_result = runner.invoke(cli, ["agent-instructions"])
+        assert print_result.exit_code == 0
+        printed = print_result.output
+
+        # Install --dry-run --force path
+        target = tmp_path / "claude.md"
+        target.write_text("# placeholder\n", encoding="utf-8")
+        install_result = runner.invoke(cli, [
+            "install-agent-instructions", "--target", str(target),
+            "--force", "--dry-run",
+        ])
+        assert install_result.exit_code == 0
+        # Every paragraph of the printed snippet should appear in
+        # install's preview.  We don't require byte-equality (install
+        # wraps with markers + adds a "Would replace in:" header)
+        # but every line of substance must be present.
+        for line in printed.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                # Skip blank lines / markdown headers (whitespace-
+                # sensitive comparison would be too brittle)
+                continue
+            if len(line) < 20:
+                # Skip very short lines (code fences, etc.) to keep
+                # the assertion focused on meaningful content
+                continue
+            assert line in install_result.output, (
+                f"Install preview missing printed line: {line!r}"
+            )

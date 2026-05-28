@@ -406,45 +406,21 @@ def start_cmd(orchestrator: str | None, mode: str | None,
     sys.exit(0)
 
 
-@cli.command(name="agent-instructions")
-@click.option("--format", "fmt", type=click.Choice([
-    "claude-md", "prompt", "short",
-]), default="claude-md", help=(
-    "Output format.  'claude-md' = a CLAUDE.md section you can paste "
-    "into ~/.claude/CLAUDE.md (works for all sessions on this machine). "
-    "'prompt' = a one-shot prompt to paste into a new agent session. "
-    "'short' = a one-paragraph hint."
-))
-def agent_instructions_cmd(fmt: str) -> None:
-    """W14-AGENT-INSTRUCTIONS 2026-05-26: print a snippet that tells
-    an agent (Claude Code, Cursor, etc.) the harness is available and
-    how to use it.
+def _agent_instructions_snippet(
+    fmt: str, repo_root: Path, home_dir: Path,
+) -> str:
+    """W14-ASK-DOCS 2026-05-27: single source of truth for the agent-
+    instructions snippet content.  Used by BOTH ``harness agent-
+    instructions`` (which prints) AND ``harness install-agent-
+    instructions`` (which appends to ~/.claude/CLAUDE.md).
 
-    Use cases:
-
-      \b
-      harness agent-instructions > ~/.claude/CLAUDE.md.harness.md
-        (then `cat` it into your user-level CLAUDE.md to have the
-         harness auto-available in every Claude Code session on
-         this machine)
-
-      \b
-      harness agent-instructions --format prompt | clip      (Windows)
-      harness agent-instructions --format prompt | pbcopy    (macOS)
-        (puts the prompt in your clipboard; paste into the next
-         agent session manually)
-
-      \b
-      harness agent-instructions --format short
-        (one-paragraph hint for embedding in a project's CLAUDE.md)
+    Keeping the content in one place prevents the two commands from
+    drifting — a prior W14 bug had ``install`` carrying stale
+    pre-v0.5.1 3-engine framing while the print verb already used the
+    new 3-mode framing.
     """
-    # Resolve the install path so the snippet has the right absolute
-    # path baked in
-    repo_root = Path(__file__).resolve().parents[2]
-    home_dir = Path.home()
-
     if fmt == "claude-md":
-        click.echo(
+        return (
             f"## xaxiu-harness is available\n\n"
             f"You have access to a multi-engine LLM tool installed at "
             f"`{repo_root}`.  Three things it provides:\n\n"
@@ -528,7 +504,7 @@ def agent_instructions_cmd(fmt: str) -> None:
             f"HARNESS_VISUAL_MANUAL.md` has screenshots + walkthroughs.\n"
         )
     elif fmt == "prompt":
-        click.echo(
+        return (
             f"You have xaxiu-harness installed at {repo_root}.  Three "
             f"things it provides:\n\n"
             f"1. **`python -m harness ask \"...\"`** — daily-driver LLM "
@@ -554,7 +530,7 @@ def agent_instructions_cmd(fmt: str) -> None:
             f"Empirical routing: `harness engines recommend <class>`."
         )
     elif fmt == "short":
-        click.echo(
+        return (
             f"xaxiu-harness ({repo_root}) provides three things: "
             f"(1) `python -m harness ask \"...\"` — daily-driver LLM "
             f"verb (routed ~$0.01-0.05, `--audit` ~$0.05, `--panel` "
@@ -565,6 +541,47 @@ def agent_instructions_cmd(fmt: str) -> None:
             f"you've just made a non-obvious factual claim and want it "
             f"sanity-checked by a different engine."
         )
+    else:
+        raise ValueError(f"Unknown format: {fmt!r}")
+
+
+@cli.command(name="agent-instructions")
+@click.option("--format", "fmt", type=click.Choice([
+    "claude-md", "prompt", "short",
+]), default="claude-md", help=(
+    "Output format.  'claude-md' = a CLAUDE.md section you can paste "
+    "into ~/.claude/CLAUDE.md (works for all sessions on this machine). "
+    "'prompt' = a one-shot prompt to paste into a new agent session. "
+    "'short' = a one-paragraph hint."
+))
+def agent_instructions_cmd(fmt: str) -> None:
+    """W14-AGENT-INSTRUCTIONS 2026-05-26: print a snippet that tells
+    an agent (Claude Code, Cursor, etc.) the harness is available and
+    how to use it.
+
+    Use cases:
+
+      \b
+      harness agent-instructions > ~/.claude/CLAUDE.md.harness.md
+        (then `cat` it into your user-level CLAUDE.md to have the
+         harness auto-available in every Claude Code session on
+         this machine)
+
+      \b
+      harness agent-instructions --format prompt | clip      (Windows)
+      harness agent-instructions --format prompt | pbcopy    (macOS)
+        (puts the prompt in your clipboard; paste into the next
+         agent session manually)
+
+      \b
+      harness agent-instructions --format short
+        (one-paragraph hint for embedding in a project's CLAUDE.md)
+    """
+    # Resolve the install path so the snippet has the right absolute
+    # path baked in
+    repo_root = Path(__file__).resolve().parents[2]
+    home_dir = Path.home()
+    click.echo(_agent_instructions_snippet(fmt, repo_root, home_dir))
     sys.exit(0)
 
 
@@ -626,33 +643,13 @@ def install_agent_instructions_cmd(
     start_marker = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->"
     end_marker = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-END -->"
 
-    # Build the snippet
+    # Build the snippet using the shared helper so this command can
+    # never drift from `harness agent-instructions`.  Single source of
+    # truth in `_agent_instructions_snippet` (W14-ASK-DOCS 2026-05-27).
     repo_root = Path(__file__).resolve().parents[2]
     home_dir = Path.home()
-    snippet_body = (
-        f"## xaxiu-harness is available\n\n"
-        f"You have access to a cross-engine LLM dispatch tool "
-        f"installed at `{repo_root}`.  Use it for:\n\n"
-        f"- **Multi-engine review**: "
-        f"`python -m harness ask \"your question\"` fires 3 engines "
-        f"(Kimi / MiMo / DeepSeek) in parallel and saves all 3 "
-        f"responses to `{repo_root}\\coord\\reviews\\ask-"
-        f"<timestamp>-<slug>\\`.  Read `packet.md` from that "
-        f"directory for the concatenated synthesis-ready bundle.\n"
-        f"- **Engine health check**: `python -m harness doctor`\n"
-        f"- **Engine recommendation**: `python -m harness engines "
-        f"recommend <task-class>` (default / latency / verbose / "
-        f"cost / high-volume / multimodal / audit).\n"
-        f"- **Key management**: `python -m harness keys serve` "
-        f"launches a browser form for managing per-provider API keys.\n\n"
-        f"**When to prefer `harness ask`**: when the user asks for "
-        f"\"a second opinion\", \"what does X think\", \"cross-engine "
-        f"review\", or for any high-stakes decision where independent "
-        f"perspectives matter.  Don't reach for it on every prompt — "
-        f"costs $0.20-0.30 per panel; takes 30s-2min.\n\n"
-        f"**Visual reference**: `{repo_root}\\docs\\"
-        f"HARNESS_VISUAL_MANUAL.md` has screenshots + walkthrough of "
-        f"every verb.\n"
+    snippet_body = _agent_instructions_snippet(
+        "claude-md", repo_root, home_dir,
     )
     full_block = (
         f"\n{start_marker}\n"
