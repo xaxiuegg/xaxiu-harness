@@ -49,6 +49,12 @@ The operator has granted full dev authority (`feedback_xaxiu_harness_full_dev_au
      stopped at 10MB transcript (vs 18MB STRONGLY).  See
      `[[feedback_no_premature_stop]]` in memory.
 
+0.6a. **Native `/goal` for single-Claude in-session loops (Claude Code ≥ v2.1.139).**
+   - When a single in-session Claude needs "keep working until X" WITHOUT cross-engine dispatch, the native `/goal <condition>` command is the lighter mechanism: it self-checks the condition after every turn (a fast Haiku evaluator) and OWNS the loop, so you do NOT wrap it in an outer ScheduleWakeup loop — that would be redundant.
+   - Keep the harness gate authoritative for the STOP condition. The `/goal` evaluator judges from your transcript (not independent file reads), so phrase the condition so you must actually RUN the gate and report its result — e.g. ``/goal "<work-done criteria> AND I have run `python -m harness session ok-to-stop` and it reports ok"``. That keeps the cross-engine / `wave_plan` backlog gate (queued production rows + creativity-fired) in charge of stopping; `/goal` has no STATUS.csv visibility on its own.
+   - `/goal` is implemented as a session-scoped prompt-based Stop hook; it coexists with the `.claude/settings.json` Stop hook (`check-csv-stale.sh`) — no conflict.
+   - **`/goal` does NOT replace the autonomous loop** (`harness loop` via Task Scheduler, cross-engine waves, multi-supervisor write-set conflict-detection). Use it only for single-session, single-Claude persistence; cross-engine waves stay on the harness loop. See "Native Claude Code features vs. the harness" in CLAUDE.md and `[[feedback_native_features_wire_to_harness]]`.
+
 1. **Read `coord/dev_loop/state.json`.**
 2. **Check `loop_status`.** If anything other than `"armed"`, append a "skipped" entry to `coord/dev_loop/log.jsonl` and exit. Do not act.
 3. **Check active dispatches.** For each entry in `active_dispatches`:
