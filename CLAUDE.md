@@ -102,6 +102,16 @@ Three engine families currently in active rotation:
 - **Mandatory flags**: `--timeout 420+` (swarm/kimi), `--deliverable`, `--add-dir`, `--context-file CLAUDE.md`, `--progress 30`.
 - **Cooldowns**: on any engine failure, set 60min cooldown for swarm/kimi, 15-30min for non-agentic backends. Fall back to alternate engine, don't retry the same one until cooldown lifts.
 
+## Native Claude Code features vs. the harness (routing — 2026-05-28)
+
+Native CC features (subagents in `.claude/agents/`, `/goal`, Dynamic Workflows) are the **orchestration front-end**.  They are single-vendor (Claude-only), so they MUST NOT answer cross-vendor work from Claude alone — that would orphan the harness's reason to exist ([feedback_native_features_wire_to_harness] in memory).  **Mental model: native = front-end; harness = the cross-vendor engine it calls.**
+
+- **Claude-only work** (single-session ideation, local test runs, in-session "keep working until X") → native is fine.  `/goal <condition>` (CC ≥ v2.1.139) replaces the bespoke "keep going" loop for IN-SESSION persistence; its condition should shell out to `python -m harness session ok-to-stop` so the cross-engine / `wave_plan` gate stays authoritative (`/goal` has no visibility into STATUS.csv).
+- **Cross-vendor work** (ship-gate audits, second opinions, multi-engine panels, multi-file dispatch) → MUST route through the harness.  Delegate to the `cross-vendor-panel` subagent, which shells out to `python -m harness ask --panel`/`--audit`, or use `xaxiu-swarm dispatch`.  Never substitute a single-vendor Claude answer for a cross-vendor verification.
+- **Subagents that touch dispatch** (the developing/integrating roles) are BRIDGE subagents: `tools: Bash` → `python -m harness …` / `xaxiu-swarm …`.  The cross-vendor dispatch + worktree + ship-audit logic stays harness-driven; the `tick()` write-set conflict-detection + merge has no native equivalent and stays in the harness loop.
+
+Native subagents shipped so far: `cross-vendor-panel` (bridge), `creativity` + `testing` (read-only native conversions of the dev_loop supervisors).  `developing`/`integrating` stay harness-driven (cross-vendor) until wired as bridge subagents.
+
 ## Parallelism + slot-filling
 
 - **Supervisors run in parallel** where their write-sets don't intersect. See [coord/dev_loop/manager.md](coord/dev_loop/manager.md) for the conflict-detection rules.
