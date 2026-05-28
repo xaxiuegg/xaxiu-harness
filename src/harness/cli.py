@@ -5815,9 +5815,22 @@ def session_ok_to_stop(json_output: bool) -> None:
 # coord (v2/D)
 # ---------------------------------------------------------------------------
 
-@cli.group(name="coord", hidden=True)
+@cli.group(name="coord")
 def coord_group() -> None:
-    """Coordinator commands: plan, run, integrate, status."""
+    """Multi-agent coordinator: planner + workers + integrate.
+
+    The high-autonomy operating mode (vs `harness ask` panel and
+    in-session use).  Spec-driven runs with isolated git worktrees
+    per worker, replan-from-failure, integration phase.
+
+    Audit follow-through 2026-05-27: was previously hidden=True
+    because v2 was treated as experimental scaffolding.  Now that
+    docs/OPERATOR_GUIDE.md § 3.3 and docs/AGENT_REFERENCE.md § 10
+    document it as a first-class operating mode, surfacing it in
+    `harness --help` matches the docs.
+
+    Full spec: spec/multi-agent-harness-architecture.md.
+    """
 
 
 @coord_group.command(name="plan")

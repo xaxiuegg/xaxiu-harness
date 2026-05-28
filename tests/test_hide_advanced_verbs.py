@@ -1,13 +1,20 @@
 """W11-HIDE-ADVANCED-VERBS: tests for the advanced/hidden verb split.
 
-13 engineering verbs are hidden from the default `harness --help`:
+12 engineering verbs are hidden from the default `harness --help`:
 spec-register, spec-verify, spec-init, lint-spec, panic-dump,
 swarm-verify, engines-reliability, engines-cooldowns, burst, lock,
-replay, proxy (group), coord (group).
+replay, proxy (group).
 
 They remain CALLABLE (hidden=True only affects help discovery).
 `harness advanced list` enumerates them for operators who need to
 find them.
+
+Audit follow-through 2026-05-27 (W14-COORD-UNHIDE): ``coord`` was
+previously in this list because v2 was treated as experimental
+scaffolding.  Now that ``coord`` is documented as a first-class
+operating mode in docs/OPERATOR_GUIDE.md § 3.3 and
+docs/AGENT_REFERENCE.md § 10, it must appear in ``harness --help``
+to match the docs.  Test moved to ``test_visible_daily_use_verbs``.
 """
 
 from __future__ import annotations
@@ -31,7 +38,6 @@ HIDDEN_VERBS = [
     "lock",
     "replay",
     "proxy",
-    "coord",
 ]
 
 
@@ -49,12 +55,17 @@ def test_engineering_verb_marked_hidden(verb_name):
 
 
 def test_daily_use_verbs_NOT_hidden():
-    """Operator-facing daily verbs must stay visible."""
+    """Operator-facing daily verbs must stay visible.
+
+    Audit follow-through 2026-05-27: ``coord`` added to this list when
+    it was unhidden (was in HIDDEN_VERBS pre-W14-COORD-UNHIDE).
+    """
     visible_required = [
         "daily", "today", "morning-brief", "preflight", "dispatch",
         "env", "env-wizard", "profile", "status", "doctor",
         "engines-heal", "session", "budget", "observer", "loop",
         "adapter", "queue", "memory", "dashboard-serve",
+        "coord",  # W14-COORD-UNHIDE 2026-05-27
     ]
     for verb_name in visible_required:
         cmd = _cli.cli.commands.get(verb_name)
