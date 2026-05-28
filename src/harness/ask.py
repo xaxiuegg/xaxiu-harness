@@ -109,14 +109,22 @@ def _dispatch_one(
     question: str,
     max_budget_usd: float,
     timeout_s: int,
+    *,
+    model_override: str = "",
 ) -> AskResult:
-    """Dispatch via dispatch_with_pool so multi-key + failover apply."""
+    """Dispatch via dispatch_with_pool so multi-key + failover apply.
+
+    ``model_override`` is forwarded to ``dispatch_with_pool(model=...)``
+    — used by ``--audit`` to send v4-pro to the DeepSeek auditor when
+    the recommender flags it (``recommend('audit').model_override``).
+    """
     started = time.monotonic()
     try:
         from harness.engines.pool_dispatch import dispatch_with_pool
         result = dispatch_with_pool(
             engine,
             question,
+            model=model_override,
             extra_args={
                 "max_budget_usd": max_budget_usd,
                 "timeout_s": timeout_s,
@@ -170,6 +178,102 @@ def run_panel(
     return [results_by_engine[eng] for eng in engines]
 
 
+@dataclass
+class AuditOutcome:
+    """W14-ASK-AUDIT 2026-05-27: result of a producer→auditor flow.
+
+    Either the producer failed (auditor is None, verdict is None) or
+    both ran (auditor is an AskResult; verdict is the parsed dict from
+    ``audit_prompt.parse_audit_verdict``).  When the auditor itself
+    failed to dispatch, ``auditor`` is the failed AskResult and
+    ``verdict["verdict"]`` is ``"UNKNOWN"``.
+    """
+    producer: AskResult
+    auditor: Optional[AskResult]
+    auditor_engine: str
+    verdict: Optional[dict]
+
+
+def run_audit(
+    question: str,
+    producer_engine: str,
+    *,
+    max_budget_usd: float = 0.30,
+    timeout_s: int = 180,
+    audit_engine_override: str = "",
+) -> AuditOutcome:
+    """Run producer → auditor sequentially.
+
+    1. Dispatch ``producer_engine`` with the user's question.
+    2. If producer failed, return (producer_result, None, None, None)
+       — the audit step is skipped, since auditing a failed dispatch
+       is meaningless.
+    3. Otherwise pick the auditor: ``audit_engine_override`` if set,
+       else ``recommend('audit', exclude={producer_engine})``.  The
+       recommender returns a different engine label by construction
+       (D-i: engine-label dedup, not (engine,model) dedup).
+    4. Build the audit prompt via ``audit_prompt.build_audit_prompt``.
+    5. Dispatch the auditor with the audit prompt + any ``model_override``
+       from the recommender (e.g. ``deepseek-v4-pro``).
+    6. Parse the auditor response into a structured verdict.
+
+    Returns an ``AuditOutcome``.  Cost is producer_cost + auditor_cost
+    (sequential, not parallel).
+    """
+    from harness.audit_prompt import build_audit_prompt, parse_audit_verdict
+
+    producer = _dispatch_one(
+        producer_engine, question, max_budget_usd, timeout_s,
+    )
+    if not producer.ok:
+        # Audit a non-response is pointless — skip stage 2 entirely.
+        return AuditOutcome(
+            producer=producer, auditor=None,
+            auditor_engine="", verdict=None,
+        )
+
+    # Resolve auditor + optional model override
+    auditor_model_override: str = ""
+    if audit_engine_override:
+        auditor_engine = audit_engine_override
+        # Operator override: leave model at engine default unless the
+        # operator separately specifies one.  (We don't expose a
+        # --audit-model flag yet; v4-pro override only applies via
+        # the recommender path.)
+    else:
+        from harness.engines.routing_recommend import recommend
+        audit_rec = recommend("audit", exclude={producer_engine})
+        auditor_engine = audit_rec.engine
+        auditor_model_override = audit_rec.model_override or ""
+
+    audit_text = build_audit_prompt(
+        question=question,
+        producer_engine=producer_engine,
+        producer_response=producer.text,
+    )
+    auditor = _dispatch_one(
+        auditor_engine, audit_text, max_budget_usd, timeout_s,
+        model_override=auditor_model_override,
+    )
+
+    if auditor.ok:
+        verdict = parse_audit_verdict(auditor.text)
+    else:
+        verdict = {
+            "verdict": "UNKNOWN",
+            "summary": f"Auditor dispatch failed: {auditor.error}",
+            "corrections": "",
+            "missed": "",
+            "overall": "",
+            "raw": "",
+        }
+
+    return AuditOutcome(
+        producer=producer, auditor=auditor,
+        auditor_engine=auditor_engine, verdict=verdict,
+    )
+
+
 def save_panel(
     question: str,
     results: list[AskResult],
@@ -177,6 +281,7 @@ def save_panel(
     *,
     mode: str = "panel",
     extra_summary: dict | None = None,
+    roles: list[str] | None = None,
 ) -> None:
     """Write per-engine .md files + question.md + summary.json (+ packet.md
     for multi-engine modes) under ``out_dir``.
@@ -198,6 +303,13 @@ def save_panel(
     extra_summary
         Additional keys to merge into ``summary.json``.  Used by
         ``--audit`` to surface the parsed verdict.
+    roles
+        Optional list of role tags, parallel to ``results``.  Each
+        non-empty role becomes a filename prefix (e.g. role
+        ``"producer"`` + engine ``"mimo-via-claude"`` writes
+        ``producer-mimo-via-claude.md``).  Used by ``--audit`` to
+        distinguish producer + auditor in the output dir.  If None
+        or shorter than results, missing entries default to no prefix.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -208,10 +320,19 @@ def save_panel(
     )
 
     # Per-engine responses
-    for r in results:
+    def _role_for(i: int) -> str:
+        return roles[i] if (roles and i < len(roles)) else ""
+
+    for i, r in enumerate(results):
         safe = r.engine.replace("/", "_")
+        role = _role_for(i)
+        if role:
+            safe = f"{role}-{safe}"
+            heading = f"# {role}: {r.engine}"
+        else:
+            heading = f"# {r.engine}"
         body = [
-            f"# {r.engine}",
+            heading,
             "",
             f"**latency**: {r.elapsed_s:.1f}s   "
             f"**tokens_in**: {r.tokens_in}   "
@@ -242,6 +363,7 @@ def save_panel(
         "results": [
             {
                 "engine": r.engine,
+                "role": _role_for(i),
                 "ok": r.ok,
                 "elapsed_s": r.elapsed_s,
                 "tokens_in": r.tokens_in,
@@ -252,7 +374,7 @@ def save_panel(
                 "text_excerpt": r.text[:300].replace("\n", " "),
                 "error": r.error,
             }
-            for r in results
+            for i, r in enumerate(results)
         ],
         "total_cost_usd": sum(r.cost_usd for r in results),
         "max_latency_s": max(
@@ -274,8 +396,13 @@ def save_panel(
     if mode == "routed":
         return
 
+    title = (
+        "# Producer → Auditor (--audit synthesis)"
+        if mode == "audit"
+        else "# Cross-engine panel for synthesis"
+    )
     packet_lines = [
-        f"# Cross-engine panel for synthesis",
+        title,
         "",
         "## Question",
         "",
@@ -284,9 +411,11 @@ def save_panel(
         "## Responses",
         "",
     ]
-    for r in results:
+    for i, r in enumerate(results):
+        role = _role_for(i)
+        section_label = f"{role}: {r.engine}" if role else r.engine
         packet_lines.extend([
-            f"### {r.engine}",
+            f"### {section_label}",
             "",
             f"_latency {r.elapsed_s:.1f}s, "
             f"cost ${r.cost_usd:.4f}, "

@@ -753,6 +753,18 @@ _VALID_TASK_CLASSES = (
     "Was the bare default before v0.5.x; now opt-in.  Use for high-stakes "
     "design crossroads where vendor diversity matters."
 ))
+@click.option("--audit", "audit_mode", is_flag=True, default=False, help=(
+    "Run producer → auditor flow.  The producer (routed default, or "
+    "--engines / --task pick) answers; a DIFFERENT engine (picked via "
+    "`recommend('audit', exclude={producer})`) then audits the answer "
+    "and returns a structured VERDICT (PASS / PARTIAL / FAIL).  Useful "
+    "for catching hallucinations and stress-testing factual claims.  "
+    "~$0.05 / ~60s.  Conflicts with --panel."
+))
+@click.option("--audit-engine", "audit_engine_override", default="", help=(
+    "Override the auditor engine pick (default: chosen by recommender).  "
+    "Implies --audit."
+))
 @click.option("--output", "output_dir", type=click.Path(
     file_okay=False, path_type=Path,
 ), default=None,
@@ -773,20 +785,23 @@ def ask_cmd(
     engines: str,
     task_class: str,
     panel_mode: bool,
+    audit_mode: bool,
+    audit_engine_override: str,
     output_dir: Path | None,
     max_budget_usd: float,
     timeout_s: int,
     no_save: bool,
     print_text: bool,
 ) -> None:
-    """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED 2026-05-27: daily-driver
-    cross-engine LLM call.
+    """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED + ASK-AUDIT 2026-05-27:
+    daily-driver cross-engine LLM call.
 
     THREE modes:
 
     \b
       routed (default)   1 engine via routing recommender,   ~$0.01-0.05
-      --panel            3-engine parallel cross-engine fanout, ~$0.20-0.30
+      --audit            producer → auditor (2 engines),     ~$0.05
+      --panel            3-engine parallel fanout,           ~$0.20-0.30
       --engines X,Y,Z    pin specific engine(s), bypass recommender
 
     Examples:
@@ -794,6 +809,7 @@ def ask_cmd(
       \b
       harness ask "should we deprecate the legacy swarm/kimi-api?"
       harness ask "..." --task latency               # → deepseek-via-claude
+      harness ask "..." --audit                      # fact-check own claims
       harness ask "..." --panel                      # 3-engine fanout
       harness ask "..." --engines mimo-via-claude    # pin explicit
       harness ask --file question.md
@@ -806,11 +822,29 @@ def ask_cmd(
     + packet.md (synthesis-ready) + summary.json.
     Routed output: question.md + <engine>.md + summary.json
     (no packet.md — the lone engine file IS the synthesis-ready artifact).
+    Audit output: question.md + producer-<engine>.md + audit-<engine>.md
+    + packet.md + summary.json (with `verdict` field: PASS / PARTIAL / FAIL).
     """
     import datetime
     from harness.ask import (
-        DEFAULT_ENGINES, _slugify, run_panel, save_panel,
+        DEFAULT_ENGINES, _slugify, run_panel, run_audit, save_panel,
     )
+
+    # --audit-engine implies --audit.  Cheaper UX than requiring both.
+    if audit_engine_override:
+        audit_mode = True
+
+    # Conflict checks (mutually exclusive flag combinations)
+    if audit_mode and panel_mode:
+        click.echo(
+            click.style(
+                "ERROR: --audit and --panel are mutually exclusive.  "
+                "--audit runs a producer→auditor flow (2 engines, "
+                "sequential); --panel fires 3 engines in parallel.",
+                fg="red",
+            ), err=True,
+        )
+        sys.exit(2)
 
     # Resolve question source
     if question_file is not None:
@@ -832,12 +866,15 @@ def ask_cmd(
         )
         sys.exit(2)
 
-    # Resolve engines + mode.  Precedence is --engines > --panel > --task
-    # (the routed default).
+    # Resolve engines + mode.  Precedence is --engines > --audit > --panel
+    # > --task (the routed default).
     #
     # Mode semantics:
     #   routed  → recommender-picked single engine; question.md +
     #             <engine>.md + summary.json (no packet.md).
+    #   audit   → producer + auditor (2 engines, sequential);
+    #             question.md + producer-<engine>.md + audit-<engine>.md
+    #             + packet.md + summary.json (verdict field).
     #   panel   → user-pinned engines (via --engines) OR --panel mode;
     #             question.md + <engine>.md per engine + packet.md +
     #             summary.json.  Pin path stays panel-shape even for
@@ -850,8 +887,20 @@ def ask_cmd(
         engine_list = tuple(
             e.strip() for e in engines.split(",") if e.strip()
         )
+        if audit_mode and len(engine_list) != 1:
+            click.echo(
+                click.style(
+                    f"ERROR: --audit requires exactly 1 producer engine; "
+                    f"got {len(engine_list)} via --engines "
+                    f"({','.join(engine_list)}).  Either drop --audit or "
+                    f"pin a single engine.",
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
         # Explicit pin = panel-shape output regardless of engine count.
         # Preserves backward compat with the pre-v0.5.x pin behavior.
+        # (--audit overrides this below.)
         mode = "panel"
     elif panel_mode:
         engine_list = DEFAULT_ENGINES
@@ -864,6 +913,10 @@ def ask_cmd(
         mode = "routed"
         rationale = rec.rationale
 
+    # --audit overrides whatever mode the engine resolution set.
+    if audit_mode:
+        mode = "audit"
+
     # Resolve output dir
     if output_dir is None and not no_save:
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -872,7 +925,19 @@ def ask_cmd(
         output_dir = repo_root / "coord" / "reviews" / f"ask-{ts}-{slug}"
 
     # Mode-specific dispatch banner
-    if mode == "routed":
+    producer_engine_for_audit: str = engine_list[0] if audit_mode else ""
+    if mode == "audit":
+        # Resolved producer is known; auditor is picked inside run_audit.
+        click.echo(
+            f"[ask] audit: producer = {producer_engine_for_audit}  "
+            f"(budget ${max_budget_usd:.2f}, timeout {timeout_s}s)"
+        )
+        if audit_engine_override:
+            click.echo(
+                f"      auditor: {audit_engine_override} "
+                f"(forced via --audit-engine)"
+            )
+    elif mode == "routed":
         click.echo(
             f"[ask] routed (task={task_class}) → {engine_list[0]}  "
             f"(budget ${max_budget_usd:.2f}, timeout {timeout_s}s)"
@@ -898,12 +963,44 @@ def ask_cmd(
     if output_dir is not None and not no_save:
         click.echo(f"      output: {output_dir}")
 
-    results = run_panel(
-        question_text,
-        engines=engine_list,
-        max_budget_usd=max_budget_usd,
-        timeout_s=timeout_s,
-    )
+    # Dispatch.  Audit uses sequential producer→auditor; routed + panel
+    # use parallel fanout (1 or N engines).
+    roles: list[str] = []
+    extra_summary: dict = {}
+    if mode == "audit":
+        outcome = run_audit(
+            question_text,
+            producer_engine=producer_engine_for_audit,
+            max_budget_usd=max_budget_usd,
+            timeout_s=timeout_s,
+            audit_engine_override=audit_engine_override,
+        )
+        if outcome.auditor is None:
+            # Producer failed; the audit step was skipped (auditing a
+            # non-response is meaningless).  Single result, no verdict.
+            results = [outcome.producer]
+            roles = ["producer"]
+            extra_summary = {
+                "producer_engine": producer_engine_for_audit,
+                "auditor_engine": "",
+                "verdict": None,
+                "audit_skipped_reason": "producer dispatch failed",
+            }
+        else:
+            results = [outcome.producer, outcome.auditor]
+            roles = ["producer", "audit"]
+            extra_summary = {
+                "producer_engine": producer_engine_for_audit,
+                "auditor_engine": outcome.auditor_engine,
+                "verdict": outcome.verdict,
+            }
+    else:
+        results = run_panel(
+            question_text,
+            engines=engine_list,
+            max_budget_usd=max_budget_usd,
+            timeout_s=timeout_s,
+        )
 
     # Print summary table (always)
     click.echo()
@@ -913,13 +1010,18 @@ def ask_cmd(
     )
     click.echo("-" * 75)
     total_cost = 0.0
-    for r in results:
+    for i, r in enumerate(results):
         if r.ok:
             ok_styled = click.style("OK", fg="green")
         else:
             ok_styled = click.style("FAIL", fg="red")
+        # Audit mode: prefix engine name with role for clarity in the table
+        if mode == "audit" and i < len(roles) and roles[i]:
+            label = f"{roles[i]}:{r.engine}"
+        else:
+            label = r.engine
         click.echo(
-            f"  {r.engine:<22} {ok_styled:<11} "
+            f"  {label:<22} {ok_styled:<11} "
             f"{r.elapsed_s:>5.1f}s   "
             f"{r.tokens_in:<6} {r.tokens_out:<6} "
             f"${r.cost_usd:<8.4f} {r.winning_alias or '—':<6}"
@@ -928,8 +1030,29 @@ def ask_cmd(
     click.echo()
     click.echo(f"  total cost: ${total_cost:.4f}")
 
+    # Audit verdict line (always shown when an audit verdict is present)
+    if mode == "audit" and extra_summary.get("verdict"):
+        v = extra_summary["verdict"]
+        verdict_str = v.get("verdict", "UNKNOWN")
+        verdict_color = {
+            "PASS": "green", "PARTIAL": "yellow",
+            "FAIL": "red", "UNKNOWN": "magenta",
+        }.get(verdict_str, "magenta")
+        click.echo()
+        click.echo(
+            click.style(f"  VERDICT: {verdict_str}", fg=verdict_color, bold=True)
+        )
+        summary_line = v.get("summary", "").strip().splitlines()[0:1]
+        if summary_line:
+            click.echo(f"    {summary_line[0]}")
+
     if not no_save and output_dir is not None:
-        save_panel(question_text, results, output_dir, mode=mode)
+        save_panel(
+            question_text, results, output_dir,
+            mode=mode,
+            extra_summary=extra_summary if extra_summary else None,
+            roles=roles if roles else None,
+        )
         if mode == "routed":
             click.echo(
                 f"  saved {len(results)} response file + summary.json"
@@ -948,9 +1071,11 @@ def ask_cmd(
     if print_text:
         click.echo()
         click.echo("=" * 75)
-        for r in results:
+        for i, r in enumerate(results):
             click.echo()
-            click.echo(click.style(f"### {r.engine}", fg="yellow", bold=True))
+            role = roles[i] if (roles and i < len(roles)) else ""
+            label = f"{role}: {r.engine}" if role else r.engine
+            click.echo(click.style(f"### {label}", fg="yellow", bold=True))
             click.echo()
             click.echo(r.text if r.ok else f"FAILED: {r.error}")
 

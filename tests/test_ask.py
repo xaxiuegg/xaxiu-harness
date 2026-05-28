@@ -611,3 +611,410 @@ class TestAskEnginesPin:
         assert mock_dispatch.call_count == 1
         assert mock_dispatch.call_args_list[0].args[0] == "mimo-via-claude"
         assert "mimo-via-claude" in result.output
+
+
+# ---------------------------------------------------------------------------
+# W14-ASK-AUDIT 2026-05-27: audit prompt + parser + producer→auditor flow
+# ---------------------------------------------------------------------------
+
+
+class TestAuditPrompt:
+    """Unit tests for the audit prompt template + verdict parser."""
+
+    def test_build_audit_prompt_includes_question(self) -> None:
+        from harness.audit_prompt import build_audit_prompt
+        prompt = build_audit_prompt(
+            question="Is MiMo Anthropic-only?",
+            producer_engine="mimo-via-claude",
+            producer_response="Yes, MiMo only speaks Anthropic protocol.",
+        )
+        assert "Is MiMo Anthropic-only?" in prompt
+        assert "mimo-via-claude" in prompt
+        assert "MiMo only speaks Anthropic protocol" in prompt
+        # Rubric sections present
+        assert "VERDICT:" in prompt
+        assert "CORRECTIONS:" in prompt
+        assert "MISSED CONSIDERATIONS:" in prompt
+        assert "OVERALL:" in prompt
+
+    def test_build_audit_prompt_strips_whitespace(self) -> None:
+        from harness.audit_prompt import build_audit_prompt
+        prompt = build_audit_prompt(
+            question="  q  \n", producer_engine="X", producer_response="\n  a  \n",
+        )
+        # No stray leading/trailing whitespace inside the rendered fields
+        assert "QUESTION:\nq\n" in prompt
+        assert "(from X):\na" in prompt
+
+
+class TestParseAuditVerdict:
+    """Parser unit tests."""
+
+    def test_full_pass_verdict(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        text = (
+            "VERDICT: PASS\n"
+            "ONE-LINE SUMMARY: Answer is correct and complete.\n"
+            "CORRECTIONS: none\n"
+            "MISSED CONSIDERATIONS: none\n"
+            "OVERALL: The answer addresses the question fully and accurately.\n"
+        )
+        v = parse_audit_verdict(text)
+        assert v["verdict"] == "PASS"
+        assert "correct and complete" in v["summary"]
+        assert v["corrections"].lower() == "none"
+        assert v["missed"].lower() == "none"
+        assert "fully and accurately" in v["overall"]
+
+    def test_partial_verdict_with_corrections(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        text = (
+            "VERDICT: PARTIAL\n"
+            "ONE-LINE SUMMARY: Mostly right; missed one protocol path.\n"
+            "CORRECTIONS:\n"
+            "- MiMo has TWO surfaces, not one.\n"
+            "- The /v1/chat/completions endpoint IS OpenAI-shape.\n"
+            "MISSED CONSIDERATIONS: Token Plan UA gating.\n"
+            "OVERALL: The producer conflated MiMo's two API surfaces.\n"
+        )
+        v = parse_audit_verdict(text)
+        assert v["verdict"] == "PARTIAL"
+        assert "TWO surfaces" in v["corrections"]
+        assert "/v1/chat/completions" in v["corrections"]
+        assert "Token Plan UA gating" in v["missed"]
+
+    def test_fail_verdict(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        text = (
+            "VERDICT: FAIL\n"
+            "ONE-LINE SUMMARY: Off-topic.\n"
+            "CORRECTIONS: The answer ignored the question.\n"
+            "MISSED CONSIDERATIONS: All of them.\n"
+            "OVERALL: Total miss.\n"
+        )
+        v = parse_audit_verdict(text)
+        assert v["verdict"] == "FAIL"
+
+    def test_missing_verdict_returns_unknown(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        text = "Sorry I don't have a verdict for this question."
+        v = parse_audit_verdict(text)
+        assert v["verdict"] == "UNKNOWN"
+        assert v["raw"] == text
+
+    def test_handles_one_line_summary_variants(self) -> None:
+        """LLMs sometimes drop the hyphen ("ONE LINE SUMMARY")."""
+        from harness.audit_prompt import parse_audit_verdict
+        text = (
+            "VERDICT: PASS\n"
+            "ONE LINE SUMMARY: looks fine.\n"
+            "CORRECTIONS: none\n"
+            "MISSED CONSIDERATIONS: none\n"
+            "OVERALL: ok.\n"
+        )
+        v = parse_audit_verdict(text)
+        assert v["verdict"] == "PASS"
+        assert "looks fine" in v["summary"]
+
+    def test_case_insensitive_headers(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        text = (
+            "verdict: pass\n"
+            "one-line summary: yep\n"
+            "corrections: none\n"
+            "missed considerations: none\n"
+            "overall: ok\n"
+        )
+        v = parse_audit_verdict(text)
+        assert v["verdict"] == "PASS"
+        assert v["summary"] == "yep"
+
+    def test_empty_text_safe(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        v = parse_audit_verdict("")
+        assert v["verdict"] == "UNKNOWN"
+        assert v["raw"] == ""
+
+    def test_none_text_safe(self) -> None:
+        from harness.audit_prompt import parse_audit_verdict
+        v = parse_audit_verdict(None)  # type: ignore[arg-type]
+        assert v["verdict"] == "UNKNOWN"
+
+
+class TestRunAudit:
+    """Producer → auditor flow tests."""
+
+    def test_producer_failure_skips_auditor(self) -> None:
+        """If the producer fails, the audit step is skipped."""
+        from harness.ask import run_audit
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(success=False),
+        ) as mock_dispatch:
+            outcome = run_audit(
+                "q", producer_engine="mimo-via-claude",
+            )
+        # Dispatch fired exactly once (just the producer)
+        assert mock_dispatch.call_count == 1
+        assert outcome.producer.ok is False
+        assert outcome.auditor is None
+        assert outcome.verdict is None
+        assert outcome.auditor_engine == ""
+
+    def test_auditor_uses_exclude_producer(self) -> None:
+        """recommend('audit', exclude={producer_engine}) is called so
+        the auditor is always a different engine label (D-i: engine-
+        label dedup)."""
+        from harness.ask import run_audit
+        producer_resp = _mock_pool_result(text="producer answer")
+        auditor_resp = _mock_pool_result(
+            text=(
+                "VERDICT: PASS\n"
+                "ONE-LINE SUMMARY: ok\n"
+                "CORRECTIONS: none\n"
+                "MISSED CONSIDERATIONS: none\n"
+                "OVERALL: fine\n"
+            )
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("deepseek-via-claude"),
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            outcome = run_audit(
+                "q", producer_engine="mimo-via-claude",
+            )
+        # Recommender called with audit class + exclude={producer}
+        mock_rec.assert_called_once()
+        call_args = mock_rec.call_args
+        # 1st positional arg = "audit"
+        assert call_args.args[0] == "audit"
+        # exclude kwarg contains producer
+        excl = call_args.kwargs.get("exclude") or set()
+        assert "mimo-via-claude" in excl
+        # 2 dispatches: producer + auditor
+        assert mock_dispatch.call_count == 2
+        # Auditor got the audit prompt (contains VERDICT label)
+        auditor_call = mock_dispatch.call_args_list[1]
+        auditor_engine = auditor_call.args[0]
+        auditor_prompt = auditor_call.args[1]
+        assert auditor_engine == "deepseek-via-claude"
+        assert "VERDICT" in auditor_prompt
+        assert "producer answer" in auditor_prompt
+        # Outcome packs the verdict
+        assert outcome.auditor is not None
+        assert outcome.verdict is not None
+        assert outcome.verdict["verdict"] == "PASS"
+
+    def test_audit_engine_override_skips_recommender(self) -> None:
+        from harness.ask import run_audit
+        producer_resp = _mock_pool_result(text="answer")
+        auditor_resp = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            outcome = run_audit(
+                "q", producer_engine="mimo-via-claude",
+                audit_engine_override="kimi-via-claude",
+            )
+        # Recommender NOT consulted
+        mock_rec.assert_not_called()
+        # Auditor dispatched against the overridden engine
+        auditor_engine = mock_dispatch.call_args_list[1].args[0]
+        assert auditor_engine == "kimi-via-claude"
+        assert outcome.auditor_engine == "kimi-via-claude"
+
+    def test_auditor_dispatch_failure_yields_unknown_verdict(self) -> None:
+        from harness.ask import run_audit
+        producer_resp = _mock_pool_result(text="answer")
+        auditor_resp = _mock_pool_result(success=False)
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("deepseek-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ),
+        ):
+            outcome = run_audit("q", producer_engine="mimo-via-claude")
+        # Auditor dispatch was attempted but failed; verdict surfaces UNKNOWN
+        assert outcome.producer.ok is True
+        assert outcome.auditor is not None
+        assert outcome.auditor.ok is False
+        assert outcome.verdict is not None
+        assert outcome.verdict["verdict"] == "UNKNOWN"
+
+
+class TestAuditCli:
+    """End-to-end --audit flag through the CLI."""
+
+    def test_audit_flag_runs_producer_then_auditor(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        producer_resp = _mock_pool_result(text="The answer is yes.")
+        auditor_resp = _mock_pool_result(
+            text=(
+                "VERDICT: PASS\n"
+                "ONE-LINE SUMMARY: correct.\n"
+                "CORRECTIONS: none\n"
+                "MISSED CONSIDERATIONS: none\n"
+                "OVERALL: ok.\n"
+            )
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                side_effect=[
+                    # Routed default pick (producer)
+                    _mock_recommendation("mimo-via-claude"),
+                    # Audit pick (auditor)
+                    _mock_recommendation("deepseek-via-claude"),
+                ],
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test question",
+                "--audit",
+                "--output", str(tmp_path / "out"),
+            ])
+        assert result.exit_code == 0
+        assert mock_dispatch.call_count == 2
+        # Banner mentions audit + producer
+        assert "audit" in result.output.lower()
+        assert "VERDICT:" in result.output or "PASS" in result.output
+        # Output dir contains expected files
+        out = tmp_path / "out"
+        assert (out / "question.md").exists()
+        assert (out / "producer-mimo-via-claude.md").exists()
+        assert (out / "audit-deepseek-via-claude.md").exists()
+        assert (out / "packet.md").exists()
+        # Summary carries audit metadata
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["mode"] == "audit"
+        assert summary["producer_engine"] == "mimo-via-claude"
+        assert summary["auditor_engine"] == "deepseek-via-claude"
+        assert summary["verdict"]["verdict"] == "PASS"
+
+    def test_audit_engine_flag_implies_audit(
+        self, tmp_path: Path,
+    ) -> None:
+        """--audit-engine X without --audit should still trigger audit
+        mode (UX convenience)."""
+        runner = CliRunner()
+        producer_resp = _mock_pool_result(text="answer")
+        auditor_resp = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test",
+                "--audit-engine", "kimi-via-claude",
+                "--no-save",
+            ])
+        assert result.exit_code == 0
+        # Two dispatches (producer + auditor), auditor=kimi via override
+        assert mock_dispatch.call_count == 2
+        assert mock_dispatch.call_args_list[1].args[0] == "kimi-via-claude"
+
+    def test_audit_plus_panel_rejected(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "ask", "test", "--audit", "--panel", "--no-save",
+        ])
+        assert result.exit_code == 2
+        assert "audit" in result.output.lower()
+        assert "panel" in result.output.lower()
+
+    def test_audit_plus_multi_engine_rejected(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "ask", "test", "--audit",
+            "--engines", "mimo-via-claude,kimi-via-claude",
+            "--no-save",
+        ])
+        assert result.exit_code == 2
+        assert "audit" in result.output.lower()
+        assert "producer" in result.output.lower()
+
+    def test_audit_with_single_engine_pin_ok(self, tmp_path: Path) -> None:
+        """--audit + --engines <single> is fine — the pinned engine
+        becomes the producer."""
+        runner = CliRunner()
+        producer_resp = _mock_pool_result(text="answer")
+        auditor_resp = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("deepseek-via-claude"),
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--audit",
+                "--engines", "kimi-via-claude",
+                "--no-save",
+            ])
+        assert result.exit_code == 0
+        # Producer = pinned kimi; recommender consulted only for the
+        # auditor pick (NOT for the routed default)
+        mock_rec.assert_called_once()
+        assert mock_rec.call_args.args[0] == "audit"
+        assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
+        assert mock_dispatch.call_args_list[1].args[0] == "deepseek-via-claude"
+
+    def test_audit_producer_fail_returns_failed_exit(self) -> None:
+        """When the producer fails, --audit exits 1 (failed result) and
+        no auditor is run."""
+        runner = CliRunner()
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(success=False),
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--audit", "--no-save",
+            ])
+        assert result.exit_code == 1
+        # Only the producer was dispatched
+        assert mock_dispatch.call_count == 1

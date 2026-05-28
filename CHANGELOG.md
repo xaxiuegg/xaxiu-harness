@@ -6,11 +6,16 @@
 
 Bare `harness ask "..."` is now a single-engine call routed through
 `harness engines recommend default` (→ mimo-via-claude, ~$0.01-0.05,
-~30s).  Three modes:
+~30s).  FOUR modes:
 
 - **routed (default)** — 1 engine via recommender.  Daily-driver.
 - **`--task <class>`** — routed default with a different task class
   (latency / verbose / cost / high-volume / multimodal / audit).
+- **`--audit`** — producer → auditor flow (2 engines, sequential).
+  Producer answers; auditor (picked via `recommend('audit',
+  exclude={producer})`) critiques the answer and returns a structured
+  VERDICT: PASS / PARTIAL / FAIL.  ~$0.05 / ~60s.  Designed for
+  catching hallucinations and stress-testing factual claims.
 - **`--panel`** — preserves the pre-v0.5.x 3-engine parallel fanout
   (~$0.20-0.30, ~60-120s).  Opt-in for high-stakes design crossroads.
 - **`--engines X,Y,Z`** — explicit pin, unchanged.  HANDOFF.md step 7
@@ -20,8 +25,18 @@ Bare `harness ask "..."` is now a single-engine call routed through
 `"audit"`).  Routed mode writes question.md + `<engine>.md` +
 summary.json (no packet.md — the lone engine file IS the synthesis-
 ready artifact).  Panel + audit modes write packet.md as before.
+Audit mode also writes `producer-<engine>.md` + `audit-<engine>.md`
+(role-prefixed filenames) and surfaces the parsed verdict in
+`summary.json` under `verdict.{verdict, summary, corrections,
+missed, overall, raw}`.
 
-W14-ASK-ROUTED-DEFAULT.
+New helpers: `harness.audit_prompt.build_audit_prompt()` (the
+inspectable producer-answer-plus-rubric template) and
+`parse_audit_verdict()` (forgiving regex parser that surfaces
+malformed verdicts as `"UNKNOWN"` rather than silently treating
+them as PASS).
+
+W14-ASK-ROUTED-DEFAULT + W14-ASK-AUDIT.
 
 ## v0.5 — 2026-05-21 (autonomous session arc)
 
