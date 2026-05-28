@@ -39,7 +39,7 @@ def _build_register_script(cadence_minutes: int) -> str:
     working_dir = str(_REPO_ROOT)
     return f"""
 $TaskName = '{TASK_NAME}'
-$Action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command ""{action_cmd}""' -WorkingDirectory '{working_dir}'
+$Action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ""{action_cmd}""' -WorkingDirectory '{working_dir}'
 $Trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes {cadence_minutes}) -RepetitionDuration (New-TimeSpan -Days 3650)
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited
