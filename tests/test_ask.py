@@ -998,6 +998,129 @@ class TestAuditCli:
         assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
         assert mock_dispatch.call_args_list[1].args[0] == "deepseek-via-claude"
 
+class TestAskResearch:
+    """W14-ASK-RESEARCH 2026-05-28 (Phase 4.2): --research <file>
+    prepends pre-fetched context to the question for synthesis."""
+
+    def test_research_flag_prepends_context(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        research = tmp_path / "findings.md"
+        research.write_text(
+            "# Findings\n\nSource: example.com\n- fact 1\n- fact 2\n",
+            encoding="utf-8",
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="synthesis"),
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "is X true?",
+                "--research", str(research),
+                "--no-save",
+            ])
+        assert result.exit_code == 0
+        # The dispatch prompt should contain BOTH the question AND
+        # the research context, in the documented framing
+        called_prompt = mock_dispatch.call_args_list[0].args[1]
+        assert "RESEARCH CONTEXT" in called_prompt
+        assert "fact 1" in called_prompt
+        assert "QUESTION" in called_prompt
+        assert "is X true" in called_prompt
+
+    def test_research_saves_findings_to_output_dir(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        research = tmp_path / "findings.md"
+        research.write_text("# Notes\n\nFinding A.\n", encoding="utf-8")
+        out = tmp_path / "out"
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="synthesis"),
+            ),
+        ):
+            result = runner.invoke(cli, [
+                "ask", "what next?",
+                "--research", str(research),
+                "--output", str(out),
+            ])
+        assert result.exit_code == 0
+        # A research.md copy is persisted alongside the engine response
+        assert (out / "research.md").exists()
+        copied = (out / "research.md").read_text(encoding="utf-8")
+        assert "Finding A" in copied
+        # summary.json records the findings metadata
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["research_findings_chars"] > 0
+        assert "findings.md" in summary["research_findings_source"]
+
+    def test_research_with_audit_layers_correctly(
+        self, tmp_path: Path,
+    ) -> None:
+        """--research + --audit: producer uses research context;
+        auditor sees the synthesized answer (NOT the raw research)."""
+        runner = CliRunner()
+        research = tmp_path / "research.md"
+        research.write_text(
+            "RFC 9999 says X is true.\n", encoding="utf-8",
+        )
+        producer_resp = _mock_pool_result(text="X is true per RFC 9999.")
+        auditor_resp = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                side_effect=[
+                    _mock_recommendation("mimo-via-claude"),
+                    _mock_recommendation("deepseek-via-claude"),
+                ],
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "is X true?",
+                "--research", str(research),
+                "--audit",
+                "--output", str(tmp_path / "audit-research"),
+            ])
+        assert result.exit_code == 0
+        # Producer prompt contains research context
+        producer_prompt = mock_dispatch.call_args_list[0].args[1]
+        assert "RFC 9999" in producer_prompt
+        # Auditor prompt contains the SYNTHESIS, not the raw research
+        # (audit_prompt template wraps the producer's answer)
+        auditor_prompt = mock_dispatch.call_args_list[1].args[1]
+        assert "X is true per RFC 9999" in auditor_prompt
+        assert "VERDICT" in auditor_prompt  # the audit-prompt rubric
+
+    def test_research_missing_file_errors(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "ask", "q",
+            "--research", "/nonexistent/file.md",
+            "--no-save",
+        ])
+        # Click's path-exists check fires before our handler — exit 2
+        assert result.exit_code == 2
+
+
 class TestAuditQuorum:
     """W14-AUDITORS-QUORUM 2026-05-28: multi-auditor (--auditors N)
     quorum support."""

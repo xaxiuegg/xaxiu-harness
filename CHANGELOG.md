@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.6.2 — 2026-05-28 (Phase 4.2: --research for cost-shifted synthesis)
+
+`harness ask "..." --research <path>` prepends a markdown file of
+pre-fetched research findings to the question and routes synthesis
+to a cheap Pattern B engine.
+
+**Design honest about scope**: the harness doesn't do WebSearch
+itself (no search API key budgeted in the strategic plan).  The
+flag is for the WORKFLOW where the calling agent (often Claude Code
+running Opus, which DOES have WebSearch built-in) gathers research
+in its own context, dumps to a markdown file, then asks the harness
+to synthesize — shifting the synthesis cost from Opus (~$0.15/min)
+to MiMo-via-claude (~$0.02/call).  Future work could add a real
+search API integration; the current MVP gates that on the operator
+deciding to budget a Brave/Tavily/Exa key.
+
+```bash
+# Agent's own context (Claude Code, Opus): runs WebSearch + saves findings
+# Then:
+harness ask "What's the current state of free-threaded Python?" \
+  --research /tmp/python-gil-findings.md
+```
+
+The synthesis prompt is built with explicit framing:
+
+```
+You have been given pre-fetched research context below.  Use it
+(and your prior knowledge) to answer the QUESTION at the end.  Cite
+specific lines or sources from the research when they bear directly
+on your answer.  Do not invent sources.
+
+RESEARCH CONTEXT:
+<file content>
+
+QUESTION:
+<user's question>
+```
+
+Composes with `--audit` — the producer sees the research; the
+auditor sees the synthesized answer (which references the research).
+
+Output dir gains `research.md` (copy of the input) for traceability.
+`summary.json` carries `research_findings_chars` + `research_findings_source`.
+
+Template (claude-md) updated with a paragraph documenting the
+cost-shift pattern.
+
+Tests: +4 in TestAskResearch (prepend / dir-copy / audit-composition
+/ missing-file-error).
+
+Full non-slow suite: 3055 passed, 8 skipped (was 3051, +4).
+
+W14-ASK-RESEARCH.
+
 ## v0.6.1 — 2026-05-28 (Phase 4.1 + 4.3: audit quorum + auto-audit heuristic)
 
 ### `--audit --auditors N` quorum (Phase 4.1)

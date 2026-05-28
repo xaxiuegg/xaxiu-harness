@@ -516,6 +516,17 @@ def _agent_instructions_snippet(
             f"see #3 below)\n"
             f"- Sub-routine LLM calls from external tools (use the "
             f"proxy, see #2 below)\n\n"
+            f"**`--research <path>` shifts synthesis to a cheaper engine:** "
+            f"when answering a question that needs CURRENT info, do the "
+            f"WebSearch in your own context (Claude Code has WebSearch + "
+            f"WebFetch built-in), dump the findings to a markdown file, "
+            f"then run `harness ask \"<question>\" --research <findings.md>`.  "
+            f"The harness prepends the research as context and routes the "
+            f"synthesis to a Pattern B engine (cheap, ~$0.02) instead of "
+            f"making YOU (often Opus, expensive) do the synthesis.  "
+            f"Saves a copy of the research to the output dir's "
+            f"`research.md` for traceability.  Composes with `--audit` "
+            f"(producer sees research; auditor sees the synthesis).\n\n"
             f"**Auto-audit heuristic for your own claims:** when you "
             f"(the agent) are about to commit to a specific, non-obvious, "
             f"falsifiable factual claim — model versions, API behavior, "
@@ -1252,6 +1263,17 @@ _VALID_TASK_CLASSES = (
     "available after excluding the producer — currently 2 max with the "
     "Pattern B engine pool.  ~$0.10 for 2 auditors."
 ))
+@click.option("--research", "research_path", type=click.Path(
+    exists=True, dir_okay=False, path_type=Path,
+), default=None, help=(
+    "Path to a markdown file of pre-fetched research context (e.g. "
+    "WebSearch findings the calling agent gathered in its own session).  "
+    "The content gets prepended to the question as RESEARCH CONTEXT and "
+    "the routed engine synthesizes an answer using it.  Cheaper than "
+    "asking Opus to both search AND synthesize — shift the synthesis "
+    "to a routed Pattern B engine.  Saves a copy of the research to "
+    "the output dir's research.md."
+))
 @click.option("--rerun", "rerun_path", type=click.Path(
     exists=True, file_okay=False, path_type=Path,
 ), default=None, help=(
@@ -1292,6 +1314,7 @@ def ask_cmd(
     audit_mode: bool,
     audit_engine_override: str,
     num_auditors: int,
+    research_path: Path | None,
     rerun_path: Path | None,
     escalate_mode: str | None,
     output_dir: Path | None,
@@ -1485,6 +1508,40 @@ def ask_cmd(
         )
         sys.exit(2)
 
+    # W14-ASK-RESEARCH 2026-05-28 (Phase 4.2): prepend pre-fetched
+    # research context to the question.  Useful when the calling agent
+    # (typically Opus) did WebSearch itself and wants to shift the
+    # synthesis to a cheaper routed engine.
+    research_content = ""
+    if research_path is not None:
+        try:
+            research_content = research_path.read_text(
+                encoding="utf-8",
+            ).strip()
+        except OSError as e:
+            click.echo(
+                click.style(
+                    f"ERROR: could not read --research file {research_path}"
+                    f": {e}",
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
+        if research_content:
+            # Wrap with explicit framing so the engine knows it's
+            # context-not-content
+            question_text = (
+                "You have been given pre-fetched research context "
+                "below.  Use it (and your prior knowledge) to answer "
+                "the QUESTION at the end.  Cite specific lines or "
+                "sources from the research when they bear directly "
+                "on your answer.  Do not invent sources.\n\n"
+                "RESEARCH CONTEXT:\n"
+                f"{research_content}\n\n"
+                "QUESTION:\n"
+                f"{question_text}"
+            )
+
     # Resolve engines + mode.  Precedence is --engines > --audit > --panel
     # > --task (the routed default).
     #
@@ -1600,6 +1657,13 @@ def ask_cmd(
                 "panel" if panel_mode else
                 mode
             )
+
+    # W14-ASK-RESEARCH 2026-05-28: surface research metadata
+    if research_content:
+        extra_summary["research_findings_chars"] = len(research_content)
+        extra_summary["research_findings_source"] = (
+            str(research_path) if research_path else "inline"
+        )
     if mode == "audit":
         outcome = run_audit(
             question_text,
@@ -1705,6 +1769,13 @@ def ask_cmd(
             extra_summary=extra_summary if extra_summary else None,
             roles=roles if roles else None,
         )
+        # Persist research context alongside outputs so the ask is
+        # self-describing (the synthesis quality depends on the input
+        # the engine saw).
+        if research_content:
+            (output_dir / "research.md").write_text(
+                research_content, encoding="utf-8",
+            )
         if mode == "routed":
             click.echo(
                 f"  saved {len(results)} response file + summary.json"
