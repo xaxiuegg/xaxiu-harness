@@ -225,6 +225,71 @@ def _step_wrappers(non_interactive: bool) -> None:
             click.echo("  " + hint.replace("\n", "\n  "))
 
 
+def _step_agent_instructions(non_interactive: bool) -> None:
+    """Install the user-level CLAUDE.md snippet so every future Claude
+    Code session on this machine knows the harness is available.
+
+    Idempotent — skips when already installed at the current version;
+    offers to refresh when stale.  W14-SETUP-WIZARD-SNIPPET 2026-05-28
+    (Phase 3.1 of agentic-operator roadmap).
+    """
+    try:
+        from harness.introspect import _check_agent_instructions
+        from harness import __version__ as live_v
+    except Exception as e:
+        _warn(f"Could not check snippet state: {e}")
+        return
+
+    ai = _check_agent_instructions()
+    if ai["installed"] and ai["current"]:
+        _ok(
+            f"agent-instructions snippet already installed at "
+            f"current version (v{ai.get('installed_version')})"
+        )
+        return
+
+    if ai["installed"]:
+        installed_v = ai.get("installed_version") or "<unversioned>"
+        _warn(
+            f"agent-instructions snippet is STALE "
+            f"(installed v{installed_v}, current v{live_v})"
+        )
+    else:
+        _warn(
+            "agent-instructions snippet NOT installed."
+        )
+    _info(
+        f"Target: {ai['target_path']}"
+    )
+    _info(
+        "Every Claude Code session on this machine will read this "
+        "snippet at startup, so it knows the harness is available + "
+        "how to use it."
+    )
+
+    if non_interactive:
+        _info("(non-interactive mode: skipping install)")
+        return
+
+    if click.confirm(
+        "  → Install / refresh the snippet now?", default=True,
+    ):
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "harness",
+             "install-agent-instructions", "--force"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                _info(line.strip())
+        else:
+            _warn(
+                f"install-agent-instructions failed: "
+                f"{result.stderr.strip()[:200]}"
+            )
+
+
 def _step_smoke_dispatch(
     diag_by_name: dict, non_interactive: bool,
 ) -> bool:
@@ -298,7 +363,7 @@ def run_wizard(non_interactive: bool = False) -> int:
         "  Press Ctrl+C at any time to abort + return to your shell."
     )
 
-    total_steps = 5
+    total_steps = 6
     issues: list[str] = []
 
     _step(1, total_steps, "Run preflight diagnostics (harness doctor)")
@@ -319,6 +384,10 @@ def run_wizard(non_interactive: bool = False) -> int:
     smoke_ok = _step_smoke_dispatch(diag_by_name, non_interactive)
     if not smoke_ok and not non_interactive:
         issues.append("smoke")
+
+    _step(6, total_steps,
+          "Install agent-instructions snippet (~/.claude/CLAUDE.md)")
+    _step_agent_instructions(non_interactive)
 
     _banner("Setup wizard complete", color="green")
     click.echo()

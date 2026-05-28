@@ -11,7 +11,12 @@ share the same underlying dispatch/retrieve/budget primitives.
 For full API contract see :mod:`harness._sdk`.
 """
 
-__version__ = "0.1.0"
+# Version is the load-bearing string for `harness introspect`'s
+# snippet-freshness detection: the installed snippet at
+# ~/.claude/CLAUDE.md carries this version in its START marker, and
+# introspect compares against the live value.  Bump when shipping
+# template-affecting changes so operators see a STALE warning.
+__version__ = "0.6.0"
 
 # W11-PYTHON-SDK-API-STUBS 2026-05-25: re-export the stable agent API.
 # The function bodies live in harness._sdk and currently raise

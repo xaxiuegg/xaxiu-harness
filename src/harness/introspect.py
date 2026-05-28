@@ -125,7 +125,11 @@ def _summarize_engines() -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-_AI_START_MARKER = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->"
+# Marker scheme: post-v0.5.7 the START marker carries the version
+# that wrote the snippet (e.g. `<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START v0.5.7 -->`).
+# Pre-v0.5.7 had no version (`<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->`).
+# Both forms are detected via the prefix below.
+_AI_START_MARKER_PREFIX = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START"
 _AI_END_MARKER = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-END -->"
 
 
@@ -144,6 +148,8 @@ def _check_agent_instructions() -> Dict[str, Any]:
         "current": False,
         "installed_hash": None,
         "current_hash": None,
+        "installed_version": None,
+        "current_version": _harness_version(),
         "hint": "",
     }
 
@@ -174,7 +180,7 @@ def _check_agent_instructions() -> Dict[str, Any]:
         result["hint"] = "could not read installed CLAUDE.md"
         return result
 
-    if _AI_START_MARKER not in content or _AI_END_MARKER not in content:
+    if _AI_START_MARKER_PREFIX not in content or _AI_END_MARKER not in content:
         result["hint"] = (
             "snippet markers not found in CLAUDE.md.  Run "
             "`python -m harness install-agent-instructions`."
@@ -182,10 +188,17 @@ def _check_agent_instructions() -> Dict[str, Any]:
         return result
 
     result["installed"] = True
-    # Extract installed body between markers (incl. the auto-comment line)
-    start = content.index(_AI_START_MARKER) + len(_AI_START_MARKER)
+    # Locate the START line + extract the version-stamp (if any).
+    # Pre-v0.5.7 installs had no version → returns empty string.
+    prefix_idx = content.index(_AI_START_MARKER_PREFIX)
+    start_line_end = content.index("-->", prefix_idx) + len("-->")
+    start_marker_text = content[prefix_idx:start_line_end]
+    import re
+    vmatch = re.search(r"v([\d.]+)", start_marker_text)
+    if vmatch:
+        result["installed_version"] = vmatch.group(1)
     end = content.index(_AI_END_MARKER)
-    installed_block = content[start:end]
+    installed_block = content[start_line_end:end]
     # Strip the auto-installed comment line so we hash just the snippet
     lines = installed_block.lstrip("\n").splitlines()
     if lines and lines[0].startswith("<!--"):
@@ -201,10 +214,13 @@ def _check_agent_instructions() -> Dict[str, Any]:
         )
 
     if not result["current"]:
+        iv = result.get("installed_version") or "<unversioned>"
+        cv = result.get("current_version") or "?"
         result["hint"] = (
-            "installed snippet predates the current repo.  Run "
-            "`python -m harness install-agent-instructions --force` "
-            "to refresh."
+            f"installed snippet predates the current repo "
+            f"(installed v{iv} → current v{cv}).  Run "
+            f"`python -m harness install-agent-instructions --force` "
+            f"to refresh."
         )
 
     return result
@@ -466,12 +482,16 @@ def render_text(snapshot: Dict[str, Any]) -> str:
     if not ai["installed"]:
         lines.append(f"  [X] NOT installed at {ai['target_path']}")
     elif ai["current"]:
-        lines.append(f"  [OK] installed at {ai['target_path']} (current)")
+        v = ai.get("current_version") or "?"
+        lines.append(
+            f"  [OK] installed at {ai['target_path']} (v{v}, current)"
+        )
     else:
+        iv = ai.get("installed_version") or "<unversioned>"
+        cv = ai.get("current_version") or "?"
         lines.append(
             f"  [!] installed at {ai['target_path']} but STALE "
-            f"(installed_hash={ai.get('installed_hash')}, "
-            f"current_hash={ai.get('current_hash')})"
+            f"(v{iv} → v{cv})"
         )
     if ai.get("hint"):
         lines.append(f"       hint: {ai['hint']}")

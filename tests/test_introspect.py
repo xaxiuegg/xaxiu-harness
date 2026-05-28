@@ -127,13 +127,14 @@ class TestCheckAgentInstructions:
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         # Install the CURRENT snippet (matches the template)
         from harness.cli import _agent_instructions_snippet
+        from harness import __version__ as _v
         fresh = _agent_instructions_snippet(
             "claude-md", _repo_root(), tmp_path,
         )
         claude_md = tmp_path / ".claude" / "CLAUDE.md"
         claude_md.parent.mkdir(parents=True)
         claude_md.write_text(
-            "\n<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->\n"
+            f"\n<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START v{_v} -->\n"
             "<!-- Auto-installed by `harness install-agent-instructions`. -->\n\n"
             + fresh.strip() + "\n"
             "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-END -->\n",
@@ -144,17 +145,46 @@ class TestCheckAgentInstructions:
         assert result["current"] is True
         # Both hashes should match
         assert result["installed_hash"] == result["current_hash"]
+        # Versioned install: introspect surfaces the version
+        assert result["installed_version"] == _v
+        assert result["current_version"] == _v
+
+    def test_installed_unversioned_still_detected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pre-v0.5.7 installs had no version stamp in the START
+        marker.  introspect must still detect + treat them as stale
+        (forcing the operator to --force refresh)."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        claude_md = tmp_path / ".claude" / "CLAUDE.md"
+        claude_md.parent.mkdir(parents=True)
+        claude_md.write_text(
+            "\n<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->\n"
+            "<!-- Auto-installed. -->\n\n"
+            "## xaxiu-harness is available\n\n"
+            "(stale pre-v0.5.7 content)\n"
+            "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-END -->\n",
+            encoding="utf-8",
+        )
+        result = _check_agent_instructions()
+        # Detected as installed (prefix matched the un-versioned marker)
+        assert result["installed"] is True
+        # No version recoverable from the marker
+        assert result["installed_version"] is None
+        # Body doesn't match current → STALE
+        assert result["current"] is False
 
     def test_installed_but_stale(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
-        # Install a STALE snippet (different content)
+        # Install a STALE snippet — older version with different content
         claude_md = tmp_path / ".claude" / "CLAUDE.md"
         claude_md.parent.mkdir(parents=True)
         claude_md.write_text(
-            "\n<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->\n"
+            "\n<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START v0.5.4 -->\n"
             "<!-- Auto-installed by `harness install-agent-instructions`. -->\n\n"
             "## xaxiu-harness is available\n\n"
             "old template — fires 3 engines (Kimi / MiMo / DeepSeek) "
@@ -167,6 +197,10 @@ class TestCheckAgentInstructions:
         assert result["current"] is False
         # Hint must direct user to --force refresh
         assert "--force" in result["hint"] or "force" in result["hint"]
+        # Stale version surfaces in hint
+        assert result["installed_version"] == "0.5.4"
+        # Both versions appear in the hint message
+        assert "0.5.4" in result["hint"]
 
 
 class TestSummarizeWrappers:

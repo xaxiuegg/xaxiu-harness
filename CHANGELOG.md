@@ -1,5 +1,64 @@
 # Changelog
 
+## v0.6.0 — 2026-05-28 (Phase 3 complete: human-operator UX)
+
+### `__version__` bumped to 0.6.0 (was stale at 0.1.0)
+
+The package version is now the load-bearing string for snippet
+freshness detection — every install of the agent-instructions snippet
+embeds this version in its START marker, and `harness introspect`
+diffs installed-vs-live.
+
+### Phase 3.1: `harness setup` wizard gains step 6
+
+The pre-existing 5-step wizard already covered doctor + claude
+binary + keys + wrappers + smoke dispatch.  Added a sixth step that
+installs/refreshes the agent-instructions snippet at
+`~/.claude/CLAUDE.md` — closes the "operator forgets to install the
+snippet" gap.  Wizard reports "already installed at current version"
+when idempotent or "STALE (vN.N.N → vM.M.M)" when refresh is needed.
+
+### Phase 3.2: `harness self-update`
+
+New verb that wraps the three things you'd otherwise run by hand:
+
+```bash
+harness self-update                  # do everything
+harness self-update --dry-run        # show what WOULD happen
+harness self-update --no-pull        # skip git pull (local-only refresh)
+harness self-update --no-install     # skip pip install
+harness self-update --no-snippet     # skip snippet refresh
+```
+
+1. `git pull --ff-only` (refuses on dirty worktree)
+2. `pip install -e . --quiet`
+3. `harness install-agent-instructions --force`
+
+Reports version transition for the snippet refresh.
+
+### Phase 3.3: snippet auto-version-stamp + staleness detection
+
+The agent-instructions snippet's START marker now embeds the version
+that wrote it: `<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START v0.6.0 -->`.
+Detection is prefix-tolerant — pre-v0.5.7 unversioned installs are
+still detected + correctly flagged STALE.
+
+`harness install-agent-instructions --force` now reports the version
+transition (`(snippet version: v0.5.4 → v0.6.0)`).
+
+`harness introspect` surfaces the installed + current versions in
+its agent-instructions section.  Stale installs show `[!] STALE
+(vX.Y.Z → vA.B.C)` with the hint `Run install-agent-instructions
+--force to refresh`.
+
+### Tests
+
+- +13 in `tests/test_introspect.py`, `tests/test_self_update.py`,
+  `tests/test_setup_wizard.py`.  Full suite: 3040 passed, 8 skipped
+  (was 3027, +13).
+
+W14-VERSION-STAMP + W14-SELF-UPDATE + W14-SETUP-WIZARD-SNIPPET.
+
 ## v0.5.7 — 2026-05-28 (snippet iteration via fresh-session sub-agent testing)
 
 ### Empirical refinement of `~/.claude/CLAUDE.md` snippet

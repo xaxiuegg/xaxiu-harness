@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from harness.cli import cli
 from harness.doctor import Diagnosis
 from harness.setup_wizard import (
+    _step_agent_instructions,
     _step_claude_binary,
     _step_doctor,
     _step_keys,
@@ -202,6 +203,101 @@ class TestRunWizard:
             with runner.isolation():
                 rc = run_wizard(non_interactive=True)
         assert rc == 1
+
+    def test_wizard_runs_six_steps(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Phase 3.1 (2026-05-28) added Step 6 — install-agent-
+        instructions snippet — to the wizard.  Lock the count."""
+        with patch(
+            "harness.doctor.run_all",
+            return_value=[
+                Diagnosis("python", "ok", "fine"),
+                Diagnosis("claude_binary", "ok", "fine"),
+                Diagnosis("secrets", "ok", "have keys"),
+            ],
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["setup", "--non-interactive"])
+        assert result.exit_code in (0, 1)
+        # Each step prints "--- Step N/6: ..." — verify all 6 fire
+        for n in range(1, 7):
+            assert f"Step {n}/6:" in result.output, (
+                f"Step {n}/6 missing from wizard output"
+            )
+        # Step 6 specifically is the agent-instructions installer
+        assert (
+            "agent-instructions" in result.output.lower()
+            or "CLAUDE.md" in result.output
+        )
+
+
+class TestStepAgentInstructions:
+    """Direct unit tests for the new step-6 helper."""
+
+    def _capture(self, fn, *args, **kwargs) -> str:
+        """Run ``fn`` and capture click.echo output as a single string.
+
+        runner.isolation() returns byte streams in some click versions;
+        easier to just intercept click.echo directly.
+        """
+        captured: list[str] = []
+
+        def _fake_echo(msg=None, *a, **kw):
+            captured.append("" if msg is None else str(msg))
+
+        with patch("click.echo", side_effect=_fake_echo):
+            fn(*args, **kwargs)
+        return "\n".join(captured)
+
+    def test_skips_when_current(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When the snippet is already current, step prints OK +
+        returns without invoking install-agent-instructions."""
+        mock_ai = {
+            "installed": True,
+            "current": True,
+            "installed_version": "0.5.7",
+            "current_version": "0.5.7",
+            "target_path": "/fake/CLAUDE.md",
+            "hint": "",
+        }
+        with patch(
+            "harness.introspect._check_agent_instructions",
+            return_value=mock_ai,
+        ):
+            stdout = self._capture(
+                _step_agent_instructions, non_interactive=True,
+            )
+        assert "already installed" in stdout
+        assert "v0.5.7" in stdout
+
+    def test_skips_install_in_non_interactive_when_stale(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When stale + non-interactive, step warns but doesn't auto-
+        install (operator must explicitly --force)."""
+        from harness import __version__ as _live_v
+        mock_ai = {
+            "installed": True,
+            "current": False,
+            "installed_version": "0.5.4",
+            "current_version": _live_v,
+            "target_path": "/fake/CLAUDE.md",
+            "hint": "predates the current repo",
+        }
+        with patch(
+            "harness.introspect._check_agent_instructions",
+            return_value=mock_ai,
+        ):
+            stdout = self._capture(
+                _step_agent_instructions, non_interactive=True,
+            )
+        assert "stale" in stdout.lower()
+        assert "0.5.4" in stdout
+        assert _live_v in stdout
+        assert "non-interactive" in stdout.lower()
 
 
 # ---------------------------------------------------------------------------

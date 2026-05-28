@@ -739,6 +739,222 @@ def agent_instructions_cmd(fmt: str) -> None:
     sys.exit(0)
 
 
+@cli.command(name="self-update")
+@click.option("--no-pull", is_flag=True, default=False, help=(
+    "Skip `git pull` (just reinstall + refresh snippet).  Useful when "
+    "you've made local changes you don't want clobbered yet."
+))
+@click.option("--no-install", is_flag=True, default=False, help=(
+    "Skip `pip install -e .` (just pull + refresh snippet)."
+))
+@click.option("--no-snippet", is_flag=True, default=False, help=(
+    "Skip the agent-instructions snippet refresh."
+))
+@click.option("--dry-run", is_flag=True, default=False, help=(
+    "Show what WOULD happen without modifying anything."
+))
+def self_update_cmd(
+    no_pull: bool, no_install: bool, no_snippet: bool, dry_run: bool,
+) -> None:
+    """W14-SELF-UPDATE 2026-05-28 (Phase 3.2 of agentic-operator roadmap):
+    one-command refresh of the entire harness install.
+
+    Wraps the three things you'd otherwise run by hand after a
+    `git pull`:
+
+      \b
+      1. `git pull --ff-only` (skip with --no-pull)
+      2. `pip install -e . --quiet` (skip with --no-install)
+      3. `harness install-agent-instructions --force` (skip with
+         --no-snippet) — refreshes the snippet at ~/.claude/CLAUDE.md
+         so fresh Claude Code sessions see the current template.
+
+    Refuses to `git pull` if your worktree has uncommitted changes
+    (use --no-pull to bypass).
+
+    Run `harness self-update --dry-run` first to see what would
+    change without touching anything.
+    """
+    import subprocess as _sp
+    from harness import __version__ as _live_version
+
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # Banner
+    click.echo()
+    click.echo(click.style(
+        "harness self-update", fg="cyan", bold=True,
+    ))
+    click.echo(f"  repo: {repo_root}")
+    click.echo(f"  live version: v{_live_version}")
+    if dry_run:
+        click.echo(click.style(
+            "  (dry-run — no changes will be made)",
+            fg="yellow",
+        ))
+    click.echo()
+
+    # ---- 1. git pull ----
+    if not no_pull:
+        click.echo(click.style("[1/3] git pull", fg="yellow", bold=True))
+        # Check if cwd is a git repo
+        is_git = _sp.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--git-dir"],
+            capture_output=True, text=True,
+        )
+        if is_git.returncode != 0:
+            click.echo(click.style(
+                f"  ✗ {repo_root} is not a git repo — skipping pull",
+                fg="red",
+            ), err=True)
+        else:
+            # Refuse to pull if working tree is dirty
+            status = _sp.run(
+                ["git", "-C", str(repo_root), "status", "--porcelain"],
+                capture_output=True, text=True,
+            )
+            if status.stdout.strip():
+                click.echo(click.style(
+                    "  ⚠ working tree has uncommitted changes — "
+                    "refusing to pull.  Use --no-pull to skip pull, "
+                    "or commit/stash first.",
+                    fg="yellow",
+                ))
+            else:
+                if dry_run:
+                    # Show what would change (fetch first, then list)
+                    _sp.run(
+                        ["git", "-C", str(repo_root), "fetch", "--quiet"],
+                        capture_output=True,
+                    )
+                    behind = _sp.run(
+                        ["git", "-C", str(repo_root), "log",
+                         "HEAD..@{u}", "--oneline"],
+                        capture_output=True, text=True,
+                    )
+                    if behind.stdout.strip():
+                        click.echo(
+                            "  Would pull these new commits:"
+                        )
+                        for line in behind.stdout.strip().splitlines():
+                            click.echo(f"    {line}")
+                    else:
+                        click.echo("  Already up to date with @{u}.")
+                else:
+                    pull = _sp.run(
+                        ["git", "-C", str(repo_root), "pull",
+                         "--ff-only", "--quiet"],
+                        capture_output=True, text=True,
+                    )
+                    if pull.returncode == 0:
+                        click.echo(click.style(
+                            "  ✓ git pull succeeded "
+                            "(or already up to date)",
+                            fg="green",
+                        ))
+                    else:
+                        click.echo(click.style(
+                            f"  ✗ git pull failed: "
+                            f"{pull.stderr.strip()[:200]}",
+                            fg="red",
+                        ), err=True)
+    else:
+        click.echo(click.style("[1/3] git pull — SKIPPED (--no-pull)",
+                               fg="white", dim=True))
+
+    # ---- 2. pip install -e . ----
+    if not no_install:
+        click.echo()
+        click.echo(click.style(
+            "[2/3] pip install -e .", fg="yellow", bold=True,
+        ))
+        if dry_run:
+            click.echo("  Would run: pip install -e . --quiet")
+        else:
+            pip = _sp.run(
+                [sys.executable, "-m", "pip", "install", "-e",
+                 str(repo_root), "--quiet"],
+                capture_output=True, text=True,
+            )
+            if pip.returncode == 0:
+                click.echo(click.style(
+                    "  ✓ pip install succeeded",
+                    fg="green",
+                ))
+            else:
+                click.echo(click.style(
+                    f"  ✗ pip install failed: "
+                    f"{pip.stderr.strip()[:300]}",
+                    fg="red",
+                ), err=True)
+    else:
+        click.echo()
+        click.echo(click.style(
+            "[2/3] pip install — SKIPPED (--no-install)",
+            fg="white", dim=True,
+        ))
+
+    # ---- 3. install-agent-instructions --force ----
+    if not no_snippet:
+        click.echo()
+        click.echo(click.style(
+            "[3/3] refresh ~/.claude/CLAUDE.md snippet",
+            fg="yellow", bold=True,
+        ))
+        if dry_run:
+            # Use introspect to determine if a refresh would change anything
+            try:
+                from harness.introspect import _check_agent_instructions
+                ai = _check_agent_instructions()
+                if ai["installed"] and ai["current"]:
+                    click.echo(
+                        f"  Already current "
+                        f"(v{ai.get('installed_version')})"
+                    )
+                elif ai["installed"]:
+                    iv = ai.get("installed_version") or "<unversioned>"
+                    click.echo(
+                        f"  Would refresh: v{iv} → v{_live_version}"
+                    )
+                else:
+                    click.echo(
+                        f"  Would INSTALL snippet at "
+                        f"{ai['target_path']}"
+                    )
+            except Exception as e:
+                click.echo(f"  (could not preview: {e})")
+        else:
+            install = _sp.run(
+                [sys.executable, "-m", "harness",
+                 "install-agent-instructions", "--force"],
+                capture_output=True, text=True, cwd=str(repo_root),
+            )
+            if install.returncode == 0:
+                # Show the install command's own output (it has the
+                # version-transition line)
+                for line in install.stdout.strip().splitlines():
+                    click.echo(f"  {line.lstrip()}")
+            else:
+                click.echo(click.style(
+                    f"  ✗ install-agent-instructions failed: "
+                    f"{install.stderr.strip()[:200]}",
+                    fg="red",
+                ), err=True)
+    else:
+        click.echo()
+        click.echo(click.style(
+            "[3/3] snippet refresh — SKIPPED (--no-snippet)",
+            fg="white", dim=True,
+        ))
+
+    click.echo()
+    click.echo(click.style(
+        "self-update done.  Run `harness introspect` to verify state.",
+        fg="cyan",
+    ))
+    sys.exit(0)
+
+
 @cli.command(name="install-agent-instructions")
 @click.option("--target", "target_path", type=click.Path(
     dir_okay=False, path_type=Path,
@@ -793,8 +1009,16 @@ def install_agent_instructions_cmd(
         target_path = Path.home() / ".claude" / "CLAUDE.md"
     target_path = Path(target_path).resolve()
 
-    # Markers for idempotent install / uninstall
-    start_marker = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START -->"
+    # Markers for idempotent install / uninstall.  W14-AUTO-VERSION-STAMP
+    # 2026-05-28: the START marker now embeds the version that wrote
+    # the snippet, so `harness introspect` can warn "STALE" without
+    # needing to hash the whole body.  Detection uses a prefix match
+    # so old (un-versioned) installs still get detected + replaced.
+    from harness import __version__ as _harness_version
+    start_marker_prefix = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START"
+    start_marker = (
+        f"<!-- W14-HARNESS-AGENT-INSTRUCTIONS-START v{_harness_version} -->"
+    )
     end_marker = "<!-- W14-HARNESS-AGENT-INSTRUCTIONS-END -->"
 
     # Build the snippet using the shared helper so this command can
@@ -819,14 +1043,25 @@ def install_agent_instructions_cmd(
     else:
         current = ""
 
-    # Locate existing block (if any) for idempotent + force + uninstall
-    has_block = start_marker in current and end_marker in current
+    # Locate existing block (prefix-tolerant for backward compat with
+    # un-versioned installs from before 2026-05-28).
+    has_block = (
+        start_marker_prefix in current and end_marker in current
+    )
     if has_block:
-        start_idx = current.index(start_marker)
+        prefix_idx = current.index(start_marker_prefix)
+        # Find the closing `-->` of the START line so we know where
+        # the (any-version) start marker ends + the body begins
+        line_end = current.index("-->", prefix_idx) + len("-->")
+        start_idx = prefix_idx
         end_idx = current.index(end_marker) + len(end_marker)
+        # Track the existing version so we can report version delta
+        existing_marker = current[prefix_idx:line_end]
         # Include the leading \n if present
         if start_idx > 0 and current[start_idx - 1] == "\n":
             start_idx -= 1
+    else:
+        existing_marker = ""
 
     # ---- Uninstall ----
     if uninstall:
@@ -888,12 +1123,33 @@ def install_agent_instructions_cmd(
     # Ensure parent dir exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(new_content, encoding="utf-8")
+    # Surface the version transition when replacing (helps operators
+    # confirm a `--force` actually refreshed the installed snippet)
+    version_hint = ""
+    if action == "replaced" and existing_marker:
+        # Try to extract prior version from the existing START marker
+        import re
+        m = re.search(r"v([\d.]+)", existing_marker)
+        prior_version = m.group(1) if m else "<unversioned>"
+        if prior_version != _harness_version:
+            version_hint = (
+                f"  (snippet version: v{prior_version} → "
+                f"v{_harness_version})"
+            )
+        else:
+            version_hint = (
+                f"  (snippet version: v{_harness_version}, unchanged)"
+            )
+    elif action == "appended to":
+        version_hint = f"  (snippet version: v{_harness_version})"
     click.echo(
         click.style(
             f"  ✓ harness section {action} {target_path}",
             fg="green",
         )
     )
+    if version_hint:
+        click.echo(click.style(version_hint, fg="white", dim=True))
     click.echo()
     click.echo(
         "  Every Claude Code session on this machine will now know "
