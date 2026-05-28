@@ -37,7 +37,12 @@ HIDDEN_VERBS = [
     "burst",
     "lock",
     "replay",
-    "proxy",
+    # NOTE: ``proxy`` was previously hidden (W11-HIDE-ADVANCED-VERBS) but
+    # was unhidden 2026-05-28 (W14-PROXY-UNHIDE) after a fresh-session
+    # sub-agent test surfaced that a hidden top-level verb causes agents
+    # to conclude "no proxy verb exists" when they verify via --help,
+    # even when the agent-instructions snippet documents the verb.  The
+    # same operational bug as W14-COORD-UNHIDE.
 ]
 
 
@@ -66,6 +71,7 @@ def test_daily_use_verbs_NOT_hidden():
         "engines-heal", "session", "budget", "observer", "loop",
         "adapter", "queue", "memory", "dashboard-serve",
         "coord",  # W14-COORD-UNHIDE 2026-05-27
+        "proxy",  # W14-PROXY-UNHIDE 2026-05-28 (sub-agent test feedback)
     ]
     for verb_name in visible_required:
         cmd = _cli.cli.commands.get(verb_name)
@@ -142,9 +148,9 @@ def test_default_help_omits_hidden_verbs():
     # verb does NOT start a line (with optional leading whitespace).
     import re
     for verb_name in HIDDEN_VERBS:
-        # Skip "proxy" + "coord" because they could collide with descriptive
-        # text mentioning them (low risk but pedantic).  Test the strict
-        # ones explicitly.
+        # Short-name verbs could collide with prose mentioning them
+        # (low risk but pedantic).  Test those strict; long-name verbs
+        # by indented-line presence.
         if verb_name in ("burst", "lock", "replay"):
             # These short names could conflict with prose; check explicitly
             pattern = rf"^\s{{2,4}}{re.escape(verb_name)}\s"

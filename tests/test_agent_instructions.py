@@ -272,6 +272,45 @@ class TestInstallAgentInstructions:
                 f"discovery primitive a fresh session should run first)"
             )
 
+    def test_claude_md_format_explicitly_warns_against_handrolled_shim(
+        self,
+    ) -> None:
+        """W14-SNIPPET-ITERATION-1 (2026-05-28): a fresh sub-agent test
+        proved the explicit "DO NOT hand-roll a shim" warning was the
+        load-bearing piece preventing the MiMo conflation scenario
+        from leading to a custom-shim reinvention.  Lock that warning
+        in so a future template edit cannot quietly drop it.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli, ["agent-instructions"])
+        assert result.exit_code == 0
+        out = result.output.lower()
+        # Either the cheat-sheet warning or the section-2 warning must
+        # be present (both currently appear; lock that at least one does)
+        assert "hand-roll" in out or "handroll" in out, (
+            "claude-md template must include the explicit anti-shim "
+            "warning — empirically load-bearing per fresh-session "
+            "sub-agent testing 2026-05-28"
+        )
+
+    def test_claude_md_includes_verb_cheat_sheet_at_top(self) -> None:
+        """W14-SNIPPET-ITERATION-1 (2026-05-28): a scannable cheat-
+        sheet at the top of the snippet (read before the detail
+        sections) is what got fresh sub-agents from "the snippet only
+        documents 4 verbs" (skim failure) to "the cheat-sheet
+        short-circuited search" (Test 2 round 3 success).  Lock it.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli, ["agent-instructions"])
+        assert result.exit_code == 0
+        out = result.output
+        # The cheat-sheet section header is the lock
+        assert "Verb cheat-sheet" in out, (
+            "claude-md template must include a `### Verb cheat-sheet` "
+            "section so a fresh sub-agent can scan the surface "
+            "without reading 100+ lines"
+        )
+
     def test_install_and_print_emit_same_claude_md_snippet(
         self, tmp_path: Path,
     ) -> None:

@@ -422,8 +422,45 @@ def _agent_instructions_snippet(
     if fmt == "claude-md":
         return (
             f"## xaxiu-harness is available\n\n"
-            f"You have access to a multi-engine LLM tool installed at "
-            f"`{repo_root}`.  Three things it provides:\n\n"
+            f"Multi-engine LLM + OpenAI-compatible HTTP proxy + agentic "
+            f"dispatch toolkit, installed at `{repo_root}`.\n\n"
+            f"### Verb cheat-sheet — read this FIRST\n\n"
+            f"```\n"
+            f"harness introspect                   ← Run in a FRESH session OR when you\n"
+            f"                                       need to discover the harness surface.\n"
+            f"                                       Single-call snapshot of verbs +\n"
+            f"                                       engines + proxy state + doctor.\n"
+            f"                                       Skip for focused single-shot tasks\n"
+            f"                                       where the cheat-sheet below suffices.\n"
+            f"harness ask \"...\"                    Daily-driver LLM verb.  3 modes:\n"
+            f"  ask \"...\"                         routed (1 engine, ~$0.01-0.05)\n"
+            f"  ask \"...\" --audit                producer→auditor (~$0.05)\n"
+            f"  ask \"...\" --panel                3-engine fanout (~$0.20-0.30)\n"
+            f"  ask --rerun <dir> --escalate X    replay + upgrade prior ask\n"
+            f"harness ask-history                  List past asks (with filters)\n"
+            f"harness ask-show <id>                Render one past ask\n"
+            f"harness proxy start --upstream X     OpenAI-compatible HTTP proxy\n"
+            f"                                     on 127.0.0.1:7879.  5 upstreams:\n"
+            f"                                     kimi-http (default), deepseek-http,\n"
+            f"                                     qwen-http, mimo-via-claude-code,\n"
+            f"                                     kimi-via-claude-code (subprocess\n"
+            f"                                     upstreams are TOS-compliant for\n"
+            f"                                     UA-gated providers like MiMo Token\n"
+            f"                                     Plan and Kimi Code subscription —\n"
+            f"                                     DO NOT hand-roll a custom shim).\n"
+            f"harness proxy upstreams              List all 5 upstreams with details\n"
+            f"harness engines describe <name>      Per-engine metadata: protocols,\n"
+            f"                                     UA-gating, key prefixes, models,\n"
+            f"                                     recommended task classes.\n"
+            f"harness engines compatibility-matrix N×M consumption-surface table\n"
+            f"harness engines recommend <class>    Empirical routing pick\n"
+            f"harness doctor                       9-check traffic-light health table\n"
+            f"harness keys serve                   Browser form for API keys\n"
+            f"xaxiu-swarm dispatch                 Sibling repo: agentic multi-file\n"
+            f"                                     dispatch.  NOT part of this repo;\n"
+            f"                                     clone separately if needed.\n"
+            f"```\n\n"
+            f"Details below.\n\n"
             f"### 1. `harness ask` — daily-driver LLM verb\n\n"
             f"Bare `python -m harness ask \"...\"` routes through an "
             f"empirical recommender to ONE engine (~$0.01-0.05, ~30s).  "
@@ -440,6 +477,12 @@ def _agent_instructions_snippet(
             f"python -m harness ask --rerun <dir> --escalate audit\n"
             f"                                              # upgrade routed → audit on the same question\n"
             f"```\n\n"
+            f"**When in doubt, default to bare `ask`.**  ~90% of "
+            f"questions are correctly answered by routed-1-engine.  "
+            f"Reach for `--audit` only when you (or the user) have just "
+            f"committed to a non-obvious factual claim worth sanity-"
+            f"checking by a different engine.  Reach for `--panel` only "
+            f"when cross-vendor diversity genuinely matters (rare).\n\n"
             f"Task classes: `default | latency | verbose | cost | "
             f"high-volume | multimodal | audit`.  "
             f"`harness engines recommend <class>` shows the pick + "
@@ -450,6 +493,13 @@ def _agent_instructions_snippet(
             f"`harness ask \"<claim>\" --audit --output /tmp/audit` and "
             f"inspect `/tmp/audit/summary.json` for "
             f"`verdict.verdict ∈ {{PASS, PARTIAL, FAIL, UNKNOWN}}`.\n\n"
+            f"  *Verdict semantics:* the verdict applies to the "
+            f"**producer's answer**, not to the input claim.  If you "
+            f"asked the producer to fact-check a wrong claim and the "
+            f"producer correctly refuted it, the auditor returns PASS "
+            f"(refutation is sound).  Always read the producer's "
+            f"answer + the auditor's `corrections`/`missed` fields, "
+            f"not just the top-level verdict.\n\n"
             f"**`--panel` is the 3-engine fanout** (was the bare default "
             f"before v0.5.1; now opt-in).  Use only for genuinely cross-"
             f"cutting design crossroads where vendor diversity matters.\n\n"
@@ -547,7 +597,7 @@ def _agent_instructions_snippet(
             f"```bash\n"
             f"python -m harness introspect             # human-readable text\n"
             f"python -m harness introspect --format json  # structured (parse this)\n"
-            f"python -m harness introspect --probe     # also live-probe engines (~few cents)\n"
+            f"python -m harness introspect --probe     # also live-probe engines (~$0.03: 3 keys × ~$0.01 each)\n"
             f"```\n\n"
             f"### Drill-down — `harness doctor`\n\n"
             f"`python -m harness doctor` runs a 9-check traffic-light "
@@ -6400,9 +6450,19 @@ def budget_export_daily(date: str | None, target_dir: Path | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-@cli.group(name="proxy", hidden=True)
+@cli.group(name="proxy")
 def proxy_group() -> None:
-    """Stateful 4-key API proxy with circuit breaker."""
+    """OpenAI-compatible HTTP proxy.  Routes /v1/chat/completions
+    requests from third-party tools (litellm-based clients, ApplyPilot,
+    etc.) to one of 5 upstreams: kimi-http (default), deepseek-http,
+    qwen-http, mimo-via-claude-code, kimi-via-claude-code.  The two
+    subprocess upstreams are TOS-compliant for User-Agent-gated
+    providers (MiMo Token Plan, Kimi Code subscription).
+
+    Run `harness proxy upstreams` to list all options, then
+    `harness proxy start --upstream <name>` to launch the daemon on
+    127.0.0.1:7879.
+    """
 
 
 @proxy_group.command(name="start")

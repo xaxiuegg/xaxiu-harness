@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.5.7 — 2026-05-28 (snippet iteration via fresh-session sub-agent testing)
+
+### Empirical refinement of `~/.claude/CLAUDE.md` snippet
+
+Ran 3 fresh-session sub-agent tests (zero conversation memory, only
+the installed CLAUDE.md snippet) against canonical scenarios.  Each
+test surfaced specific friction; each fix was applied + verified.
+
+**Test 1** — Routine routed-ask question ("venv vs Conda for a
+beginner"): 9/10.  Friction: `--audit` vs `--panel` tie-breaker
+needed a re-read.  `--probe` cost was vague.
+
+**Test 2 round 1** — The canonical Desktop transcript scenario
+(third-party tool wants OpenAI-shape endpoint pointing at MiMo Token
+Plan, TOS-compliantly): **6/10, agent considered writing a custom
+shim**.  Root cause: `proxy` was `hidden=True` so `harness --help`
+didn't show it, and the snippet's deep proxy section was missed
+during skim.
+
+**Test 2 round 3** — Same scenario after two fixes: 9/10.  Agent
+went straight to `harness proxy start --upstream mimo-via-claude-code`,
+zero shim consideration.
+
+**Test 3** — Hallucination self-check ("fact-check claim before
+posting to Slack"): 9/10.  Agent correctly chose `--audit`, executed
+it, AND correctly interpreted "verdict PASS" when the producer
+refuted the user's input claim.
+
+### Fixes shipped this commit
+
+1. **`proxy` verb unhidden** (cli.py + tests/test_hide_advanced_verbs.py).
+   Same operational bug as W14-COORD-UNHIDE: hidden verbs in
+   `--help` make agents conclude "verb doesn't exist" even when the
+   snippet documents the verb.
+2. **Verb cheat-sheet at the top of the claude-md template** — a
+   scannable command list before the detail sections.  Test 2 round 3
+   credited this with "decisively" short-circuiting the search.
+3. **"When in doubt, default to bare `ask`" tie-breaker** in the
+   ask section.  Resolves the Test 1 confusion between `--audit`
+   and `--panel` for routine questions.
+4. **Concrete `--probe` cost** ("~$0.03: 3 keys × ~$0.01 each")
+   replaces the vague "few cents".
+5. **Audit verdict semantics clarification**: explicit note that
+   PASS applies to the producer's answer, not the input claim — so
+   a PASS verdict on a refutation of a wrong claim correctly means
+   "the refutation is sound" (the claim is wrong).  Test 3 caught
+   the potential confusion.
+6. **`harness introspect` callout softened** from "RUN THIS FIRST"
+   to "Run in a FRESH session OR when you need to discover the
+   surface; skip for focused single-shot tasks where the cheat-
+   sheet suffices" — per Test 3 feedback that the prescriptive
+   wording overfired for tasks with a clear command.
+
+### Regression locks (in `tests/test_agent_instructions.py`)
+
+- `test_claude_md_format_explicitly_warns_against_handrolled_shim` —
+  the anti-shim warning was empirically load-bearing.  Locked.
+- `test_claude_md_includes_verb_cheat_sheet_at_top` — the cheat-
+  sheet was empirically the difference between 6/10 and 9/10.
+  Locked.
+
+W14-SNIPPET-ITERATION-1.
+
 ## v0.5.6 — 2026-05-28 (conversational re-asks + history browser)
 
 ### Phase 2.2 + 2.3 of agentic-operator roadmap
