@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.5.5 — 2026-05-28 (harness introspect — single-call discovery primitive)
+
+### Phase 2.1 of agentic-operator roadmap
+
+New verb **`harness introspect`** gives a fresh Claude Code session ONE
+call to learn the harness's full surface + current state, instead of
+issuing 5+ individual queries to discover the same information.
+
+```bash
+harness introspect                  # human-readable text
+harness introspect --format json    # structured (agent-parse this)
+harness introspect --probe          # also live-probe engines (~few cents)
+```
+
+The snapshot covers:
+
+- Version + repo path + timestamp
+- **Verbs**: ask modes / proxy state with 5 upstream options /
+  engines describe count / xaxiu-swarm sibling presence
+- **Engines**: per-engine key presence + count + protocols +
+  UA-gating + recommended task classes (from the Phase 1.2 metadata)
+- **Agent-instructions snippet**: installed-vs-current hash check
+  (warns "STALE" when the snippet at `~/.claude/CLAUDE.md` predates
+  the current repo — exactly the gap we hit on the operator's machine)
+- **Wrappers**: per-provider Claude Code shortcut installed + on-PATH
+- **Doctor**: 9-check summary with first-issue hint + fix command
+- **Recent asks**: last 5 outputs with mode + verdict + engines + cost
+
+Default is read-only (no live network).  `--probe` opts into per-engine
+round-trips.
+
+### Module + tests
+
+- New: `src/harness/introspect.py` (`build_snapshot()`, `render_text()`,
+  6 private collectors).  28 tests in `tests/test_introspect.py`.
+- New: `harness introspect` CLI verb in `src/harness/cli.py`.
+
+### Agent-instructions template update
+
+All 3 formats (claude-md / prompt / short) now lead with
+"**Start here — `harness introspect`**", giving fresh sessions a
+clear single-call entry point.  Regression tests extended to require
+the introspect mention in every format.
+
+W14-INTROSPECT.
+
 ## v0.5.4 — 2026-05-28 (agent-instructions templates surface today's verbs)
 
 ### Phase 1.3 of the agentic-operator roadmap

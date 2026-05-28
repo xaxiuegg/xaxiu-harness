@@ -516,13 +516,28 @@ def _agent_instructions_snippet(
             f"Answer: BOTH — see the dual `protocol_surfaces` field.  "
             f"Source-spelunking is no longer required for this class of "
             f"question.\n\n"
-            f"### Before reaching for any of this — verify health\n\n"
+            f"### Start here — `harness introspect`\n\n"
+            f"**The single command a fresh session should run first.**  "
+            f"`python -m harness introspect --format json` returns one "
+            f"structured snapshot covering: harness version + path, "
+            f"available verbs (ask modes / proxy state / 5 upstream "
+            f"options / engine metadata / swarm sibling status), per-"
+            f"engine key + protocol + UA-gating status, installed-snippet "
+            f"freshness (warns if stale), wrapper-script + PATH status, "
+            f"doctor summary, last 5 ask outputs with mode + verdict + "
+            f"cost.  Use it instead of running 5+ individual queries to "
+            f"discover the surface.\n\n"
+            f"```bash\n"
+            f"python -m harness introspect             # human-readable text\n"
+            f"python -m harness introspect --format json  # structured (parse this)\n"
+            f"python -m harness introspect --probe     # also live-probe engines (~few cents)\n"
+            f"```\n\n"
+            f"### Drill-down — `harness doctor`\n\n"
             f"`python -m harness doctor` runs a 9-check traffic-light "
-            f"table covering Python install, key presence, engine "
-            f"reachability, and DPAPI access.  Run it FIRST in a fresh "
-            f"session before assuming an engine is available — the "
-            f"strategic plan's $195/mo budget covers MiMo + DeepSeek + "
-            f"Qwen but Kimi is no longer in the rotation.\n\n"
+            f"table.  Same data introspect surfaces in summary form; "
+            f"use directly when you need the per-check fix-hints.  Note "
+            f"the strategic plan's $195/mo budget covers MiMo + DeepSeek "
+            f"+ Qwen — Kimi is no longer in the rotation.\n\n"
             f"### Support verbs\n\n"
             f"- `python -m harness doctor` — 9-check health table\n"
             f"- `python -m harness keys serve` — browser form for "
@@ -559,6 +574,13 @@ def _agent_instructions_snippet(
             f"3. **xaxiu-swarm** (sibling repo) — agentic multi-file "
             f"dispatch via `xaxiu-swarm dispatch --backend <name> "
             f"--deliverable <path>`.  Use for multi-file refactors.\n\n"
+            f"**Run `harness introspect --format json` FIRST** in a "
+            f"fresh session — it returns one structured snapshot of "
+            f"available verbs, per-engine key/health status, proxy "
+            f"state, installed-snippet freshness, wrappers, doctor "
+            f"summary, and recent ask outputs.  Single call, no "
+            f"source-spelunking.  Use `harness doctor` for per-check "
+            f"fix hints.\n\n"
             f"**Before making engine-specific claims, query first:** "
             f"`harness engines describe <name>` returns protocol "
             f"surfaces / UA gating / key prefixes / recommended task "
@@ -566,8 +588,7 @@ def _agent_instructions_snippet(
             f"`harness engines compatibility-matrix` shows the N×M "
             f"engine-vs-consumption-surface table.  "
             f"`harness engines recommend <class>` returns the empirical "
-            f"routing pick.  Run `harness doctor` first in a fresh "
-            f"session to verify which engines are actually reachable.\n\n"
+            f"routing pick.\n\n"
             f"When NOT to use `harness ask`: routine implementation "
             f"(do it yourself), factual lookups (WebSearch), multi-file "
             f"refactors (xaxiu-swarm), or third-party tool LLM calls "
@@ -575,18 +596,17 @@ def _agent_instructions_snippet(
         )
     elif fmt == "short":
         return (
-            f"xaxiu-harness ({repo_root}) provides: "
+            f"xaxiu-harness ({repo_root}).  Start with "
+            f"`harness introspect --format json` — single-call snapshot "
+            f"of verbs, engines, proxy state, doctor.  Then: "
             f"(1) `harness ask \"...\"` — daily LLM verb (routed "
             f"~$0.01-0.05, `--audit` ~$0.05, `--panel` ~$0.20-0.30); "
             f"(2) `harness proxy start [--upstream <name>]` — OpenAI-"
-            f"compatible endpoint on 127.0.0.1:7879 with 5 upstreams "
-            f"(kimi-http, deepseek-http, qwen-http, mimo-via-claude-"
-            f"code, kimi-via-claude-code); (3) sibling repo `xaxiu-"
-            f"swarm` for agentic multi-file dispatch.  Query "
-            f"`harness engines describe <name>` for engine metadata "
-            f"before making factual claims.  `harness doctor` to "
-            f"verify health.  Reach for `--audit` when you've just made "
-            f"a non-obvious factual claim worth sanity-checking."
+            f"compatible endpoint on 127.0.0.1:7879 with 5 upstreams; "
+            f"(3) `xaxiu-swarm` sibling for agentic multi-file dispatch.  "
+            f"`harness engines describe <name>` for engine metadata.  "
+            f"Reach for `--audit` when you've just made a non-obvious "
+            f"factual claim worth sanity-checking."
         )
     else:
         raise ValueError(f"Unknown format: {fmt!r}")
@@ -2898,6 +2918,41 @@ def lint_spec_cmd(spec_path: Path | None, spec_opt: Path | None, fmt: str) -> No
 
     # Exit 1 if any error-severity finding exists; exit 0 on warn-only / clean
     sys.exit(0 if ready else 1)
+
+
+@cli.command(name="introspect")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]),
+              default="text", show_default=True)
+@click.option("--probe", "with_probe", is_flag=True, default=False,
+              help="Run live engine probes (real network round-trips, "
+                   "costs a few cents).  Off by default — snapshot is "
+                   "read-only and cheap.")
+def introspect_cmd(fmt: str, with_probe: bool) -> None:
+    """W14-INTROSPECT 2026-05-28 (Phase 2.1): single-call capability +
+    state snapshot.
+
+    The verb a fresh Claude Code session should run FIRST to learn
+    what's available + working without spelunking source.
+
+    Output covers: harness version + path, available verbs (ask modes /
+    proxy state + 5 upstreams / engine metadata / xaxiu-swarm sibling
+    status), per-engine key + protocol + UA-gating summary, installed-
+    snippet freshness check, wrapper-script + PATH status, doctor
+    summary, last 5 ask outputs with mode + verdict + cost.
+
+    Default (`--format text`) is human-readable; `--format json` is
+    the recommended programmatic surface for agents.
+
+    Run with `--probe` for live engine round-trips (catches 401s the
+    presence check cannot).  Costs a few cents per run.
+    """
+    from harness.introspect import build_snapshot, render_text
+    snapshot = build_snapshot(probe=with_probe)
+    if fmt == "json":
+        click.echo(json.dumps(snapshot, indent=2, default=str))
+    else:
+        click.echo(render_text(snapshot))
+    sys.exit(0)
 
 
 @cli.command(name="doctor")

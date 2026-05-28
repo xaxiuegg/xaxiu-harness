@@ -231,6 +231,9 @@ class TestInstallAgentInstructions:
         assert "mimo-via-claude-code" in out
         assert "harness engines describe" in out
         assert "compatibility-matrix" in out
+        # Positive: v0.5.5 fingerprint (Phase 2.1: introspect is the
+        # discovery primitive a fresh session should run first)
+        assert "harness introspect" in out
         # Negative: stale-template fingerprint absent
         assert "fires 3 engines (Kimi / MiMo / DeepSeek)" not in out
 
@@ -261,6 +264,12 @@ class TestInstallAgentInstructions:
             # the MiMo shim the Desktop transcript hand-rolled
             assert "--upstream" in out or "upstream" in out.lower(), (
                 f"{fmt}: must mention proxy --upstream"
+            )
+            # Phase 2.1: `harness introspect` is the recommended first
+            # command in a fresh session — every format must surface it
+            assert "harness introspect" in out, (
+                f"{fmt}: must mention `harness introspect` (the "
+                f"discovery primitive a fresh session should run first)"
             )
 
     def test_install_and_print_emit_same_claude_md_snippet(
