@@ -5944,10 +5944,60 @@ def proxy_group() -> None:
 @proxy_group.command(name="start")
 @click.option("--port", default=7879, type=int)
 @click.option("--host", default="127.0.0.1")
-def proxy_start(port: int, host: str) -> None:
+@click.option("--upstream", default="kimi-http", show_default=True, help=(
+    "Upstream selector.  Run `harness proxy upstreams` to see all "
+    "options.  HTTP-direct: kimi-http (default), deepseek-http, "
+    "qwen-http.  TOS-compliant subprocess: mimo-via-claude-code, "
+    "kimi-via-claude-code."
+))
+def proxy_start(port: int, host: str, upstream: str) -> None:
     """Start the proxy server in the background."""
     from harness.proxy.cli import start
-    start(port=port, host=host)
+    start(port=port, host=host, upstream=upstream)
+
+
+@proxy_group.command(name="upstreams")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]),
+              default="table", show_default=True)
+def proxy_upstreams(fmt: str) -> None:
+    """List all upstream selectors the proxy supports.
+
+    Each upstream is a named recipe: transport (HTTP-direct vs Claude
+    Code subprocess) + base URL + default model + key env var.
+    """
+    from harness.proxy.upstreams import list_upstreams
+    upstreams = list_upstreams()
+    if fmt == "json":
+        import json
+        out = {
+            name: {
+                "transport": s.transport,
+                "key_env": s.key_env,
+                "base_url": s.base_url,
+                "default_model": s.default_model,
+                "description": s.description,
+                "tos_notes": s.tos_notes,
+            }
+            for name, s in upstreams.items()
+        }
+        click.echo(json.dumps(out, indent=2))
+        return
+    # Table format
+    click.echo(
+        f"{'name':<24} {'transport':<26} {'key env':<22} model"
+    )
+    click.echo("-" * 110)
+    for name, s in upstreams.items():
+        click.echo(
+            f"  {name:<22} {s.transport:<26} {s.key_env:<22} "
+            f"{s.default_model}"
+        )
+    click.echo()
+    click.echo("Subprocess upstreams are TOS-compliant for UA-gated providers.")
+    click.echo(
+        "Latency: HTTP ~100ms overhead; subprocess ~5-7s overhead "
+        "(Claude Code boot per request)."
+    )
 
 
 @proxy_group.command(name="stop")

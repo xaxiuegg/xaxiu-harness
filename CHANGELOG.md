@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.5.2 — 2026-05-28 (harness proxy --upstream)
+
+### `harness proxy start --upstream <name>` — multi-upstream proxy
+
+The proxy was previously hardcoded to Kimi (`api.moonshot.cn`).  It now
+supports five upstreams, picked via `--upstream <name>` (default
+`kimi-http` to preserve pre-v0.5.2 behavior).
+
+**HTTP-direct upstreams** (OpenAI-compatible chat-completions, ~100ms
+overhead per request):
+
+- `kimi-http` — Kimi (Moonshot).  Pre-v0.5.2 behavior.
+- `deepseek-http` — DeepSeek v4.  PAYG.
+- `qwen-http` — Qwen 3.6 Plus via Alibaba DashScope.  PAYG.
+
+**Claude-Code-subprocess upstreams** (TOS-compliant for User-Agent-
+gated providers, ~5-7s subprocess boot per request):
+
+- `mimo-via-claude-code` — MiMo Token Plan SGP.  Routes through `claude
+  --bare --print --output-format json` with the right ANTHROPIC_*
+  env vars; translates the Anthropic-shape response back to OpenAI
+  shape.  Replaces the standalone shim some integrations were forced
+  to hand-roll.
+- `kimi-via-claude-code` — Kimi Code subscription via the same pattern.
+
+Direct-HTTP routes can be rejected by UA-gated providers (`tp-*` MiMo
+keys, Kimi Code subscription).  Subprocess routes spawn the legitimate
+`claude` binary whose User-Agent is on the providers' allowlists — no
+spoofing, TOS-compliant.
+
+**New verbs:**
+
+```bash
+harness proxy upstreams                 # list all 5 with transport + key env
+harness proxy upstreams --format json   # machine-readable
+harness proxy start --upstream mimo-via-claude-code
+harness proxy start --upstream deepseek-http
+```
+
+**New modules:**
+
+- `src/harness/proxy/upstreams.py` — registry of `UpstreamSpec`
+  (frozen dataclass) and `get_upstream(name)` / `list_upstreams()`.
+- `src/harness/proxy/handlers.py` — `http_handler`,
+  `claude_code_subprocess_handler`, `dispatch_to_upstream` + the
+  Anthropic-to-OpenAI translation helpers.
+
+`create_app(upstream="...")` accepts either an upstream name or a
+fully-constructed `UpstreamSpec`.  `upstream_url=` is still honored
+as an override for the spec's `base_url` (back-compat for callers
+predating the registry).
+
+`/healthz` response now includes the active upstream's name,
+transport, base_url, and default_model.
+
+W14-PROXY-UPSTREAMS.
+
 ## v0.5.1 — 2026-05-27 (harness ask redesign)
 
 ### Breaking: `harness ask` default changed from 3-engine panel → routed single engine

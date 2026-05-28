@@ -65,13 +65,24 @@ def _print_status(state_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def start(port: int, host: str) -> None:
+def start(
+    port: int, host: str, upstream: str = "kimi-http",
+) -> None:
     pid_path = _pid_path()
     if pid_path.exists():
         existing = int(pid_path.read_text().strip())
         if _find_process(existing):
             click.echo(f"Proxy already running (PID {existing}).")
             return
+
+    # Validate upstream early — surface the error before we spawn a
+    # daemon we'd have to kill again
+    from harness.proxy.upstreams import get_upstream
+    try:
+        spec = get_upstream(upstream)
+    except ValueError as e:
+        click.echo(f"ERROR: {e}", err=True)
+        sys.exit(2)
 
     kwargs: dict[str, object] = {}
     if sys.platform == "win32":
@@ -81,7 +92,10 @@ def start(port: int, host: str) -> None:
         [
             sys.executable,
             "-c",
-            f"from harness.proxy.server import serve; serve(host='{host}', port={port})",
+            (
+                f"from harness.proxy.server import serve; "
+                f"serve(host='{host}', port={port}, upstream='{spec.name}')"
+            ),
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -89,7 +103,13 @@ def start(port: int, host: str) -> None:
     )
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(proc.pid))
-    click.echo(f"Proxy started on {host}:{port} (PID {proc.pid})")
+    click.echo(
+        f"Proxy started on {host}:{port} (PID {proc.pid})\n"
+        f"  upstream: {spec.name} ({spec.transport})"
+    )
+    click.echo(f"  target:   {spec.base_url}")
+    if spec.tos_notes:
+        click.echo(f"  TOS:      {spec.tos_notes.splitlines()[0]}")
 
 
 def stop() -> None:

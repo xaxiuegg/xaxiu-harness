@@ -1,4 +1,17 @@
-"""FastAPI proxy application for Kimi API."""
+"""FastAPI proxy application — pluggable upstream (W14-PROXY-UPSTREAMS).
+
+The proxy was historically a Kimi-only HTTP forwarder.  As of 2026-05-27
+it supports multiple upstreams via the ``upstream`` parameter:
+
+- ``kimi-http`` (default — preserves pre-v0.5.1 behavior)
+- ``deepseek-http``, ``qwen-http`` — direct HTTP, OpenAI-compat
+- ``mimo-via-claude-code``, ``kimi-via-claude-code`` — Claude Code
+  subprocess upstreams for TOS-compliant access to UA-gated providers
+
+See ``harness.proxy.upstreams`` for the registry + ``handlers`` for the
+per-transport request handlers.  The circuit breaker + key pool +
+state machinery apply uniformly regardless of transport.
+"""
 
 from __future__ import annotations
 
@@ -9,17 +22,24 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
 
 from harness.proxy.circuit import classify_outcome, transition
+from harness.proxy.handlers import dispatch_to_upstream
 from harness.proxy.router import pick_key
 from harness.proxy.state import KeyState, ProxyState, read_state, write_state
+from harness.proxy.upstreams import (
+    DEFAULT_UPSTREAM_NAME,
+    UpstreamSpec,
+    get_upstream,
+)
 
 try:
     from harness.secrets.dpapi import decrypt_secret
 except NotImplementedError:  # pragma: no cover
     decrypt_secret = None
 
+# Pre-v0.5.1 callers may import this; kept as the Kimi HTTP URL for
+# backward compat with code that constructed the proxy by URL.
 DEFAULT_UPSTREAM = "https://api.moonshot.cn/v1/chat/completions"
 
 
@@ -44,6 +64,11 @@ def resolve_keys(env_prefix: str = "KIMI_API_KEY") -> dict[str, str]:
          ``<env_prefix>`` is populated, use it as k1.
 
     Empty-string values are treated as missing.
+
+    W14-PROXY-UPSTREAMS: ``env_prefix`` is now upstream-aware — pass
+    ``"MIMO_API_KEY"`` for the MiMo upstream, ``"DEEPSEEK_API_KEY"``
+    for DeepSeek, etc.  Defaults to ``KIMI_API_KEY`` for backward
+    compat with callers that pre-date the multi-upstream change.
     """
     from harness.keys import resolve_keys as _generic
     return _generic(env_prefix)
@@ -63,8 +88,42 @@ def create_app(
     upstream_url: str | None = None,
     keys: dict[str, str] | None = None,
     http_client: httpx.AsyncClient | None = None,
+    upstream: str | UpstreamSpec | None = None,
 ) -> FastAPI:
+    """Build the FastAPI proxy app.
+
+    Parameters
+    ----------
+    state_path
+        Where to persist the per-key circuit-breaker state.
+    upstream_url
+        Backward-compat override.  If set, replaces the upstream's
+        ``base_url``.  New code should pass ``upstream=...`` instead.
+    keys
+        Pre-resolved ``{alias: key_value}`` dict.  If ``None``, resolved
+        from env via ``resolve_keys(upstream_spec.key_env)``.
+    http_client
+        ``httpx.AsyncClient`` for HTTP-transport upstreams.  Auto-
+        constructed at app startup if not provided.
+    upstream
+        Either an upstream NAME (looked up in the registry) or a fully-
+        constructed ``UpstreamSpec``.  Defaults to ``"kimi-http"`` for
+        pre-v0.5.1 backward compat.
+    """
     from contextlib import asynccontextmanager
+
+    # Resolve upstream spec (string lookup or pass-through)
+    if isinstance(upstream, UpstreamSpec):
+        upstream_spec = upstream
+    else:
+        upstream_spec = get_upstream(upstream or DEFAULT_UPSTREAM_NAME)
+    # ``upstream_url=`` is an escape hatch for tests/overrides — it
+    # replaces just the base_url, keeping the rest of the spec.
+    if upstream_url is not None:
+        import dataclasses
+        upstream_spec = dataclasses.replace(
+            upstream_spec, base_url=upstream_url,
+        )
 
     @asynccontextmanager
     async def lifespan(app_: FastAPI):
@@ -89,8 +148,14 @@ def create_app(
 
     app = FastAPI(title="xaxiu-harness proxy", lifespan=lifespan)
     app.state.state_path = _state_path(state_path)
-    app.state.upstream_url = upstream_url or DEFAULT_UPSTREAM
-    app.state.keys = keys if keys is not None else resolve_keys()
+    app.state.upstream_spec = upstream_spec
+    # ``upstream_url`` kept for back-compat with any external code that
+    # introspects ``app.state.upstream_url``.
+    app.state.upstream_url = upstream_spec.base_url
+    app.state.keys = (
+        keys if keys is not None
+        else resolve_keys(upstream_spec.key_env)
+    )
     app.state.http_client = http_client
     app.state.lock = asyncio.Lock()
 
@@ -109,6 +174,7 @@ def create_app(
             now = datetime.now(timezone.utc)
             alias = pick_key(state, now=now)
             if alias is None:
+                from fastapi.responses import JSONResponse
                 return JSONResponse(
                     status_code=503,
                     content={"detail": "No routable keys available."},
@@ -119,23 +185,15 @@ def create_app(
 
         key = app.state.keys[alias]
         body = await request.body()
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}",
-        }
         client: httpx.AsyncClient = app.state.http_client
         exc: Exception | None = None
         status_code: int | None = None
         response_body = b""
         try:
-            resp = await client.post(
-                app.state.upstream_url,
-                headers=headers,
-                content=body,
+            response_body, status_code = await dispatch_to_upstream(
+                app.state.upstream_spec, body, key, client,
             )
-            status_code = resp.status_code
-            response_body = resp.content
-        except Exception as e:  # pragma: no cover
+        except Exception as e:  # pragma: no cover - handler should not raise
             exc = e
 
         async with app.state.lock:
@@ -158,6 +216,12 @@ def create_app(
             "pool_size": len(state.keys),
             "in_flight": in_flight_total,
             "max_concurrent": sum(k.max_concurrent for k in state.keys.values()),
+            "upstream": {
+                "name": app.state.upstream_spec.name,
+                "transport": app.state.upstream_spec.transport,
+                "base_url": app.state.upstream_spec.base_url,
+                "default_model": app.state.upstream_spec.default_model,
+            },
         }
 
     return app
