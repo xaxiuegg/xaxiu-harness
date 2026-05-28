@@ -709,6 +709,88 @@ class MiMoConcrete(Engine):
         return payload
 
 
+class QwenConcrete(Engine):
+    """W14-KIMI-REPLACEMENT-WITH-QWEN 2026-05-28: Qwen 3.6 Plus (Alibaba)
+    via the DashScope OpenAI-compatible endpoint.
+
+    Endpoint: ``https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions``
+
+    Authentication: ``DASHSCOPE_API_KEY`` (PAYG only — NOT the Alibaba
+    Coding Plan subscription).  Strategic plan committed $50/mo PAYG to
+    this engine slot per the engine-budget triad (CURRENT_PLAN.md
+    2026-05-25 entry).  Apache-2.0 open-weight, zero termination risk.
+
+    Honoured ``extra_args``:
+      - ``temperature`` (float) – defaults to 0.7
+      - ``max_tokens`` (int) – defaults to 8192
+
+    Tier 1D scaffold note: this adapter ships WITHOUT a live smoke test
+    until the operator acquires DASHSCOPE_API_KEY.  Tests use mocked
+    httpx — the request shape + response parsing are validated, but
+    not the live wire round-trip.  Operator should run a single
+    ``harness ask --engines qwen "..."`` after key acquisition to
+    validate.
+    """
+
+    def dispatch(
+        self,
+        packet_content: str,
+        model: str,
+        extra_args: Optional[dict[str, Any]] = None,
+    ) -> EngineResponse:
+        extra = extra_args or {}
+        if not model or model.strip().lower() in {"auto", "qwen", "default"}:
+            model = "qwen-plus"
+
+        from harness.engines._retry import run_with_retry
+
+        def _do_http() -> EngineResponse:
+            start = time.monotonic()
+            with httpx.Client(
+                verify=True,
+                timeout=_DEFAULT_TIMEOUT,
+            ) as client:
+                payload = self._build_payload(packet_content, model, extra)
+                response = client.post(
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                text = _extract_chat_text(data)
+                tokens_in, tokens_out = _extract_openai_usage(data)
+                latency_ms = int((time.monotonic() - start) * 1000)
+                return EngineResponse(
+                    success=True,
+                    text=text,
+                    latency_ms=latency_ms,
+                    error=None,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                )
+
+        return run_with_retry(_do_http)
+
+    @staticmethod
+    def _build_payload(
+        content: str,
+        model: str,
+        extra: dict[str, Any],
+    ) -> dict:
+        temperature = float(extra.get("temperature", 0.7))
+        max_tokens = int(extra.get("max_tokens", 8192))
+        return {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -820,6 +902,11 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
         cls = GeminiConcrete
     elif name_lower == "mimo":
         cls = MiMoConcrete
+    elif name_lower == "qwen":
+        # W14-KIMI-REPLACEMENT-WITH-QWEN 2026-05-28: scaffold ships
+        # ahead of operator acquiring DASHSCOPE_API_KEY.  The adapter
+        # works end-to-end against a real key; tests use mocked httpx.
+        cls = QwenConcrete
     else:
         # Should not happen due to earlier guard, but keep exhaustive.
         raise RuntimeError(f"Unsupported engine: {name_lower}")

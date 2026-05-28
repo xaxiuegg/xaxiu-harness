@@ -54,6 +54,14 @@ PRICING_USD_PER_M_TOKENS: Final[dict[str, dict[str, float]]] = {
     "mimo-pro-long":   {"input": 2.00,  "output": 6.00},   # MiMo V2.5-Pro (256K–1M slice)
     "mimo-sub":        {"input": 0.0,   "output": 0.0},    # tp- key → free
     "mimo-pro-sub":    {"input": 0.0,   "output": 0.0},    # tp- key → free
+    # Alibaba Qwen 3.6 Plus via DashScope PAYG (added 2026-05-28,
+    # W14-KIMI-REPLACEMENT-WITH-QWEN).  Strategic plan: $0.97/M tokens
+    # blended, ~$50/mo for ~51M tokens.  Public DashScope rate card:
+    # qwen-plus is $0.40 input / $1.20 output per 1M (verify on key
+    # acquisition; rates change quarterly).
+    "qwen":            {"input": 0.40,  "output": 1.20},   # qwen-plus PAYG
+    "qwen-max":        {"input": 1.60,  "output": 6.40},   # qwen-max PAYG
+    "qwen-turbo":      {"input": 0.05,  "output": 0.20},   # qwen-turbo PAYG
 }
 
 # ---------------------------------------------------------------------------

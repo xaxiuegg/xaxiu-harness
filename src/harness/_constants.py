@@ -7,7 +7,9 @@ Prevents the duplicate-source-of-truth drift flagged in the v1.2 security audit
 from pathlib import Path
 from typing import Final
 
-SUPPORTED_BACKENDS: Final = ["deepseek", "kimi", "anthropic", "gemini", "mimo", "mock"]
+SUPPORTED_BACKENDS: Final = [
+    "deepseek", "kimi", "anthropic", "gemini", "mimo", "qwen", "mock",
+]
 
 API_KEY_ENV_VARS: Final = {
     "deepseek": "DEEPSEEK_API_KEY",
@@ -18,6 +20,12 @@ API_KEY_ENV_VARS: Final = {
     # selects endpoint at dispatch time: ``sk-...`` → pay-as-you-go,
     # ``tp-...`` → Token Plan subscription (treated as zero-cost in budget).
     "mimo": "MIMO_API_KEY",
+    # Alibaba Qwen 3.6 Plus via DashScope OpenAI-compatible endpoint
+    # (added 2026-05-28, W14-KIMI-REPLACEMENT-WITH-QWEN).  PAYG only —
+    # NOT the Alibaba Coding Plan subscription.  Strategic-plan slot:
+    # $50/mo, ~51M tokens at $0.97/M.  Live validation gated on operator
+    # acquiring DASHSCOPE_API_KEY from dashscope.aliyun.com.
+    "qwen": "DASHSCOPE_API_KEY",
 }
 
 DASHBOARD_PORT: Final = 7878

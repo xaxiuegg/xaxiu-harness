@@ -150,9 +150,13 @@ def test_eligible_engines_sorts_by_priority() -> None:
     }
     # "mock" is unconditionally excluded by _eligible_engines (test-only backend)
     # 2026-05-22: mimo added to SUPPORTED_BACKENDS (Xiaomi MiMo open platform)
+    # 2026-05-28: qwen added to SUPPORTED_BACKENDS (Alibaba Qwen via DashScope)
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
-    assert names == ["kimi", "deepseek", "gemini", "mimo", "anthropic"]
+    # Order: HIGH > NORMAL > AVOID; within tier, SUPPORTED_BACKENDS order
+    # (deepseek, kimi, anthropic, gemini, mimo, qwen, mock).  kimi is HIGH;
+    # anthropic is AVOID; rest are NORMAL.
+    assert names == ["kimi", "deepseek", "gemini", "mimo", "qwen", "anthropic"]
 
 
 def test_eligible_engines_excludes_tried() -> None:
@@ -162,14 +166,14 @@ def test_eligible_engines_excludes_tried() -> None:
     }
     result = _eligible_engines(health, exclude={"deepseek"})
     names = [n for n, _ in result]
-    assert names == ["kimi", "anthropic", "gemini", "mimo"]
+    assert names == ["kimi", "anthropic", "gemini", "mimo", "qwen"]
 
 
 def test_eligible_engines_defaults_to_normal() -> None:
     health: dict[str, EngineHealth] = {}
     result = _eligible_engines(health, exclude=set())
     names = [n for n, _ in result]
-    assert names == ["deepseek", "kimi", "anthropic", "gemini", "mimo"]
+    assert names == ["deepseek", "kimi", "anthropic", "gemini", "mimo", "qwen"]
 
 
 def test_eligible_engines_excludes_mock_unconditionally() -> None:
@@ -486,7 +490,7 @@ def test_dispatch_all_fallbacks_exhausted(
         result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
 
     assert result.success is False
-    assert result.fallback_chain == ["deepseek", "kimi", "anthropic", "gemini", "mimo"]
+    assert result.fallback_chain == ["deepseek", "kimi", "anthropic", "gemini", "mimo", "qwen"]
     assert "all_fallbacks_exhausted" in result.error
     mock_db.update_dispatch_status.assert_called_with(
         "disp-1234", "all_fallbacks_exhausted", latency_ms=5
@@ -663,9 +667,9 @@ def test_dispatch_no_redispatch_same_engine(
         result = dispatch_packet(project="valid-project", packet_path=tmp_packet)
 
     assert result.success is False
-    # deepseek tried once; fallback chains through kimi/anthropic/gemini/mimo
-    assert len(result.fallback_chain) == 5
-    assert len(set(result.fallback_chain)) == 5  # all unique
+    # deepseek tried once; fallback chains through kimi/anthropic/gemini/mimo/qwen
+    assert len(result.fallback_chain) == 6
+    assert len(set(result.fallback_chain)) == 6  # all unique
 
 
 # ---------------------------------------------------------------------------

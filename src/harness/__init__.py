@@ -16,7 +16,7 @@ For full API contract see :mod:`harness._sdk`.
 # ~/.claude/CLAUDE.md carries this version in its START marker, and
 # introspect compares against the live value.  Bump when shipping
 # template-affecting changes so operators see a STALE warning.
-__version__ = "0.6.5"
+__version__ = "0.6.6"
 
 # W11-PYTHON-SDK-API-STUBS 2026-05-25: re-export the stable agent API.
 # The function bodies live in harness._sdk and currently raise
