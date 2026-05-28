@@ -46,11 +46,14 @@ def test_install_scheduler_all_implies_include_chat(runner: CliRunner) -> None:
 
 
 def test_install_scheduler_all_arms_db_snapshot(runner: CliRunner) -> None:
-    """With --all, the db-snapshot task is registered if the module exists."""
-    try:
-        from harness.state import db_scheduler  # noqa: F401
-    except ImportError:
-        pytest.skip("db_scheduler module not yet shipped")
+    """With --all, the db-snapshot task is registered.
+
+    W14-REPO-WIDE-STALENESS-AUDIT 2026-05-28: removed the stale
+    ``pytest.skip("db_scheduler module not yet shipped")`` guard —
+    ``harness.state.db_scheduler`` has been in the tree for weeks
+    and imports cleanly.  The skip path was dead code.
+    """
+    from harness.state import db_scheduler  # noqa: F401
     with patch("harness.cli.register_tasks",
                return_value=(True, "armed")), \
          patch("harness.state.db_scheduler.register_snapshot_task",
@@ -71,11 +74,12 @@ def test_uninstall_scheduler_removes_observer_at_minimum(runner: CliRunner) -> N
 
 def test_install_scheduler_all_handles_partial_failure(runner: CliRunner) -> None:
     """When db-snapshot registration fails, --all still attempts cost-export
-    and exits 1 to surface the failure."""
-    try:
-        from harness.state import db_scheduler  # noqa: F401
-    except ImportError:
-        pytest.skip("db_scheduler module not yet shipped")
+    and exits 1 to surface the failure.
+
+    W14-REPO-WIDE-STALENESS-AUDIT 2026-05-28: see the partner test
+    above — same stale skip removed here.
+    """
+    from harness.state import db_scheduler  # noqa: F401
     with patch("harness.cli.register_tasks",
                return_value=(True, "armed")), \
          patch("harness.state.db_scheduler.register_snapshot_task",

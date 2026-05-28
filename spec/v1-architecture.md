@@ -3,7 +3,7 @@
 ## 1. Repo Layout
 
 ```
-D:/Projects/xaxiu-harness/
+D:/xaxiu-harness-standalone/
 ├── src/harness/               # Core Python package (CLI, engine abstraction, scheduler)
 │   ├── cli.py                 # Click-based CLI verbs
 │   ├── engines/               # Built-in backends (DeepSeek, Kimi, Anthropic)
@@ -81,7 +81,7 @@ D:/Projects/xaxiu-harness/
 | `command` | string | yes | `harness <verb> <args>` |
 | `idempotent` | bool | yes | True if task can be run multiple times safely |
 
-**Complete warehouse adapter example** (`D:/Projects/xaxiu-harness/adapters/warehouse/harness-adapter.yaml`):
+**Complete warehouse adapter example** (`D:/xaxiu-harness-standalone/adapters/warehouse/harness-adapter.yaml`):
 
 ```yaml
 name: warehouse
@@ -144,7 +144,7 @@ All verbs invoked via `harness <verb>`. Exit codes: 0 = success, 1 = generic err
 
 ## 4. State File Format
 
-### Global config: `D:/Projects/xaxiu-harness/state/harness.config.yml`
+### Global config: `D:/xaxiu-harness-standalone/state/harness.config.yml`
 
 ```yaml
 harness_version: "1.0"

@@ -260,11 +260,17 @@ def recommend_healthy(
     the producer engine to dedup); terminated engines are added to
     the exclude set rather than replacing it.
 
-    Engines in the Pattern B namespace (``mimo-via-claude``,
-    ``deepseek-via-claude``, ``kimi-via-claude``) map to their
-    underlying provider key (``mimo``, ``deepseek``, ``kimi``) when
-    comparing against the terminated set — health probes are keyed
-    by provider, not by wrapper.
+    Transport-aware filtering (W14-REPO-WIDE-STALENESS-AUDIT
+    2026-05-28 fix): Pattern B engines (``*-via-claude``) use a
+    completely different transport (Claude Code subprocess) than
+    direct-HTTP probes, so a Pattern A termination signal MUST NOT
+    propagate to Pattern B.  Empirical: 2026-05-22 Moonshot
+    terminated direct-HTTP Kimi API access but ``kimi-via-claude``
+    (Coding Agents path) remained functional.  Previously this
+    function mapped ``kimi-via-claude`` → ``kimi`` and incorrectly
+    filtered the Pattern B engine; now Pattern B engines are
+    exempted from the terminated filter, matching real provider
+    policy.
     """
     from harness.engines.routing import _recently_terminated_engines
     terminated_providers = _recently_terminated_engines(
@@ -279,11 +285,10 @@ def recommend_healthy(
         except ValueError:
             return None
 
-    def _provider_of(engine_name: str) -> str:
-        """Map Pattern B engine names to their underlying provider key."""
-        if engine_name.endswith("-via-claude"):
-            return engine_name[: -len("-via-claude")]
-        return engine_name
+    def _is_pattern_b(engine_name: str) -> bool:
+        """Pattern B engines route via Claude Code subprocess, not
+        direct HTTP — they're unaffected by direct-API termination."""
+        return engine_name.endswith("-via-claude")
 
     excludes = set(exclude or set())
     # Walk recommend() N times, each iteration excluding the prior
@@ -293,7 +298,11 @@ def recommend_healthy(
             rec = recommend(task_class, exclude=excludes)
         except ValueError:
             return None
-        if _provider_of(rec.engine) in terminated_providers:
+        # Pattern B engines are subprocess-routed, so direct-API
+        # termination signals don't apply to them.  Pattern A engines
+        # ARE affected — filter only when the engine matches a
+        # terminated direct-HTTP provider.
+        if not _is_pattern_b(rec.engine) and rec.engine in terminated_providers:
             excludes.add(rec.engine)
             continue
         return rec

@@ -1,6 +1,6 @@
 # CLAUDE.md — xaxiu-harness
 
-You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone\` (migrated 2026-05-22 from `D:\Projects\xaxiu-harness\` — see MIGRATION.md).  Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope.  This project has its own isolated Claude Code memory directory at `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (43 entries) — warehouse-specific memory is intentionally NOT loaded here.
+You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone\` (migrated 2026-05-22 from `D:\Projects\xaxiu-harness\` — see MIGRATION.md).  Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope.  This project has its own isolated Claude Code memory directory at `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (57 entries as of 2026-05-28; check `MEMORY.md` index for the live count) — warehouse-specific memory is intentionally NOT loaded here.
 
 ## First action in any fresh session / clone / worktree (READ FIRST)
 
@@ -35,7 +35,10 @@ xaxiu-harness is the operator's command surface and observability layer for dele
 
 Underneath: cross-platform key resolution, JSONL audit ledger with redaction, replay, budget meter, observer flags, FastAPI dashboard.  "Ask 3 LLMs" is the lowest-autonomy surface, not the project's scope.  Operator-facing docs in [docs/OPERATOR_GUIDE.md](docs/OPERATOR_GUIDE.md), agent-facing in [docs/AGENT_REFERENCE.md](docs/AGENT_REFERENCE.md).
 
-## Current state — v0.5 (v2 production-hardened + Phase-5 operator UX layered on top)
+## Current state — v0.6.x (v2 production-hardened + Phase-5 operator UX + W14 agentic-operator/security PM-2026-05-28 layered on top)
+
+Current version: see `pyproject.toml` + `src/harness/__init__.py::__version__` for the live value (these are the only sources that don't go stale — every other count in this doc is a snapshot).
+
 
 **v1 core** (single-Claude dev manager, in-session orchestration):
 
@@ -43,7 +46,7 @@ Underneath: cross-platform key resolution, JSONL audit ledger with redaction, re
 |---|---|
 | Adapter schema, loader, NL→YAML | [src/harness/adapters/](src/harness/adapters/) |
 | CLI — full verb list via `harness --help` / `harness capabilities` (live count beats stale doc numbers; P6 audit fix 2026-05-27) | [src/harness/cli.py](src/harness/cli.py) |
-| Engine ABC + 5 concrete (kimi/deepseek/anthropic/gemini/mock) + auto-fallback (mock excluded from prod chain) | [src/harness/engines/](src/harness/engines/) |
+| Engine ABC + 6 concrete (kimi/deepseek/anthropic/gemini/mimo/qwen) + MockEngine + auto-fallback (mock excluded from prod chain) | [src/harness/engines/](src/harness/engines/) |
 | State layer (JSON + SQLite + JSONL+redact; lazy init_db) | [src/harness/state/](src/harness/state/) |
 | DPAPI secrets | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
 | HarnessError L1-L5 taxonomy | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
@@ -65,7 +68,7 @@ Underneath: cross-platform key resolution, JSONL audit ledger with redaction, re
 | v2/A — Stateful 4-key proxy + circuit breaker + auto-quarantine on flap | [src/harness/proxy/](src/harness/proxy/) |
 | v2/B — Coord schemas + Planner + replan-from-failure + plan-from-NL | [src/harness/coord/schemas.py](src/harness/coord/schemas.py), [src/harness/coord/planner.py](src/harness/coord/planner.py) |
 | v2/C — Worker + worktree + checkpoint + progress-stream + heartbeat | [src/harness/coord/worker.py](src/harness/coord/worker.py), [src/harness/coord/worktree.py](src/harness/coord/worktree.py), [src/harness/coord/checkpoint.py](src/harness/coord/checkpoint.py) |
-| v2/D — Coordinator + Integrator + canceller + notify hook + `harness coord` CLI (12 subcommands) | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py), [src/harness/coord/canceller.py](src/harness/coord/canceller.py), [src/harness/coord/notify.py](src/harness/coord/notify.py) |
+| v2/D — Coordinator + Integrator + canceller + notify hook + `harness coord` CLI (13 subcommands as of 2026-05-28; check `harness coord --help` for the live count) | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py), [src/harness/coord/canceller.py](src/harness/coord/canceller.py), [src/harness/coord/notify.py](src/harness/coord/notify.py) |
 | v2/E — Operator UX: dashboard /v2/* JSON + HTML detail + cost panel + WS embed | [src/harness/dashboard/v2_routes.py](src/harness/dashboard/v2_routes.py), [src/harness/dashboard/app.py](src/harness/dashboard/app.py) |
 | v2/F — Production hardening: MockEngine + V2-FIRST-RUN smoke + budget meter wired to worker telemetry | [src/harness/engines/mock.py](src/harness/engines/mock.py), [tests/test_coord_smoke_e2e.py](tests/test_coord_smoke_e2e.py) |
 | Operator-config sub-schemas (session_handoff / kill_conditions / production_hygiene_balance) | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
@@ -85,11 +88,15 @@ Per operator directive 2026-05-20 ([feedback_xaxiu_harness_full_dev_authority](h
 - **Full dev authority** within xaxiu-harness scope. Commit, push, dispatch, install dependencies, modify code without per-action confirmation. Supersedes the prior 30 LOC ceiling **for this project only** — other projects (warehouse) still under [feedback_claude_strategic_role].
 - **Escalate to operator ONLY for L5 errors.** Definition in [reference_xaxiu_harness_error_taxonomy] — L5 = FATAL = operator action required (e.g. DPAPI unreadable, git auth lost). L1-L4 stay autonomous; the loop self-heals via cooldowns + auto-retry. The loop never globally halts on L5 — only the affected phase pauses with exponential backoff.
 
-## Engine routing (read [coord/dev_loop/dispatch-rules.md](coord/dev_loop/dispatch-rules.md) for the full table)
+## Engine routing (read [coord/dev_loop/dispatch-rules.md](coord/dev_loop/dispatch-rules.md) for the live table — rewritten 2026-05-26 for Pattern B)
 
-- **swarm/kimi** (xaxiu-swarm wrapping Kimi-Code CLI subprocess) → agentic, applies in-place edits. Use for multi-file refactors, in-place edit packets.
-- **swarm/kimi-api** (xaxiu-swarm + Kimi REST) → non-agentic. Single text response to deliverable path. Use for FIND/REPLACE blocks or full-file output the integrating supervisor parses.
-- **swarm/deepseek** (xaxiu-swarm + DeepSeek REST) → non-agentic. Same as kimi-api. V-file-spanning, math/schema-correctness, novel-feature drafting. Pair with `--no-thinking` for surgical patches.
+**Live source of truth**: `harness engines compatibility-matrix` (Phase 1.2 shipped 2026-05-28) renders an N×M table of every engine × every consumption surface (CLI/SDK/proxy/swarm); `harness engines describe <name>` returns per-engine metadata in one call.  Below is a short orientation, NOT the canonical reference.
+
+Three engine families currently in active rotation:
+
+- **Pattern A (direct HTTP)** — `deepseek`, `mimo`, `qwen`, `anthropic`, `gemini`.  Each speaks its native REST.  Use for routed `harness ask` + audit + dispatch.
+- **Pattern B (Claude-Code subprocess)** — `mimo-via-claude`, `kimi-via-claude`, `deepseek-via-claude`, `qwen-via-claude`.  Spawns Claude Code with a per-provider config, TOS-compliant for User-Agent-gated providers (MiMo Token Plan, Kimi Code subscription).  **DO NOT hand-roll a custom shim** — these wrappers exist precisely so you don't have to.
+- **Swarm subprocess (xaxiu-swarm)** — `swarm/kimi` (agentic, applies in-place edits), `swarm/kimi-api` / `swarm/deepseek` (non-agentic, write to `--deliverable` path).  Sibling repo; clone separately.  Multi-file refactors + multi-turn tool use.
 - **Never** dispatch to `--backend claude`; never use Claude Agent sub-agents for ship-gate audits ([feedback_no_claude_swarm_worker]).
 - **Multi-packet dispatch**: prefer `xaxiu-swarm swarm --max-concurrent N packet1 packet2 ...` over N separate `dispatch` calls.
 - **Mandatory flags**: `--timeout 420+` (swarm/kimi), `--deliverable`, `--add-dir`, `--context-file CLAUDE.md`, `--progress 30`.
@@ -108,7 +115,7 @@ Per operator directive 2026-05-20 ([feedback_xaxiu_harness_full_dev_authority](h
 
 ## Memory entries this session inherits
 
-Load these from `~/.claude/projects/D--Projects/memory/` (operator's Claude memory) at session start:
+Load these from `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (this project's isolated Claude memory) at session start:
 
 - `feedback_xaxiu_harness_full_dev_authority` — authority + escalation rule
 - `reference_xaxiu_harness_error_taxonomy` — L1-L5 + domain + code scheme
