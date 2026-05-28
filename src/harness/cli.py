@@ -1589,9 +1589,22 @@ def ask_cmd(
         engine_list = DEFAULT_ENGINES
         mode = "panel"
     else:
-        # Routed default — use the empirical recommender.
-        from harness.engines.routing_recommend import recommend
-        rec = recommend(task_class)
+        # Routed default — use the health-aware empirical recommender.
+        # W14-DISPATCH-HEALTH-AWARE-FALLBACK 2026-05-28: falls through
+        # to alternates when the primary pick is recently terminated.
+        from harness.engines.routing_recommend import recommend_healthy
+        rec = recommend_healthy(task_class)
+        if rec is None:
+            click.echo(
+                click.style(
+                    f"ERROR: no healthy engine available for task class "
+                    f"{task_class!r}.  All candidates are recently "
+                    f"terminated.  Check `harness engines health` + "
+                    f"`harness keys list` to diagnose.",
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(1)
         engine_list = (rec.engine,)
         mode = "routed"
         rationale = rec.rationale

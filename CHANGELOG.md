@@ -48,6 +48,8 @@ Full non-slow suite: 3067 passed, 8 skipped (was 3055, +12).
 
 W14-BUDGET-METER-PER-ENGINE-OBSERVER-HOOK.
 
+
+
 ## v0.6.3 — 2026-05-28 (Goodhart-aware sub-agent testing → ask-history hyphen anti-trap)
 
 Round 5 sub-agent tests designed to surface friction the prior 4-test

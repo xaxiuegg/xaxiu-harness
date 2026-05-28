@@ -235,3 +235,66 @@ def _pick_first(
         return _filter_excluded(primary, alternates, excluded)
     except ValueError:
         return None
+
+
+def recommend_healthy(
+    task_class: str,
+    *,
+    exclude: Optional[set[str]] = None,
+    health_probe_log_path=None,
+) -> Optional[Recommendation]:
+    """W14-DISPATCH-HEALTH-AWARE-FALLBACK 2026-05-28: recommend an
+    engine that's NOT recently terminated.
+
+    Wraps :func:`recommend` with the same routing data but consults
+    ``state/engine_health_probes.jsonl`` (W13-ENGINE-FAILURE-VISIBILITY)
+    and skips engines whose most-recent probe categorized as
+    ``terminated``.  Falls through to alternates within the
+    recommendation chain until a healthy engine is found.
+
+    Returns ``None`` if all candidates are terminated (caller should
+    surface this — typically as an L4 escalation since the operator's
+    chosen task class has no usable engine).
+
+    The ``exclude`` parameter still applies (e.g. audit-mode passing
+    the producer engine to dedup); terminated engines are added to
+    the exclude set rather than replacing it.
+
+    Engines in the Pattern B namespace (``mimo-via-claude``,
+    ``deepseek-via-claude``, ``kimi-via-claude``) map to their
+    underlying provider key (``mimo``, ``deepseek``, ``kimi``) when
+    comparing against the terminated set — health probes are keyed
+    by provider, not by wrapper.
+    """
+    from harness.engines.routing import _recently_terminated_engines
+    terminated_providers = _recently_terminated_engines(
+        log_path=health_probe_log_path,
+    )
+    if not terminated_providers:
+        # No terminated engines — bare recommend() is correct.  Convert
+        # ValueError (all-candidates-excluded) to None so callers don't
+        # need to wrap in try/except.
+        try:
+            return recommend(task_class, exclude=exclude)
+        except ValueError:
+            return None
+
+    def _provider_of(engine_name: str) -> str:
+        """Map Pattern B engine names to their underlying provider key."""
+        if engine_name.endswith("-via-claude"):
+            return engine_name[: -len("-via-claude")]
+        return engine_name
+
+    excludes = set(exclude or set())
+    # Walk recommend() N times, each iteration excluding the prior
+    # terminated picks.  Cap iterations to prevent infinite loop.
+    for _ in range(10):
+        try:
+            rec = recommend(task_class, exclude=excludes)
+        except ValueError:
+            return None
+        if _provider_of(rec.engine) in terminated_providers:
+            excludes.add(rec.engine)
+            continue
+        return rec
+    return None

@@ -288,22 +288,23 @@ def _pick_auditor_engines(
     producer_engine: str,
     num_auditors: int,
 ) -> list[tuple[str, str]]:
-    """Walk the recommender to pick up to N distinct auditor engines.
+    """Walk the health-aware recommender to pick up to N distinct
+    auditor engines.
 
     Returns list of (engine_name, model_override) tuples in priority
-    order.  Capped at the number of unique alternates available — if
-    only 2 distinct engines remain after excluding producer, returning
-    2 even when N=3 is requested.
+    order.  Capped at the number of unique HEALTHY alternates available
+    — if only 2 distinct engines remain after excluding producer + dead
+    engines, returning 2 even when N=3 is requested.
+
+    W14-DISPATCH-HEALTH-AWARE-FALLBACK 2026-05-28: now uses
+    ``recommend_healthy()`` to skip recently-terminated engines.
     """
-    from harness.engines.routing_recommend import recommend
+    from harness.engines.routing_recommend import recommend_healthy
     excludes = {producer_engine}
     out: list[tuple[str, str]] = []
     for _ in range(num_auditors):
-        try:
-            rec = recommend("audit", exclude=excludes)
-        except ValueError:
-            break  # exhausted candidates
-        if rec.engine in excludes:
+        rec = recommend_healthy("audit", exclude=excludes)
+        if rec is None or rec.engine in excludes:
             break
         out.append((rec.engine, rec.model_override or ""))
         excludes.add(rec.engine)
