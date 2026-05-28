@@ -430,12 +430,15 @@ def _agent_instructions_snippet(
             f"Cheap enough for routine second opinions; NOT for every "
             f"prompt (you're already an LLM — do the work yourself when "
             f"you can).\n\n"
-            f"Three modes:\n\n"
+            f"Three modes + conversational re-ask:\n\n"
             f"```bash\n"
             f"python -m harness ask \"...\"                  # routed, 1 engine ~$0.01-0.05\n"
             f"python -m harness ask \"...\" --task <class>   # routed by task class\n"
             f"python -m harness ask \"<claim>\" --audit      # 2 engines: producer + auditor ~$0.05\n"
             f"python -m harness ask \"...\" --panel          # 3 engines parallel ~$0.20-0.30\n"
+            f"python -m harness ask --rerun <dir>            # re-ask question from prior ask dir\n"
+            f"python -m harness ask --rerun <dir> --escalate audit\n"
+            f"                                              # upgrade routed → audit on the same question\n"
             f"```\n\n"
             f"Task classes: `default | latency | verbose | cost | "
             f"high-volume | multimodal | audit`.  "
@@ -516,6 +519,20 @@ def _agent_instructions_snippet(
             f"Answer: BOTH — see the dual `protocol_surfaces` field.  "
             f"Source-spelunking is no longer required for this class of "
             f"question.\n\n"
+            f"### 5. Past asks — `harness ask-history` + `ask-show`\n\n"
+            f"Browse the forever-record of past `harness ask` outputs "
+            f"without leaving the CLI:\n\n"
+            f"```bash\n"
+            f"python -m harness ask-history --last 10            # last 10 asks\n"
+            f"python -m harness ask-history --mode audit         # audit only\n"
+            f"python -m harness ask-history --verdict FAIL       # past failures\n"
+            f"python -m harness ask-history --format json | jq   # programmatic\n"
+            f"python -m harness ask-show <ask-id>                # render one\n"
+            f"```\n\n"
+            f"Pairs with `harness ask --rerun <dir>` (above): use "
+            f"`ask-history` to find an id, then `ask --rerun` to re-ask "
+            f"with the same question + optionally upgrade the mode via "
+            f"`--escalate audit` or `--escalate panel`.\n\n"
             f"### Start here — `harness introspect`\n\n"
             f"**The single command a fresh session should run first.**  "
             f"`python -m harness introspect --format json` returns one "
@@ -581,6 +598,11 @@ def _agent_instructions_snippet(
             f"summary, and recent ask outputs.  Single call, no "
             f"source-spelunking.  Use `harness doctor` for per-check "
             f"fix hints.\n\n"
+            f"**Past asks**: `harness ask-history` lists past outputs; "
+            f"`harness ask-show <id>` renders one; "
+            f"`harness ask --rerun <dir>` re-asks the same question "
+            f"(optionally with `--escalate audit` or `--escalate panel` "
+            f"to upgrade the mode).\n\n"
             f"**Before making engine-specific claims, query first:** "
             f"`harness engines describe <name>` returns protocol "
             f"surfaces / UA gating / key prefixes / recommended task "
@@ -600,13 +622,15 @@ def _agent_instructions_snippet(
             f"`harness introspect --format json` — single-call snapshot "
             f"of verbs, engines, proxy state, doctor.  Then: "
             f"(1) `harness ask \"...\"` — daily LLM verb (routed "
-            f"~$0.01-0.05, `--audit` ~$0.05, `--panel` ~$0.20-0.30); "
-            f"(2) `harness proxy start [--upstream <name>]` — OpenAI-"
-            f"compatible endpoint on 127.0.0.1:7879 with 5 upstreams; "
-            f"(3) `xaxiu-swarm` sibling for agentic multi-file dispatch.  "
-            f"`harness engines describe <name>` for engine metadata.  "
-            f"Reach for `--audit` when you've just made a non-obvious "
-            f"factual claim worth sanity-checking."
+            f"~$0.01-0.05, `--audit` ~$0.05, `--panel` ~$0.20-0.30, "
+            f"`--rerun <dir>` to re-ask + `--escalate {{audit|panel}}` "
+            f"to upgrade); (2) `harness proxy start [--upstream <name>]` "
+            f"— OpenAI-compatible endpoint on 127.0.0.1:7879 with 5 "
+            f"upstreams; (3) `xaxiu-swarm` sibling for agentic multi-"
+            f"file dispatch.  `harness engines describe <name>` for "
+            f"engine metadata.  `harness ask-history` + `ask-show` for "
+            f"past outputs.  Reach for `--audit` when you've just made "
+            f"a non-obvious factual claim worth sanity-checking."
         )
     else:
         raise ValueError(f"Unknown format: {fmt!r}")
@@ -886,6 +910,23 @@ _VALID_TASK_CLASSES = (
     "Override the auditor engine pick (default: chosen by recommender).  "
     "Implies --audit."
 ))
+@click.option("--rerun", "rerun_path", type=click.Path(
+    exists=True, file_okay=False, path_type=Path,
+), default=None, help=(
+    "Conversational re-ask: take the question from a previous ask-* "
+    "dir and re-dispatch.  Optionally combine with --escalate "
+    "{audit|panel} to upgrade the mode.  Saves to a new dir with "
+    "parent_id field in summary.json for traceability.  Conflicts "
+    "with positional QUESTION and --file."
+))
+@click.option("--escalate", "escalate_mode",
+              type=click.Choice(["audit", "panel"], case_sensitive=False),
+              default=None, help=(
+    "With --rerun, upgrade the dispatch mode of the re-ask.  "
+    "`--escalate audit` adds a different-engine auditor to a routed "
+    "or pinned producer.  `--escalate panel` switches to the 3-engine "
+    "parallel fanout.  Without --rerun this flag is ignored."
+))
 @click.option("--output", "output_dir", type=click.Path(
     file_okay=False, path_type=Path,
 ), default=None,
@@ -908,22 +949,26 @@ def ask_cmd(
     panel_mode: bool,
     audit_mode: bool,
     audit_engine_override: str,
+    rerun_path: Path | None,
+    escalate_mode: str | None,
     output_dir: Path | None,
     max_budget_usd: float,
     timeout_s: int,
     no_save: bool,
     print_text: bool,
 ) -> None:
-    """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED + ASK-AUDIT 2026-05-27:
-    daily-driver cross-engine LLM call.
+    """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED + ASK-AUDIT 2026-05-27
+    / W14-ASK-RERUN 2026-05-28: daily-driver cross-engine LLM call.
 
-    THREE modes:
+    THREE modes + conversational re-ask:
 
     \b
       routed (default)   1 engine via routing recommender,   ~$0.01-0.05
       --audit            producer → auditor (2 engines),     ~$0.05
       --panel            3-engine parallel fanout,           ~$0.20-0.30
       --engines X,Y,Z    pin specific engine(s), bypass recommender
+      --rerun <dir>      re-ask the question from a prior ask-* dir
+                         (optionally with --escalate {audit|panel})
 
     Examples:
 
@@ -934,6 +979,11 @@ def ask_cmd(
       harness ask "..." --panel                      # 3-engine fanout
       harness ask "..." --engines mimo-via-claude    # pin explicit
       harness ask --file question.md
+      harness ask --rerun coord/reviews/ask-...      # repeat the question
+      harness ask --rerun coord/reviews/ask-... --escalate audit
+                                                     # add audit layer
+      harness ask --rerun coord/reviews/ask-... --escalate panel
+                                                     # promote to 3-engine
 
     NOTE: bare `harness ask` was a 3-engine panel before v0.5.x.
     Pass `--panel` to keep that behavior.  The routed default uses
@@ -945,11 +995,102 @@ def ask_cmd(
     (no packet.md — the lone engine file IS the synthesis-ready artifact).
     Audit output: question.md + producer-<engine>.md + audit-<engine>.md
     + packet.md + summary.json (with `verdict` field: PASS / PARTIAL / FAIL).
+    Rerun output: same as the mode resolved by --escalate; summary.json
+    carries `parent_id` for traceability.
     """
     import datetime
     from harness.ask import (
         DEFAULT_ENGINES, _slugify, run_panel, run_audit, save_panel,
     )
+
+    # --escalate is meaningless without --rerun
+    if escalate_mode and rerun_path is None:
+        click.echo(
+            click.style(
+                "WARNING: --escalate has no effect without --rerun "
+                "(ignored).",
+                fg="yellow",
+            ), err=True,
+        )
+        escalate_mode = None
+
+    # Phase 2.2: --rerun loads question + engine defaults from a prior
+    # ask dir.  --escalate {audit|panel} optionally upgrades the mode.
+    parent_summary: dict = {}
+    parent_id: str = ""
+    if rerun_path is not None:
+        if question or question_file:
+            click.echo(
+                click.style(
+                    "ERROR: --rerun is incompatible with positional "
+                    "QUESTION and --file (the question comes from the "
+                    "rerun directory).",
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
+
+        q_file = rerun_path / "question.md"
+        if not q_file.exists():
+            click.echo(
+                click.style(
+                    f"ERROR: {rerun_path} does not contain question.md "
+                    f"— not a valid ask-* directory.",
+                    fg="red",
+                ), err=True,
+            )
+            sys.exit(2)
+
+        # Parse the question.md format ("# Panel question\n\n<text>\n")
+        q_raw = q_file.read_text(encoding="utf-8").strip()
+        if q_raw.startswith("# Panel question") and "\n\n" in q_raw:
+            q_raw = q_raw.split("\n\n", 1)[1]
+        # Synthesize the positional question for the resolver below
+        question = q_raw.strip()
+        parent_id = rerun_path.name
+
+        # Load parent summary to learn original mode + engines
+        summary_file = rerun_path / "summary.json"
+        if summary_file.exists():
+            try:
+                parent_summary = json.loads(
+                    summary_file.read_text(encoding="utf-8"),
+                )
+            except (json.JSONDecodeError, OSError):
+                parent_summary = {}
+
+        parent_mode = parent_summary.get("mode", "routed")
+        # Producer engine(s) = anything that wasn't the auditor
+        parent_engines = [
+            r.get("engine")
+            for r in parent_summary.get("results", [])
+            if r.get("engine") and r.get("role") != "audit"
+        ]
+
+        # Apply --escalate (or inherit parent's mode)
+        normalized_escalate = (escalate_mode or "").lower()
+        if normalized_escalate == "audit":
+            audit_mode = True
+            # Audit needs exactly 1 producer.  Use parent's first engine
+            # that wasn't the auditor.  If parent was panel, this picks
+            # the first of the 3.
+            if parent_engines:
+                engines = parent_engines[0]
+        elif normalized_escalate == "panel":
+            panel_mode = True
+            # Leave engines empty so panel_mode picks DEFAULT_ENGINES
+            engines = ""
+        else:
+            # No escalation — inherit parent's mode + engine set
+            if parent_mode == "panel":
+                panel_mode = True
+            elif parent_mode == "audit":
+                audit_mode = True
+                if parent_engines:
+                    engines = parent_engines[0]
+            elif parent_engines:
+                # Original was routed or pinned — pin those engines
+                engines = ",".join(e for e in parent_engines if e)
 
     # --audit-engine implies --audit.  Cheaper UX than requiring both.
     if audit_engine_override:
@@ -1088,6 +1229,20 @@ def ask_cmd(
     # use parallel fanout (1 or N engines).
     roles: list[str] = []
     extra_summary: dict = {}
+    # If this is a --rerun, carry the parent id forward so the new
+    # summary.json is self-describing.  Both branches below `.update()`
+    # rather than reassign so this survives.
+    if parent_id:
+        extra_summary["parent_id"] = parent_id
+        if parent_summary.get("mode"):
+            extra_summary["parent_mode"] = parent_summary["mode"]
+        if escalate_mode:
+            extra_summary["escalated_from"] = parent_summary.get("mode", "?")
+            extra_summary["escalated_to"] = (
+                "audit" if audit_mode else
+                "panel" if panel_mode else
+                mode
+            )
     if mode == "audit":
         outcome = run_audit(
             question_text,
@@ -1101,20 +1256,20 @@ def ask_cmd(
             # non-response is meaningless).  Single result, no verdict.
             results = [outcome.producer]
             roles = ["producer"]
-            extra_summary = {
+            extra_summary.update({
                 "producer_engine": producer_engine_for_audit,
                 "auditor_engine": "",
                 "verdict": None,
                 "audit_skipped_reason": "producer dispatch failed",
-            }
+            })
         else:
             results = [outcome.producer, outcome.auditor]
             roles = ["producer", "audit"]
-            extra_summary = {
+            extra_summary.update({
                 "producer_engine": producer_engine_for_audit,
                 "auditor_engine": outcome.auditor_engine,
                 "verdict": outcome.verdict,
-            }
+            })
     else:
         results = run_panel(
             question_text,
@@ -2918,6 +3073,77 @@ def lint_spec_cmd(spec_path: Path | None, spec_opt: Path | None, fmt: str) -> No
 
     # Exit 1 if any error-severity finding exists; exit 0 on warn-only / clean
     sys.exit(0 if ready else 1)
+
+
+@cli.command(name="ask-history")
+@click.option("--last", "last_n", type=int, default=20, show_default=True,
+              help="Cap the result count.  Pass 0 for unlimited.")
+@click.option("--mode", "mode_filter",
+              type=click.Choice(["routed", "audit", "panel"]),
+              default=None,
+              help="Filter to one mode.  Default: all modes.")
+@click.option("--verdict", "verdict_filter",
+              type=click.Choice(
+                  ["PASS", "PARTIAL", "FAIL", "UNKNOWN"],
+                  case_sensitive=False,
+              ),
+              default=None,
+              help="Filter by audit verdict.  Implies --mode audit.")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]),
+              default="text", show_default=True)
+def ask_history_cmd(
+    last_n: int, mode_filter: str | None,
+    verdict_filter: str | None, fmt: str,
+) -> None:
+    """W14-ASK-HISTORY 2026-05-28 (Phase 2.3): list past `harness ask`
+    outputs from `coord/reviews/`.
+
+    Pairs with `harness ask --rerun <dir>` (Phase 2.2): use this to
+    find an id, then re-ask with that id.
+
+    Examples:
+
+      \b
+      harness ask-history --last 10                # last 10 asks
+      harness ask-history --mode audit             # audit-mode only
+      harness ask-history --verdict FAIL           # past failures
+      harness ask-history --format json | jq '.'   # programmatic
+    """
+    from harness.ask_history import list_asks, render_history_text
+    rows = list_asks(
+        last_n=last_n if last_n > 0 else 0,
+        mode_filter=mode_filter,
+        verdict_filter=verdict_filter,
+    )
+    if fmt == "json":
+        click.echo(json.dumps(rows, indent=2, default=str))
+    else:
+        click.echo(render_history_text(rows))
+    sys.exit(0)
+
+
+@cli.command(name="ask-show")
+@click.argument("ask_id")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]),
+              default="text", show_default=True)
+def ask_show_cmd(ask_id: str, fmt: str) -> None:
+    """W14-ASK-HISTORY 2026-05-28 (Phase 2.3): render one past ask
+    output: question, mode, engines, verdict (if audit), per-engine
+    responses.
+
+    Pass the directory name from `harness ask-history` output, e.g.
+    `harness ask-show ask-20260528-115620-some-question-slug`.
+    """
+    from harness.ask_history import load_ask, render_ask_text
+    data = load_ask(ask_id)
+    if "error" in data:
+        click.echo(click.style(f"ERROR: {data['error']}", fg="red"), err=True)
+        sys.exit(1)
+    if fmt == "json":
+        click.echo(json.dumps(data, indent=2, default=str))
+    else:
+        click.echo(render_ask_text(data))
+    sys.exit(0)
 
 
 @cli.command(name="introspect")

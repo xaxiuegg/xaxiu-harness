@@ -1,5 +1,64 @@
 # Changelog
 
+## v0.5.6 — 2026-05-28 (conversational re-asks + history browser)
+
+### Phase 2.2 + 2.3 of agentic-operator roadmap
+
+Two related verbs that turn `coord/reviews/ask-*/` from a write-only
+forever-record into a queryable + replayable history.
+
+**`harness ask --rerun <dir> [--escalate {audit|panel}]`** (Phase 2.2)
+
+Re-asks the question from a prior ask-* dir.  Without `--escalate`,
+inherits the parent's mode + engines.  With `--escalate audit`,
+upgrades a routed answer to a producer→auditor flow on the same
+question.  With `--escalate panel`, promotes to the 3-engine fanout.
+The new ask's `summary.json` carries `parent_id`, `parent_mode`,
+`escalated_from`, and `escalated_to` for traceability.
+
+```bash
+harness ask --rerun coord/reviews/ask-...                # repeat
+harness ask --rerun coord/reviews/ask-... --escalate audit
+harness ask --rerun coord/reviews/ask-... --escalate panel
+```
+
+Conflicts: `--rerun` cannot be combined with positional QUESTION or
+`--file` (the question comes from the rerun dir).  `--escalate`
+without `--rerun` emits a warning + is ignored.
+
+**`harness ask-history` + `harness ask-show <id>`** (Phase 2.3)
+
+Browse past `harness ask` outputs without leaving the CLI.
+
+```bash
+harness ask-history --last 10              # newest 10
+harness ask-history --mode audit           # audit only
+harness ask-history --verdict FAIL         # past failures
+harness ask-history --format json | jq     # programmatic
+harness ask-show ask-20260528-...          # render one
+harness ask-show ask-20260528-... --format json
+```
+
+The natural pairing: use `ask-history` to find a parent id, then
+`ask --rerun <dir>` to replay it.
+
+### Module + tests
+
+- New: `src/harness/ask_history.py` (`list_asks`, `load_ask`,
+  `render_history_text`, `render_ask_text`).  20 tests in
+  `tests/test_ask_history.py`.
+- New CLI verbs in `src/harness/cli.py`: `ask-history`, `ask-show`,
+  plus `--rerun` + `--escalate` flags on the existing `ask` command.
+- `tests/test_ask.py` gains a `TestAskRerun` class (7 tests covering
+  question inheritance, --escalate audit/panel/none, conflicts with
+  positional/file, missing question.md error, --escalate without
+  --rerun warning).
+- Agent-instructions templates updated: ask section gains
+  `--rerun`/`--escalate` examples; new "Past asks" subsection (claude-md
+  Section 5) covers `ask-history` + `ask-show`.
+
+W14-ASK-RERUN + W14-ASK-HISTORY.
+
 ## v0.5.5 — 2026-05-28 (harness introspect — single-call discovery primitive)
 
 ### Phase 2.1 of agentic-operator roadmap

@@ -1018,3 +1018,211 @@ class TestAuditCli:
         assert result.exit_code == 1
         # Only the producer was dispatched
         assert mock_dispatch.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# W14-ASK-RERUN 2026-05-28 (Phase 2.2): --rerun <dir> --escalate {audit|panel}
+# ---------------------------------------------------------------------------
+
+
+def _build_ask_dir(
+    tmp_path: Path, question: str, mode: str = "routed",
+    engines: list[str] | None = None, dirname: str | None = None,
+) -> Path:
+    """Build a fake ask-* dir containing question.md + summary.json,
+    suitable as input to `harness ask --rerun <dir>`."""
+    dirname = dirname or "ask-20260527-test-question"
+    d = tmp_path / dirname
+    d.mkdir()
+    (d / "question.md").write_text(
+        f"# Panel question\n\n{question}\n",
+        encoding="utf-8",
+    )
+    eng = engines or ["mimo-via-claude"]
+    (d / "summary.json").write_text(json.dumps({
+        "question": question,
+        "mode": mode,
+        "results": [
+            {"engine": e, "role": "" if mode != "audit" else
+             ("producer" if i == 0 else "audit")}
+            for i, e in enumerate(eng)
+        ],
+        "total_cost_usd": 0.01,
+    }), encoding="utf-8")
+    return d
+
+
+class TestAskRerun:
+    """`--rerun <dir>` loads question from a prior ask dir + optionally
+    upgrades the mode via `--escalate {audit|panel}`."""
+
+    def test_rerun_inherits_question_and_engine(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        parent = _build_ask_dir(
+            tmp_path, "Why is X true?",
+            mode="routed", engines=["mimo-via-claude"],
+        )
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(text="answer"),
+        ) as mock_dispatch:
+            result = runner.invoke(cli, [
+                "ask", "--rerun", str(parent), "--no-save",
+            ])
+        assert result.exit_code == 0
+        # Recommender NOT called — parent's engine was inherited
+        # (mock_dispatch was called with the inherited engine)
+        assert mock_dispatch.call_count == 1
+        assert mock_dispatch.call_args_list[0].args[0] == "mimo-via-claude"
+        # Question text was read from question.md
+        assert "Why is X true?" in mock_dispatch.call_args_list[0].args[1]
+
+    def test_rerun_with_escalate_audit_promotes_routed_to_audit(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        parent = _build_ask_dir(
+            tmp_path, "Is Y the case?",
+            mode="routed", engines=["mimo-via-claude"],
+        )
+        producer_resp = _mock_pool_result(text="answer")
+        auditor_resp = _mock_pool_result(
+            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: fine\n"
+        )
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("deepseek-via-claude"),
+            ) as mock_rec,
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                side_effect=[producer_resp, auditor_resp],
+            ) as mock_dispatch,
+        ):
+            result = runner.invoke(cli, [
+                "ask", "--rerun", str(parent),
+                "--escalate", "audit",
+                "--output", str(tmp_path / "rerun-out"),
+            ])
+        assert result.exit_code == 0
+        # Two dispatches (producer + auditor); recommender consulted
+        # for the auditor pick with exclude={producer}
+        assert mock_dispatch.call_count == 2
+        assert mock_dispatch.call_args_list[0].args[0] == "mimo-via-claude"
+        assert mock_dispatch.call_args_list[1].args[0] == "deepseek-via-claude"
+        # Recommender called with audit class
+        mock_rec.assert_called_once()
+        assert mock_rec.call_args.args[0] == "audit"
+        # Output dir has parent_id surfacing the parent ask
+        out = tmp_path / "rerun-out"
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["parent_id"] == parent.name
+        assert summary["mode"] == "audit"
+        assert summary["escalated_from"] == "routed"
+        assert summary["escalated_to"] == "audit"
+
+    def test_rerun_with_escalate_panel_promotes_to_3_engines(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        parent = _build_ask_dir(
+            tmp_path, "Should we ship X?",
+            mode="routed", engines=["mimo-via-claude"],
+        )
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(text="resp"),
+        ) as mock_dispatch:
+            result = runner.invoke(cli, [
+                "ask", "--rerun", str(parent),
+                "--escalate", "panel",
+                "--output", str(tmp_path / "panel-rerun"),
+            ])
+        assert result.exit_code == 0
+        # 3 dispatches across the default panel engines
+        assert mock_dispatch.call_count == 3
+        engines_called = {
+            c.args[0] for c in mock_dispatch.call_args_list
+        }
+        assert engines_called == set(DEFAULT_ENGINES)
+        # Parent traceability + escalation metadata in summary.json
+        out = tmp_path / "panel-rerun"
+        summary = json.loads(
+            (out / "summary.json").read_text(encoding="utf-8"),
+        )
+        assert summary["parent_id"] == parent.name
+        assert summary["mode"] == "panel"
+        assert summary["escalated_to"] == "panel"
+
+    def test_rerun_no_escalate_inherits_panel_mode(
+        self, tmp_path: Path,
+    ) -> None:
+        """Parent was --panel; rerun without --escalate stays panel."""
+        runner = CliRunner()
+        parent = _build_ask_dir(
+            tmp_path, "Original panel question",
+            mode="panel",
+            engines=list(DEFAULT_ENGINES),
+        )
+        with patch(
+            "harness.engines.pool_dispatch.dispatch_with_pool",
+            return_value=_mock_pool_result(text="resp"),
+        ) as mock_dispatch:
+            result = runner.invoke(cli, [
+                "ask", "--rerun", str(parent), "--no-save",
+            ])
+        assert result.exit_code == 0
+        assert mock_dispatch.call_count == 3
+
+    def test_rerun_conflicts_with_positional_question(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        parent = _build_ask_dir(tmp_path, "Original q")
+        result = runner.invoke(cli, [
+            "ask", "New q", "--rerun", str(parent), "--no-save",
+        ])
+        assert result.exit_code == 2
+        combined = (result.output + (result.stderr or "")).lower()
+        assert "incompat" in combined or "conflict" in combined
+
+    def test_rerun_missing_question_md_errors(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        broken = tmp_path / "ask-broken"
+        broken.mkdir()  # no question.md
+        result = runner.invoke(cli, [
+            "ask", "--rerun", str(broken), "--no-save",
+        ])
+        assert result.exit_code == 2
+        combined = result.output + (result.stderr or "")
+        assert "question.md" in combined
+
+    def test_escalate_without_rerun_warns_and_ignores(
+        self, tmp_path: Path,
+    ) -> None:
+        runner = CliRunner()
+        with (
+            patch(
+                "harness.engines.routing_recommend.recommend",
+                return_value=_mock_recommendation("mimo-via-claude"),
+            ),
+            patch(
+                "harness.engines.pool_dispatch.dispatch_with_pool",
+                return_value=_mock_pool_result(text="answer"),
+            ),
+        ):
+            result = runner.invoke(cli, [
+                "ask", "test", "--escalate", "audit", "--no-save",
+            ])
+        # Warning surfaces but command still succeeds (single routed dispatch)
+        assert result.exit_code == 0
+        combined = (result.output + (result.stderr or "")).lower()
+        assert "escalate" in combined and (
+            "ignored" in combined or "no effect" in combined
+        )
