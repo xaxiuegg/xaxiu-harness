@@ -30,9 +30,16 @@ def _loop_tick_cmd() -> str:
 
 def _build_register_script(cadence_minutes: int) -> str:
     action_cmd = _loop_tick_cmd()
+    # W14-LOOP-CWD-FIX (2026-05-27): include -WorkingDirectory so Task
+    # Scheduler doesn't run the action from `C:\Windows\System32` (the
+    # default).  Without this, `python -m harness loop tick` blew up
+    # with `PermissionError: [WinError 5] Access is denied: 'coord'`
+    # because the loop state path was cwd-relative.  Belt-and-suspenders
+    # with the cli.py default-path fix anchoring to _REPO_ROOT.
+    working_dir = str(_REPO_ROOT)
     return f"""
 $TaskName = '{TASK_NAME}'
-$Action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command ""{action_cmd}""'
+$Action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command ""{action_cmd}""' -WorkingDirectory '{working_dir}'
 $Trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes {cadence_minutes}) -RepetitionDuration (New-TimeSpan -Days 3650)
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited

@@ -21,6 +21,11 @@ from typing import Any, Optional
 import click
 import yaml
 
+from harness._constants import (
+    _REPO_ROOT,
+    LOOP_DEFAULT_OBSERVER_DIR,
+    LOOP_DEFAULT_STATE_PATH,
+)
 from harness.adapters.from_description import generate_adapter_from_nl
 from harness.adapters.loader import _repo_root, load_project_adapter, load_template
 from harness.adapters.scaffold import scaffold_adapter
@@ -5130,7 +5135,7 @@ def state() -> None:
 @state.command(name="inspect")
 @click.option("--format", "fmt", type=click.Choice(["pretty", "json", "compact"]), default="pretty")
 @click.option("--path", type=click.Path(path_type=Path),
-              default=Path("coord/dev_loop/state.json"))
+              default=lambda: LOOP_DEFAULT_STATE_PATH)
 def state_inspect(fmt: str, path: Path) -> None:
     """Pretty-print coord/dev_loop/state.json for the operator."""
     from harness.errors import ConfigCorruption
@@ -5196,7 +5201,7 @@ def loop_group() -> None:
 
 @loop_group.command(name="init")
 @click.option("--state-path", type=click.Path(path_type=Path),
-              default=Path("coord/dev_loop/state.json"))
+              default=lambda: LOOP_DEFAULT_STATE_PATH)
 def loop_init_cmd(state_path: Path) -> None:
     """Create state.json with defaults if missing."""
     from harness.loops.state import LoopState, write_state
@@ -5210,9 +5215,16 @@ def loop_init_cmd(state_path: Path) -> None:
 
 @loop_group.command(name="tick")
 @click.option("--state-path", type=click.Path(path_type=Path),
-              default=Path("coord/dev_loop/state.json"))
+              default=lambda: LOOP_DEFAULT_STATE_PATH,
+              help="Override the loop state file.  Default anchors to the "
+                   "repo root via _REPO_ROOT so Task Scheduler invocations "
+                   "from C:\\Windows\\System32 still resolve correctly "
+                   "(W14-LOOP-CWD-FIX 2026-05-27).")
 @click.option("--project-root", type=click.Path(path_type=Path),
-              default=Path.cwd())
+              default=lambda: _REPO_ROOT,
+              help="Override project root for adapter resolution.  Default "
+                   "is the harness repo root, not Path.cwd() (which broke "
+                   "Task Scheduler runs pre-W14-LOOP-CWD-FIX).")
 def loop_tick_cmd(state_path: Path, project_root: Path) -> None:
     """Run one tick of the autonomous loop."""
     from datetime import datetime, timezone
@@ -5221,7 +5233,7 @@ def loop_tick_cmd(state_path: Path, project_root: Path) -> None:
     try:
         result = _tick(
             state_path=state_path,
-            observer_dir=Path("coord/observer"),
+            observer_dir=LOOP_DEFAULT_OBSERVER_DIR,
             project=project_root,
             now=datetime.now(timezone.utc),
         )
@@ -5259,7 +5271,7 @@ def loop_stop_cmd() -> None:
 
 @loop_group.command(name="status")
 @click.option("--state-path", type=click.Path(path_type=Path),
-              default=Path("coord/dev_loop/state.json"))
+              default=lambda: LOOP_DEFAULT_STATE_PATH)
 def loop_status_cmd(state_path: Path) -> None:
     """Print loop_status + tick_count + last_tick_at + observer + session flags."""
     from harness.loops.scheduler import is_registered

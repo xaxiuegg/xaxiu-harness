@@ -27,8 +27,14 @@ __all__ = [
 ]
 
 
-HEARTBEAT_PATH: Path = Path("coord/dev_loop/heartbeat.json")
-STATE_PATH: Path = Path("coord/dev_loop/state.json")
+# W14-LOOP-CWD-FIX (2026-05-27): both paths are anchored to the repo
+# root via _REPO_ROOT so Task Scheduler invocations from any cwd
+# (notably C:\Windows\System32) resolve correctly.  Pre-fix bug:
+# `harness heartbeat show` from a fresh shell silently wrote to
+# `<cwd>/coord/dev_loop/...` instead of the repo's coord/.
+from harness._constants import _REPO_ROOT as _HB_REPO_ROOT
+HEARTBEAT_PATH: Path = _HB_REPO_ROOT / "coord" / "dev_loop" / "heartbeat.json"
+STATE_PATH: Path = _HB_REPO_ROOT / "coord" / "dev_loop" / "state.json"
 
 _ISO_RE = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$"
 
@@ -79,15 +85,24 @@ def _last_escalation_id(state: dict[str, Any]) -> str | None:
 
 
 def pulse(
-    state_path: Path = STATE_PATH,
-    heartbeat_path: Path = HEARTBEAT_PATH,
+    state_path: Path | None = None,
+    heartbeat_path: Path | None = None,
 ) -> Heartbeat:
     """Read ``state_path``, derive a ``Heartbeat``, write atomically.
 
     Raises ``FileNotFoundError`` if ``state_path`` is missing — the dev
     manager calls this from inside an established loop, so a missing
     state file is a real error rather than a no-op.
+
+    W14-LOOP-CWD-FIX (2026-05-27): defaults resolve at CALL time, not
+    definition time, so monkey-patching the module-level ``STATE_PATH`` /
+    ``HEARTBEAT_PATH`` constants works as expected.  The previous
+    `path = HEARTBEAT_PATH` default captured the value at import.
     """
+    if state_path is None:
+        state_path = STATE_PATH
+    if heartbeat_path is None:
+        heartbeat_path = HEARTBEAT_PATH
     p = Path(state_path)
     if not p.exists():
         raise FileNotFoundError(f"state file missing: {p}")
@@ -124,8 +139,14 @@ def _atomic_write(path: Path, data: dict[str, Any]) -> None:
         pass
 
 
-def read_heartbeat(path: Path = HEARTBEAT_PATH) -> Heartbeat | None:
-    """Load the latest heartbeat; return ``None`` if missing."""
+def read_heartbeat(path: Path | None = None) -> Heartbeat | None:
+    """Load the latest heartbeat; return ``None`` if missing.
+
+    W14-LOOP-CWD-FIX (2026-05-27): default resolves at CALL time for
+    correct monkey-patching of ``HEARTBEAT_PATH``.
+    """
+    if path is None:
+        path = HEARTBEAT_PATH
     p = Path(path)
     if not p.exists():
         return None

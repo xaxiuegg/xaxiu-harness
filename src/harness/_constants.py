@@ -37,3 +37,14 @@ PROJECT_NAME_REGEX: Final = r"^[a-z0-9-]{1,32}$"
 # %APPDATA%/xaxiu-harness/state — addressed when the installer ships.
 _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 STATE_DIR: Final = _REPO_ROOT / "state"
+
+# W14-LOOP-CWD-FIX (2026-05-27): the dev-loop and observer keep state under
+# ``coord/`` (separate from STATE_DIR's DPAPI store).  Anchor those paths
+# to the repo root so Task Scheduler invocations from `C:\Windows\System32`
+# (or any other cwd) write to the correct location.  Pre-fix bug: 336
+# failed XaxiuHarnessLoopTick invocations over 7 days, each tripping
+# `PermissionError: [WinError 5] Access is denied: 'coord'` because the
+# default `Path("coord/dev_loop/state.json")` resolved against the
+# scheduler's cwd, not the repo.
+LOOP_DEFAULT_STATE_PATH: Final = _REPO_ROOT / "coord" / "dev_loop" / "state.json"
+LOOP_DEFAULT_OBSERVER_DIR: Final = _REPO_ROOT / "coord" / "observer"

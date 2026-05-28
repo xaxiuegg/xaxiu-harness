@@ -1,11 +1,10 @@
 {
   "schema_version": 1,
   "loop_status": "armed",
-  "loop_status_legend": {
-    "armed": "loop running normally",
-    "operator_paused": "operator manually paused via flag",
-    "exhausted_plan": "all wave_plan entries are done"
-  },
+  "tick_count": 14,
+  "last_tick_at": "2026-05-28T03:27:28Z",
+  "started_at": null,
+  "project_name": null,
   "phase_status": {
     "creativity": "armed",
     "developing": "armed",
@@ -13,49 +12,238 @@
     "integrating": "armed",
     "process_improvement": "armed"
   },
-  "phase_status_legend": {
-    "armed": "phase eligible to run this tick",
-    "paused_by_escalation": "see escalations[] for the L5 tag pausing this phase; auto-retries when next_retry_at <= now"
-  },
-  "notification": {
-    "method": "file",
-    "file_path": "coord/dev_loop/escalations.md",
-    "windows_toast": false
-  },
-  "created_at": "2026-05-20T03:50:00Z",
-  "last_tick_at": "2026-05-21T00:02:35Z",
-  "tick_count": 11,
-  "operator_directives": {
-    "full_dev_authority": true,
-    "escalation_threshold": "L5",
-    "approved_engine_routing": {
-      "creativity": {
-        "engine": "claude-in-session",
-        "model": null
-      },
-      "developing": {
-        "engine": "kimi",
-        "model": null
-      },
-      "testing": {
-        "engine": "kimi",
-        "model": null
-      },
-      "integrating": {
-        "engine": "claude-in-session",
-        "model": null
-      },
-      "process_improvement": {
-        "engine": "claude-in-session",
-        "model": null
-      }
+  "active_dispatches": [
+    {
+      "task_id": "dispatch-2026-05-21T02-35-wave3-dashboard",
+      "packet": "coord/packets/2026-05-21-wave3-dashboard/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-21T02:35:32Z",
+      "phase": "developing",
+      "wave_id": "wave-3",
+      "timeout_seconds": 1200,
+      "bg_handle": "biatdaadg"
     },
-    "cadence_minutes": {
-      "creativity": 360,
-      "developing": 30,
-      "testing": 60,
-      "integrating": 20,
-      "process_improvement": 120
+    {
+      "task_id": "dispatch-2026-05-21T02-40-wave6A-loops",
+      "packet": "coord/packets/2026-05-21-wave6A-loops-core/packet.md",
+      "engine": "swarm/kimi",
+      "dispatched_at": "2026-05-21T02:40:00Z",
+      "phase": "developing",
+      "wave_id": "wave-6/A",
+      "timeout_seconds": 1200,
+      "note": "Parallel with Wave 3; disjoint file sets (dashboard/ vs loops/)"
+    }
+  ],
+  "wave_plan": [
+    {
+      "id": "wave-A.1",
+      "name": "wire dispatch verb to dispatch_packet",
+      "status": "done",
+      "depends_on": [],
+      "completed_at": "2026-05-20T02:48:00Z"
+    },
+    {
+      "id": "wave-A",
+      "name": "wire remaining 10 CLI verbs",
+      "status": "done",
+      "depends_on": [],
+      "completed_at": "2026-05-20T11:26:27Z"
+    },
+    {
+      "id": "wave-A.5",
+      "name": "error taxonomy spec + src/harness/errors.py",
+      "status": "done",
+      "depends_on": [
+        "wave-A"
+      ],
+      "completed_at": "2026-05-20T11:26:27Z"
+    },
+    {
+      "id": "wave-A.6",
+      "name": "retrofit raises across codebase to HarnessError subclasses",
+      "status": "done",
+      "depends_on": [
+        "wave-A.5"
+      ],
+      "completed_at": "2026-05-20T12:16:39Z",
+      "current_dispatch": "bv4wtqu7g",
+      "completion_note": "Scope refined during execution: 4 raises retrofitted (1 in dpapi.py to ConfigCorruption, 3 in jsonl_log.py to SchemaViolation). Pydantic validators, user-input validation in loader, dispatcher's contract-protected raise (L81), and assertion-style RuntimeErrors intentionally left as ValueError/RuntimeError — they don't fit the L3-L5 operational error model. 89/89 tests still green.",
+      "attempt_count": 1
+    },
+    {
+      "id": "wave-B",
+      "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI",
+      "status": "done",
+      "depends_on": [
+        "wave-A"
+      ],
+      "completed_at": "2026-05-20T13:19:31Z",
+      "last_attempt_at": "2026-05-20T12:08:10Z",
+      "attempt_count": 1,
+      "last_failure_mode": "kimi_api_packet_trap_prose_not_edits (non-agentic backend)",
+      "next_strategy": "Wait for Kimi CLI cooldown (~25 min remaining); dispatch the 2 test files as ONE Kimi CLI packet (interdependent fixtures); CI already gates regressions.",
+      "partial_complete": [
+        "ci_workflow_yml"
+      ],
+      "pending_work": [
+        "tests/test_engines_concrete_boundary.py",
+        "tests/test_engines_guards_boundary.py"
+      ],
+      "current_swarm_run": "2026-05-20T12:54",
+      "completion_note": "75 new tests, 164/164 green; concrete.py + guards.py boundary coverage achieved. Swarm worker-1 was tagged timeout but Kimi-Code CLI applies edits incrementally - the file landed."
+    },
+    {
+      "id": "wave-4",
+      "name": "Windows installer + first-run wizard",
+      "status": "done",
+      "depends_on": [
+        "wave-A",
+        "wave-B"
+      ],
+      "completed_at": "2026-05-20T13:53:38Z",
+      "spec_ready": "spec/wave-4-installer.md",
+      "packet_ready": "coord/packets/2026-05-20-wave4-installer/packet.md",
+      "awaiting": "Wave B/1 + B/2 to complete (frees swarm/kimi slot); ideally also Wave 7 for operator-mode wizard prompt",
+      "current_swarm_run": "2026-05-20T13:08",
+      "completion_note": "Authored by swarm/kimi (timeout-tag but Kimi-CLI incremental edits landed all 4 files); tests/test_install_smoke.py patch path fixed inline; 171/171 then 185/185 pass."
+    },
+    {
+      "id": "wave-5",
+      "name": "templates + NLâ†’YAML translator + visual config builder",
+      "status": "done",
+      "depends_on": [
+        "wave-4"
+      ],
+      "completed_at": "2026-05-21T01:50:00Z",
+      "dispatched_at": "2026-05-21T01:28:21Z",
+      "current_dispatch": "b8nt1z3rd (swarm round-3)",
+      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
+      "completion_note": "Round 3 swarm: both workers tagged timeout @ 1200s but landed full deliverables via incremental Kimi-CLI edits. Wave 5/A: 6 templates created (adapters/templates/*.yaml). Wave 5/B: from_description.py + _nl_to_yaml_prompt.md + adapter verb group + 23 tests. Bonus: W7C OperatorSection added to schema.py + init verb emits operator: YAML (3 waves in 1 round). 369/369 tests pass."
+    },
+    {
+      "id": "wave-3",
+      "name": "dashboard backend + frontend (FastAPI + WebSocket)",
+      "status": "done",
+      "depends_on": [
+        "wave-4"
+      ],
+      "completed_at": "2026-05-21T03:35:00Z",
+      "completion_note": "Shipped Round 5 via Kimi clean exit (biatdaadg); 9 files (cli wiring + dashboard module + static + tests); 15 tests; commit 71225ad."
+    },
+    {
+      "id": "wave-6",
+      "name": "autonomous loops as harness feature (productize dev_loop pattern)",
+      "status": "done",
+      "depends_on": [
+        "wave-3",
+        "wave-5"
+      ],
+      "completed_at": "2026-05-21T04:18:00Z",
+      "completion_note": "Shipped via Wave 6/A (loops core; commit a7ef925) + 6/B (CLI + scheduler; inline) + 6/C (real supervisors; commit d25db4d). harness loop init/tick/start/stop/status all operational. CreativitySupervisor/DevelopingSupervisor/IntegratingSupervisor/ProcessImprovementSupervisor + TestingSupervisor all real per Wave 6/C.",
+      "ignored": "planned-status-line-below-historical",
+      "operator_added": "2026-05-20",
+      "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration",
+      "scope_expansion_2026_05_20": "Must include operator-modes config surface: every directive given in this dev-loop session becomes a discoverable CLI flag / YAML key. See memory feedback_operator_inputs_become_harness_config for the directive table (full-dev-authority, L5 escalation, parallelism, engine-fill, etc.).",
+      "feature_roster": "spec/session-derived-feature-roster.md",
+      "acceptance_gate": "Every row in feature roster must be checked ✅ before Wave 6 ships"
+    },
+    {
+      "id": "wave-7",
+      "name": "operator-mode CLI flags + adapter.operator YAML section",
+      "status": "done",
+      "depends_on": [
+        "wave-A",
+        "wave-B"
+      ],
+      "completed_at": "2026-05-20T13:59:13Z",
+      "operator_added": "2026-05-20",
+      "note": "Surface session directives as harness config (--full-dev-authority, --escalation-threshold L5, --engine-fill aggressive, etc.). Foundation for Wave 6. Smaller scope than full productization.",
+      "packet_ready": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
+      "spec_ready": "spec/operator-modes.md",
+      "awaiting": "swarm/kimi cooldown lift at 12:53:14Z",
+      "current_swarm_run": "2026-05-20T13:08",
+      "attempt_count": 1,
+      "partial_complete": [
+        "7/A: foundation module (operator/__init__, modes, config, flags) + tests"
+      ],
+      "pending_work": [
+        "7/B: cli.py @apply_operator_flags wiring; schema.py OperatorSection; dispatch dry_run handling; init verb operator: emission"
+      ],
+      "completed_at_7A": "2026-05-20T13:53:38Z",
+      "completion_note": "7/A foundation (operator/* module + 14 tests) + 7/B CLI integration (apply_operator_flags on @cli.group, ctx.obj, dispatch dry_run handling) both inline; 185/185 tests green; harness --help shows 7 new flags; smoke confirmed --mode dry_run dispatch exits 0 without dispatch. Schema OperatorSection deferred to Wave 7/C (low priority polish)."
+    },
+    {
+      "id": "wave-B2",
+      "name": "boundary tests for remaining 5 coverage gaps (dpapi/state-*/cli_helpers)",
+      "status": "done",
+      "depends_on": [
+        "wave-A"
+      ],
+      "completed_at": "2026-05-20T14:30:00Z",
+      "dispatched_via": "xaxiu-swarm swarm --max-concurrent 3 (5 packets queued)",
+      "current_swarm_run": "2026-05-20T13:50",
+      "completion_note": "All 5 boundary test packets landed via incremental Kimi-CLI edits. Commits: d6acc1f (dpapi), 0a7a0f5 (state/files), d1e8f92 (state/db), f010ecf (state/jsonl), 34c920b (cli_helpers). 263/263 tests green.",
+      "reconciled_at": "2026-05-21T00:02:35Z"
+    },
+    {
+      "id": "wave-5.5",
+      "name": "canonical status tracker as harness primitive (roster #19)",
+      "status": "done",
+      "depends_on": [
+        "wave-A",
+        "wave-B"
+      ],
+      "completed_at": "2026-05-21T00:50:00Z",
+      "spec_ready": "spec/status-tracker.md",
+      "packet_ready": "coord/packets/2026-05-20-status-tracker-harness-feature/packet.md",
+      "dispatched_at": "2026-05-21T00:02:35Z",
+      "current_dispatch": "bcsacjnox",
+      "blocks": [
+        "wave-5.6",
+        "wave-5",
+        "wave-3"
+      ],
+      "note": "Recovery layer for autonomous loops. Required before #20 because both touch cli.py.",
+      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
+      "completion_note": "Kimi-CLI dispatch timed out at 1200s but landed 4/5 files incrementally per [[feedback_kimi_cli_incremental_edits]] (schema.py, store.py, hooks.py, __init__.py). Claude inline authored tests/test_status.py (42 tests), promoted cli.py status command to group with 7 subcommands (preserving legacy as 'status report'), wired dispatcher.py hooks (wave_id-gated, opt-in), fixed 3 bugs Kimi introduced (key-inversion in write_status, tempfile leak on os.replace failure, unable to read rows with unquoted commas), and fixed the existing STATUS.csv row 3 (WA-1) unquoted-comma data bug. Final: 305/305 tests pass (was 263; +42 new); 90% coverage on harness.status. Test 305 exceeds packet's >=285 acceptance criterion."
+    },
+    {
+      "id": "wave-5.6",
+      "name": "independent observer (roster #20) — the check on dev-manager authority",
+      "status": "done",
+      "depends_on": [
+        "wave-5.5"
+      ],
+      "completed_at": "2026-05-21T01:20:00Z",
+      "spec_ready": "spec/observer.md",
+      "packet_ready": "coord/packets/2026-05-20-observer-primitive/packet.md",
+      "dispatched_at": "2026-05-21T00:52:00Z",
+      "current_dispatch": "bq1ydqn3l",
+      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
+      "completion_note": "Kimi-CLI dispatch timed out at 1200s but landed massively: 6 module files (state.py 96%, audit_prompt.py 85%, cycle.py 89%, flags.py 83%, scheduler.py 32%, __init__.py 100%; total 79% coverage) + tests/test_observer.py (22KB, 41 tests) + cli.py observer group (12 subcommands) + manager.md Step 0 protocol. Claude only had to remove the obsolete observer_tick stub test (the stub was correctly replaced by the new observer group) + refresh cli.py docstring. 346/346 tests pass. Second hybrid wave in this session — Kimi-CLI's incremental edits are reliable even when swarm reports timeout.",
+      "note": "Round 2 — was sequential after #19 due to cli.py conflict."
+    }
+  ],
+  "escalations": [],
+  "engine_slots": {
+    "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
+    "kimi": {
+      "max_parallel": 6,
+      "in_flight": [],
+      "fill_policy": "aggressive",
+      "session_pattern_2026_05_21": "Three consecutive timeout-but-landed runs (#19 bcsacjnox, #20 bq1ydqn3l, Round 3 b8nt1z3rd). Kimi-CLI incremental edits land robustly even when xaxiu-swarm reports timeout. Decision: treat swarm timeout as 'check git diff first' not 'failed'."
+    },
+    "kimi-api": {
+      "max_parallel": 6,
+      "in_flight": [],
+      "fill_policy": "aggressive_overflow",
+      "note": "Production-ready up to 18 concurrent per warehouse 2026-05-12-p0-quartet (3-key pool x 6); 6 is the conservative default"
+    },
+    "deepseek": {
+      "max_parallel": 1,
+      "in_flight": [],
+      "fill_policy": "on_demand",
+      "note": "DeepSeek costs per API call; only dispatch when task needs its strengths (V-file, math/schema, novel-feature drafting)"
     }
   },
   "phase_cursors": {
@@ -95,8 +283,8 @@
       "current_dispatch_task_id": null
     },
     "testing": {
-      "last_run_at": "2026-05-20T14:04:45Z",
-      "next_due_at": "2026-05-20T15:04:45Z",
+      "last_run_at": "2026-05-28T03:17:10.511932+00:00",
+      "next_due_at": "2026-05-28T04:17:10.511932+00:00",
       "coverage_gaps": [
         "secrets/dpapi.py",
         "state/db.py",
@@ -125,9 +313,11 @@
         "engines/base.py": 67
       },
       "gaps_resolved_in_this_session": [
-        "engines/concrete.py (20% \u2192 84%)",
-        "engines/guards.py (39% \u2192 100%)"
-      ]
+        "engines/concrete.py (20% → 84%)",
+        "engines/guards.py (39% → 100%)"
+      ],
+      "pytest_outcome": "pass",
+      "pytest_summary": "2882 passed, 8 skipped in 191.13s (0:03:11)"
     },
     "integrating": {
       "last_run_at": null,
@@ -169,7 +359,7 @@
         {
           "id": "pi-20260520-05",
           "tier": "P3",
-          "title": "Process-improvement loop itself \u2192 feature roster row #16",
+          "title": "Process-improvement loop itself → feature roster row #16",
           "applied": true,
           "evidence": "this very tick"
         }
@@ -181,6 +371,40 @@
         "L4_or_L5_escalation",
         "explicit_invoke"
       ]
+    }
+  },
+  "event_log_path": "coord/dev_loop/log.jsonl",
+  "operator_directives": {
+    "full_dev_authority": true,
+    "escalation_threshold": "L5",
+    "approved_engine_routing": {
+      "creativity": {
+        "engine": "claude-in-session",
+        "model": null
+      },
+      "developing": {
+        "engine": "kimi",
+        "model": null
+      },
+      "testing": {
+        "engine": "kimi",
+        "model": null
+      },
+      "integrating": {
+        "engine": "claude-in-session",
+        "model": null
+      },
+      "process_improvement": {
+        "engine": "claude-in-session",
+        "model": null
+      }
+    },
+    "cadence_minutes": {
+      "creativity": 360,
+      "developing": 30,
+      "testing": 60,
+      "integrating": 20,
+      "process_improvement": 120
     }
   },
   "engine_cooldowns": {
@@ -222,243 +446,29 @@
       "post_failure_cooldown_seconds": 1800
     }
   },
+  "loop_status_legend": {
+    "armed": "loop running normally",
+    "operator_paused": "operator manually paused via flag",
+    "exhausted_plan": "all wave_plan entries are done"
+  },
+  "phase_status_legend": {
+    "armed": "phase eligible to run this tick",
+    "paused_by_escalation": "see escalations[] for the L5 tag pausing this phase; auto-retries when next_retry_at <= now"
+  },
+  "notification": {
+    "method": "file",
+    "file_path": "coord/dev_loop/escalations.md",
+    "windows_toast": false
+  },
+  "created_at": "2026-05-20T03:50:00Z",
   "dispatch_rules_path": "coord/dev_loop/dispatch-rules.md",
-  "active_dispatches": [
-    {
-      "task_id": "dispatch-2026-05-21T02-35-wave3-dashboard",
-      "packet": "coord/packets/2026-05-21-wave3-dashboard/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-21T02:35:32Z",
-      "phase": "developing",
-      "wave_id": "wave-3",
-      "timeout_seconds": 1200,
-      "bg_handle": "biatdaadg"
-    },
-    {
-      "task_id": "dispatch-2026-05-21T02-40-wave6A-loops",
-      "packet": "coord/packets/2026-05-21-wave6A-loops-core/packet.md",
-      "engine": "swarm/kimi",
-      "dispatched_at": "2026-05-21T02:40:00Z",
-      "phase": "developing",
-      "wave_id": "wave-6/A",
-      "timeout_seconds": 1200,
-      "note": "Parallel with Wave 3; disjoint file sets (dashboard/ vs loops/)"
-    }
-  ],
   "reconciled_at": "2026-05-21T00:50:00Z",
   "reconcile_note": "Round 1 (status-tracker #19) completed hybrid mode at 2026-05-21T00:50Z; cleared from active_dispatches. Earlier reconcile at 2026-05-21T00:02:35Z cleared 5 stale Wave B/2 entries that completed pre-crash (commits d6acc1f, 0a7a0f5, d1e8f92, f010ecf, 34c920b).",
-  "wave_plan": [
-    {
-      "id": "wave-A.1",
-      "name": "wire dispatch verb to dispatch_packet",
-      "status": "done",
-      "completed_at": "2026-05-20T02:48:00Z"
-    },
-    {
-      "id": "wave-A",
-      "name": "wire remaining 10 CLI verbs",
-      "status": "done",
-      "completed_at": "2026-05-20T11:26:27Z"
-    },
-    {
-      "id": "wave-A.5",
-      "name": "error taxonomy spec + src/harness/errors.py",
-      "status": "done",
-      "depends_on": [
-        "wave-A"
-      ],
-      "completed_at": "2026-05-20T11:26:27Z"
-    },
-    {
-      "id": "wave-A.6",
-      "name": "retrofit raises across codebase to HarnessError subclasses",
-      "status": "done",
-      "depends_on": [
-        "wave-A.5"
-      ],
-      "current_dispatch": "bv4wtqu7g",
-      "completed_at": "2026-05-20T12:16:39Z",
-      "completion_note": "Scope refined during execution: 4 raises retrofitted (1 in dpapi.py to ConfigCorruption, 3 in jsonl_log.py to SchemaViolation). Pydantic validators, user-input validation in loader, dispatcher's contract-protected raise (L81), and assertion-style RuntimeErrors intentionally left as ValueError/RuntimeError \u2014 they don't fit the L3-L5 operational error model. 89/89 tests still green.",
-      "attempt_count": 1
-    },
-    {
-      "id": "wave-B",
-      "name": "boundary tests for engines/concrete.py + engines/guards.py + GitHub Actions CI",
-      "status": "done",
-      "depends_on": [
-        "wave-A"
-      ],
-      "last_attempt_at": "2026-05-20T12:08:10Z",
-      "attempt_count": 1,
-      "last_failure_mode": "kimi_api_packet_trap_prose_not_edits (non-agentic backend)",
-      "next_strategy": "Wait for Kimi CLI cooldown (~25 min remaining); dispatch the 2 test files as ONE Kimi CLI packet (interdependent fixtures); CI already gates regressions.",
-      "partial_complete": [
-        "ci_workflow_yml"
-      ],
-      "pending_work": [
-        "tests/test_engines_concrete_boundary.py",
-        "tests/test_engines_guards_boundary.py"
-      ],
-      "current_swarm_run": "2026-05-20T12:54",
-      "completed_at": "2026-05-20T13:19:31Z",
-      "completion_note": "75 new tests, 164/164 green; concrete.py + guards.py boundary coverage achieved. Swarm worker-1 was tagged timeout but Kimi-Code CLI applies edits incrementally - the file landed."
-    },
-    {
-      "id": "wave-4",
-      "name": "Windows installer + first-run wizard",
-      "status": "done",
-      "depends_on": [
-        "wave-A",
-        "wave-B"
-      ],
-      "spec_ready": "spec/wave-4-installer.md",
-      "packet_ready": "coord/packets/2026-05-20-wave4-installer/packet.md",
-      "awaiting": "Wave B/1 + B/2 to complete (frees swarm/kimi slot); ideally also Wave 7 for operator-mode wizard prompt",
-      "current_swarm_run": "2026-05-20T13:08",
-      "completed_at": "2026-05-20T13:53:38Z",
-      "completion_note": "Authored by swarm/kimi (timeout-tag but Kimi-CLI incremental edits landed all 4 files); tests/test_install_smoke.py patch path fixed inline; 171/171 then 185/185 pass."
-    },
-    {
-      "id": "wave-5",
-      "name": "templates + NL\u00e2\u2020\u2019YAML translator + visual config builder",
-      "status": "done",
-      "depends_on": [
-        "wave-4"
-      ],
-      "dispatched_at": "2026-05-21T01:28:21Z",
-      "completed_at": "2026-05-21T01:50:00Z",
-      "current_dispatch": "b8nt1z3rd (swarm round-3)",
-      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
-      "completion_note": "Round 3 swarm: both workers tagged timeout @ 1200s but landed full deliverables via incremental Kimi-CLI edits. Wave 5/A: 6 templates created (adapters/templates/*.yaml). Wave 5/B: from_description.py + _nl_to_yaml_prompt.md + adapter verb group + 23 tests. Bonus: W7C OperatorSection added to schema.py + init verb emits operator: YAML (3 waves in 1 round). 369/369 tests pass."
-    },
-    {
-      "id": "wave-3",
-      "name": "dashboard backend + frontend (FastAPI + WebSocket)",
-      "status": "done",
-      "depends_on": [
-        "wave-4"
-      ],
-      "completed_at": "2026-05-21T03:35:00Z",
-      "completion_note": "Shipped Round 5 via Kimi clean exit (biatdaadg); 9 files (cli wiring + dashboard module + static + tests); 15 tests; commit 71225ad."
-    },
-    {
-      "id": "wave-6",
-      "name": "autonomous loops as harness feature (productize dev_loop pattern)",
-      "status": "done",
-      "completed_at": "2026-05-21T04:18:00Z",
-      "completion_note": "Shipped via Wave 6/A (loops core; commit a7ef925) + 6/B (CLI + scheduler; inline) + 6/C (real supervisors; commit d25db4d). harness loop init/tick/start/stop/status all operational. CreativitySupervisor/DevelopingSupervisor/IntegratingSupervisor/ProcessImprovementSupervisor + TestingSupervisor all real per Wave 6/C.",
-      "ignored": "planned-status-line-below-historical",
-      "depends_on": [
-        "wave-3",
-        "wave-5"
-      ],
-      "operator_added": "2026-05-20",
-      "note": "Generalize coord/dev_loop/ scaffolding into adapter-YAML-configurable feature with per-supervisor engine choice and Task Scheduler integration",
-      "scope_expansion_2026_05_20": "Must include operator-modes config surface: every directive given in this dev-loop session becomes a discoverable CLI flag / YAML key. See memory feedback_operator_inputs_become_harness_config for the directive table (full-dev-authority, L5 escalation, parallelism, engine-fill, etc.).",
-      "feature_roster": "spec/session-derived-feature-roster.md",
-      "acceptance_gate": "Every row in feature roster must be checked \u2705 before Wave 6 ships"
-    },
-    {
-      "id": "wave-7",
-      "name": "operator-mode CLI flags + adapter.operator YAML section",
-      "status": "done",
-      "depends_on": [
-        "wave-A",
-        "wave-B"
-      ],
-      "operator_added": "2026-05-20",
-      "note": "Surface session directives as harness config (--full-dev-authority, --escalation-threshold L5, --engine-fill aggressive, etc.). Foundation for Wave 6. Smaller scope than full productization.",
-      "packet_ready": "coord/packets/2026-05-20-wave7-operator-modes/packet.md",
-      "spec_ready": "spec/operator-modes.md",
-      "awaiting": "swarm/kimi cooldown lift at 12:53:14Z",
-      "current_swarm_run": "2026-05-20T13:08",
-      "attempt_count": 1,
-      "partial_complete": [
-        "7/A: foundation module (operator/__init__, modes, config, flags) + tests"
-      ],
-      "pending_work": [
-        "7/B: cli.py @apply_operator_flags wiring; schema.py OperatorSection; dispatch dry_run handling; init verb operator: emission"
-      ],
-      "completed_at_7A": "2026-05-20T13:53:38Z",
-      "completed_at": "2026-05-20T13:59:13Z",
-      "completion_note": "7/A foundation (operator/* module + 14 tests) + 7/B CLI integration (apply_operator_flags on @cli.group, ctx.obj, dispatch dry_run handling) both inline; 185/185 tests green; harness --help shows 7 new flags; smoke confirmed --mode dry_run dispatch exits 0 without dispatch. Schema OperatorSection deferred to Wave 7/C (low priority polish)."
-    },
-    {
-      "id": "wave-B2",
-      "name": "boundary tests for remaining 5 coverage gaps (dpapi/state-*/cli_helpers)",
-      "status": "done",
-      "depends_on": [
-        "wave-A"
-      ],
-      "dispatched_via": "xaxiu-swarm swarm --max-concurrent 3 (5 packets queued)",
-      "current_swarm_run": "2026-05-20T13:50",
-      "completed_at": "2026-05-20T14:30:00Z",
-      "completion_note": "All 5 boundary test packets landed via incremental Kimi-CLI edits. Commits: d6acc1f (dpapi), 0a7a0f5 (state/files), d1e8f92 (state/db), f010ecf (state/jsonl), 34c920b (cli_helpers). 263/263 tests green.",
-      "reconciled_at": "2026-05-21T00:02:35Z"
-    },
-    {
-      "id": "wave-5.5",
-      "name": "canonical status tracker as harness primitive (roster #19)",
-      "status": "done",
-      "depends_on": [
-        "wave-A",
-        "wave-B"
-      ],
-      "spec_ready": "spec/status-tracker.md",
-      "packet_ready": "coord/packets/2026-05-20-status-tracker-harness-feature/packet.md",
-      "dispatched_at": "2026-05-21T00:02:35Z",
-      "completed_at": "2026-05-21T00:50:00Z",
-      "current_dispatch": "bcsacjnox",
-      "blocks": ["wave-5.6", "wave-5", "wave-3"],
-      "note": "Recovery layer for autonomous loops. Required before #20 because both touch cli.py.",
-      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
-      "completion_note": "Kimi-CLI dispatch timed out at 1200s but landed 4/5 files incrementally per [[feedback_kimi_cli_incremental_edits]] (schema.py, store.py, hooks.py, __init__.py). Claude inline authored tests/test_status.py (42 tests), promoted cli.py status command to group with 7 subcommands (preserving legacy as 'status report'), wired dispatcher.py hooks (wave_id-gated, opt-in), fixed 3 bugs Kimi introduced (key-inversion in write_status, tempfile leak on os.replace failure, unable to read rows with unquoted commas), and fixed the existing STATUS.csv row 3 (WA-1) unquoted-comma data bug. Final: 305/305 tests pass (was 263; +42 new); 90% coverage on harness.status. Test 305 exceeds packet's >=285 acceptance criterion."
-    },
-    {
-      "id": "wave-5.6",
-      "name": "independent observer (roster #20) — the check on dev-manager authority",
-      "status": "done",
-      "depends_on": [
-        "wave-5.5"
-      ],
-      "spec_ready": "spec/observer.md",
-      "packet_ready": "coord/packets/2026-05-20-observer-primitive/packet.md",
-      "dispatched_at": "2026-05-21T00:52:00Z",
-      "completed_at": "2026-05-21T01:20:00Z",
-      "current_dispatch": "bq1ydqn3l",
-      "completion_mode": "hybrid_kimi_partial_then_claude_inline",
-      "completion_note": "Kimi-CLI dispatch timed out at 1200s but landed massively: 6 module files (state.py 96%, audit_prompt.py 85%, cycle.py 89%, flags.py 83%, scheduler.py 32%, __init__.py 100%; total 79% coverage) + tests/test_observer.py (22KB, 41 tests) + cli.py observer group (12 subcommands) + manager.md Step 0 protocol. Claude only had to remove the obsolete observer_tick stub test (the stub was correctly replaced by the new observer group) + refresh cli.py docstring. 346/346 tests pass. Second hybrid wave in this session — Kimi-CLI's incremental edits are reliable even when swarm reports timeout.",
-      "note": "Round 2 — was sequential after #19 due to cli.py conflict."
-    }
-  ],
   "blockers": [],
-  "escalations": [],
-  "event_log_path": "coord/dev_loop/log.jsonl",
-  "engine_slots": {
-    "_doc": "Each tick, the manager fills idle Kimi slots with queued work. DeepSeek stays idle unless explicitly needed (cost-per-API constraint).",
-    "kimi": {
-      "max_parallel": 6,
-      "in_flight": [],
-      "fill_policy": "aggressive",
-      "session_pattern_2026_05_21": "Three consecutive timeout-but-landed runs (#19 bcsacjnox, #20 bq1ydqn3l, Round 3 b8nt1z3rd). Kimi-CLI incremental edits land robustly even when xaxiu-swarm reports timeout. Decision: treat swarm timeout as 'check git diff first' not 'failed'."
-    },
-    "kimi-api": {
-      "max_parallel": 6,
-      "in_flight": [],
-      "fill_policy": "aggressive_overflow",
-      "note": "Production-ready up to 18 concurrent per warehouse 2026-05-12-p0-quartet (3-key pool x 6); 6 is the conservative default"
-    },
-    "deepseek": {
-      "max_parallel": 1,
-      "in_flight": [],
-      "fill_policy": "on_demand",
-      "note": "DeepSeek costs per API call; only dispatch when task needs its strengths (V-file, math/schema, novel-feature drafting)"
-    }
-  },
   "dispatch_learnings": [
     {
       "discovered_at": "2026-05-20T12:08:10Z",
-      "insight": "xaxiu-swarm backend agentic capability differs: 'kimi' (CLI) is agentic and can apply in-place edits via Edit/Write tools. 'kimi-api' and 'deepseek' are NOT agentic \u2014 they produce a single text response written to --deliverable path. Packets requesting in-place edits must target kimi CLI; packets to api backends must request FIND/REPLACE or full-file-contents output the integrating supervisor parses.",
+      "insight": "xaxiu-swarm backend agentic capability differs: 'kimi' (CLI) is agentic and can apply in-place edits via Edit/Write tools. 'kimi-api' and 'deepseek' are NOT agentic — they produce a single text response written to --deliverable path. Packets requesting in-place edits must target kimi CLI; packets to api backends must request FIND/REPLACE or full-file-contents output the integrating supervisor parses.",
       "applied_to_rules": "coord/dev_loop/dispatch-rules.md TBU next tick",
       "evidence": [
         "Wave A.6 on deepseek-v4-flash: exit 0, prose output, no files modified",

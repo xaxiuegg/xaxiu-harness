@@ -16,11 +16,30 @@ from harness.heartbeat import pulse as _pulse
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """Provide a TestClient with working-directory isolation."""
+    """Provide a TestClient with working-directory isolation.
+
+    W14-LOOP-CWD-FIX (2026-05-27): also monkey-patches the repo-anchored
+    heartbeat/state path constants so tests don't accidentally read the
+    real repo's coord/dev_loop/heartbeat.json.
+    """
     monkeypatch.chdir(tmp_path)
     # Ensure coord dirs exist
     (tmp_path / "coord" / "dev_loop").mkdir(parents=True)
     (tmp_path / "coord" / "observer").mkdir(parents=True)
+    # Redirect the repo-anchored heartbeat + state paths into tmp_path
+    monkeypatch.setattr(
+        "harness.heartbeat.HEARTBEAT_PATH",
+        tmp_path / "coord" / "dev_loop" / "heartbeat.json",
+    )
+    monkeypatch.setattr(
+        "harness.heartbeat.STATE_PATH",
+        tmp_path / "coord" / "dev_loop" / "state.json",
+    )
+    # The dashboard imports these at module load; rebind there too
+    monkeypatch.setattr(
+        "harness.dashboard.app.HEARTBEAT_PATH",
+        tmp_path / "coord" / "dev_loop" / "heartbeat.json",
+    )
     return TestClient(create_app())
 
 

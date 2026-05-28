@@ -285,19 +285,27 @@ class TestCLI:
         assert "show" in result.output
 
     def test_heartbeat_show_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
-        # Need coord/dev_loop/ to exist so the default path resolves to something
-        (tmp_path / "coord" / "dev_loop").mkdir(parents=True)
+        """W14-LOOP-CWD-FIX: HEARTBEAT_PATH is now repo-anchored, so this
+        test monkey-patches the constants directly rather than relying on
+        cwd-relative resolution (the pre-fix bug)."""
+        hb_path = tmp_path / "coord" / "dev_loop" / "heartbeat.json"
+        state_path = tmp_path / "coord" / "dev_loop" / "state.json"
+        hb_path.parent.mkdir(parents=True)
+        monkeypatch.setattr("harness.heartbeat.HEARTBEAT_PATH", hb_path)
+        monkeypatch.setattr("harness.heartbeat.STATE_PATH", state_path)
         from harness.cli import cli
         result = CliRunner().invoke(cli, ["heartbeat", "show"])
         assert result.exit_code == 0
         assert "never" in result.output.lower()
 
     def test_heartbeat_pulse_smoke(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
+        """W14-LOOP-CWD-FIX: monkey-patch the repo-anchored constants
+        instead of cd'ing into tmp_path."""
         coord = tmp_path / "coord" / "dev_loop"
         coord.mkdir(parents=True)
-        (coord / "state.json").write_text(
+        state_path = coord / "state.json"
+        hb_path = coord / "heartbeat.json"
+        state_path.write_text(
             json.dumps({
                 "schema_version": 1,
                 "loop_status": "armed",
@@ -308,7 +316,9 @@ class TestCLI:
             }),
             encoding="utf-8",
         )
+        monkeypatch.setattr("harness.heartbeat.HEARTBEAT_PATH", hb_path)
+        monkeypatch.setattr("harness.heartbeat.STATE_PATH", state_path)
         from harness.cli import cli
         result = CliRunner().invoke(cli, ["heartbeat", "pulse"])
         assert result.exit_code == 0, result.output
-        assert (coord / "heartbeat.json").exists()
+        assert hb_path.exists()
