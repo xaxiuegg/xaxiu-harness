@@ -132,14 +132,15 @@ def _dispatch_one(
     if agentic:
         extra["agentic"] = True
 
-    # claude-via-cc uses the subscription OAuth (no poolable key), so it
-    # bypasses the multi-key pool and dispatches the engine directly.
-    # ``effort`` (Opus 4.8: low|medium|high|xhigh|max) is honoured only by
-    # this engine; other engines ignore the extra key.
-    if engine == "claude-via-cc":
+    # Direct-dispatch engines (no poolable HTTP key): claude-via-cc uses the
+    # subscription OAuth; kimi-cli is a local-CLI subprocess agent (subagents +
+    # web research via the Kimi CLI).  Both bypass the multi-key pool and
+    # dispatch directly.  ``effort``/``agentic`` are honoured only where
+    # meaningful; other engines ignore the extra keys.
+    if engine in ("claude-via-cc", "kimi-cli"):
         try:
             from harness.engines.concrete import get_engine
-            resp = get_engine("claude-via-cc").dispatch(
+            resp = get_engine(engine).dispatch(
                 question, model_override or "", extra,
             )
         except Exception as exc:
@@ -158,7 +159,9 @@ def _dispatch_one(
             cost_usd=float(getattr(resp, "cost_usd", 0.0) or 0.0),
             text=resp.text if resp.success else "",
             error=resp.error if not resp.success else "",
-            winning_alias="subscription", attempt_count=1,
+            winning_alias=("subscription" if engine == "claude-via-cc"
+                           else "kimi-cli"),
+            attempt_count=1,
         )
 
     try:

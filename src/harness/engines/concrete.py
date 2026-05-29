@@ -882,6 +882,24 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
             )
         return KimiViaClaudeCodeEngine(api_key=api_key)
 
+    if name_lower == "kimi-cli":
+        # W14-KIMI-CLI-TIER2 2026-05-29: agentic Kimi worker via the local
+        # Kimi CLI (subagents + FetchURL web research).  A Code-subscription
+        # key can't reach the raw /v1 API (UA-gated to coding agents), so the
+        # CLI is the only agentic-Kimi path — and it IS a full agent (subagent
+        # fan-out, MCP, skills).  Live key resolution handles rotation + the
+        # stale ~/.kimi config key.
+        from harness.engines.kimi_cli import KimiCliEngine
+        from harness.secrets.resolve import resolve_key
+        api_key = resolve_key("KIMI_API_KEY", prefer_dpapi=prefer_dpapi,
+                              prefer_live_user=_prefer_live_user())
+        if not api_key:
+            raise RuntimeError(
+                "No API key for kimi-cli. Set KIMI_API_KEY (your Kimi Code "
+                "subscription key)."
+            )
+        return KimiCliEngine(api_key=api_key)
+
     if name_lower == "claude-via-cc":
         # W14-CLAUDE-VIA-CC: subscription Claude via Claude Code subprocess.
         # NO key resolution — auth is the operator's stored `claude login`
