@@ -112,17 +112,25 @@ def _dispatch_one(
     *,
     model_override: str = "",
     effort: str = "",
+    agentic: bool = False,
 ) -> AskResult:
     """Dispatch via dispatch_with_pool so multi-key + failover apply.
 
     ``model_override`` is forwarded to ``dispatch_with_pool(model=...)``
     — used by ``--audit`` to send v4-pro to the DeepSeek auditor when
     the recommender flags it (``recommend('audit').model_override``).
+
+    ``agentic`` drops ``--bare`` + offers a tool allowlist (WebFetch /
+    WebSearch / Task / file + Bash).  Honoured only by the subscription
+    ``claude-via-cc`` engine (gated in its ``_build_command``); other
+    engines ignore the extra key.
     """
     started = time.monotonic()
     extra: dict = {"max_budget_usd": max_budget_usd, "timeout_s": timeout_s}
     if effort:
         extra["effort"] = effort
+    if agentic:
+        extra["agentic"] = True
 
     # claude-via-cc uses the subscription OAuth (no poolable key), so it
     # bypasses the multi-key pool and dispatches the engine directly.
@@ -193,6 +201,7 @@ def run_panel(
     max_budget_usd: float = 0.30,
     timeout_s: int = 180,
     effort: str = "",
+    agentic: bool = False,
 ) -> list[AskResult]:
     """Fire the cross-engine panel in parallel.  Returns one
     AskResult per engine in the same order as ``engines``."""
@@ -201,7 +210,7 @@ def run_panel(
         future_to_engine = {
             pool.submit(
                 _dispatch_one, eng, question, max_budget_usd, timeout_s,
-                effort=effort,
+                effort=effort, agentic=agentic,
             ): eng
             for eng in engines
         }
@@ -353,6 +362,7 @@ def run_audit(
     audit_engine_override: str = "",
     num_auditors: int = 1,
     effort: str = "",
+    agentic: bool = False,
 ) -> AuditOutcome:
     """Run producer → auditor(s).
 
@@ -374,9 +384,12 @@ def run_audit(
     """
     from harness.audit_prompt import build_audit_prompt, parse_audit_verdict
 
+    # ``agentic`` applies only to the producer (auditors are cross-vendor
+    # providers returning verdict text; agentic is subscription-gated and
+    # inert for them anyway).
     producer = _dispatch_one(
         producer_engine, question, max_budget_usd, timeout_s,
-        effort=effort,
+        effort=effort, agentic=agentic,
     )
     if not producer.ok:
         return AuditOutcome(

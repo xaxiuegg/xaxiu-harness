@@ -105,7 +105,8 @@ def test_effort_threads_through_run_panel(monkeypatch):
     from harness.ask import AskResult
     seen = {}
 
-    def _fake(engine, question, mb, ts, *, model_override="", effort=""):
+    def _fake(engine, question, mb, ts, *, model_override="", effort="",
+              agentic=False):
         seen["effort"] = effort
         return AskResult(engine=engine, ok=True, elapsed_s=0.1, tokens_in=1,
                          tokens_out=1, cost_usd=0.0, text="x", error="",
@@ -120,3 +121,94 @@ def test_effort_present_in_ask_signatures():
     from harness.ask import _dispatch_one, run_panel, run_audit
     for fn in (_dispatch_one, run_panel, run_audit):
         assert "effort" in inspect.signature(fn).parameters
+
+
+# --- W14-AGENTIC-MODE 2026-05-29: --agentic (non-bare) dispatch profile ---
+# Doc-verified (AGENT_REFERENCE tool matrix): WebFetch/WebSearch function
+# only on the subscription backend (real Anthropic server tools); provider
+# /anthropic endpoints don't expose their native web search (it lives on
+# the OpenAI /v1 surface under a different protocol).  So agentic mode is
+# subscription-gated.
+
+
+def test_agentic_drops_bare_and_offers_web_tools():
+    cmd = _engine()._build_command("opus", {"agentic": True})
+    assert "--bare" not in cmd, "agentic must drop --bare"
+    tools = cmd[cmd.index("--tools") + 1]
+    assert "WebFetch" in tools and "WebSearch" in tools and "Task" in tools
+
+
+def test_non_agentic_keeps_bare_and_empty_tools():
+    cmd = _engine()._build_command("opus", {})
+    assert "--bare" in cmd
+    assert cmd[cmd.index("--tools") + 1] == ""
+
+
+def test_agentic_gated_to_subscription():
+    """A stray agentic=True on a NON-subscription (provider) engine must be
+    ignored: --bare stays, tools stay empty (no provider token-bloat)."""
+    from harness.engines.claude_code_subprocess import (
+        ClaudeCodeSubprocessEngine,
+    )
+    prov = ClaudeCodeSubprocessEngine(
+        api_key="x", base_url="https://e/anthropic",
+        default_model="m", verify_binary=False,
+    )
+    cmd = prov._build_command("m", {"agentic": True})
+    assert "--bare" in cmd, "provider agentic must stay --bare (gated)"
+    assert cmd[cmd.index("--tools") + 1] == ""
+
+
+def test_agentic_composes_with_effort():
+    cmd = _engine()._build_command("opus", {"agentic": True, "effort": "max"})
+    assert "--bare" not in cmd
+    assert "--effort" in cmd and cmd[cmd.index("--effort") + 1] == "max"
+
+
+def test_agentic_threads_through_run_panel(monkeypatch):
+    import harness.ask as ask
+    from harness.ask import AskResult
+    seen = {}
+
+    def _fake(engine, question, mb, ts, *, model_override="", effort="",
+              agentic=False):
+        seen["agentic"] = agentic
+        return AskResult(engine=engine, ok=True, elapsed_s=0.1, tokens_in=1,
+                         tokens_out=1, cost_usd=0.0, text="x", error="",
+                         winning_alias="", attempt_count=1)
+
+    monkeypatch.setattr(ask, "_dispatch_one", _fake)
+    ask.run_panel("q", engines=("claude-via-cc",), agentic=True)
+    assert seen["agentic"] is True
+
+
+def test_agentic_injected_into_extra(monkeypatch):
+    """_dispatch_one(agentic=True) must put agentic=True into the engine's
+    extra_args (so _build_command sees it)."""
+    import harness.ask as ask
+    import harness.engines.concrete as concrete
+
+    captured = {}
+
+    class _FakeEngine:
+        def dispatch(self, q, model, extra):
+            captured.update(extra)
+            return EngineResponse(
+                success=True, text="ok", latency_ms=1, error=None,
+                tokens_in=1, tokens_out=1, cost_usd=0.0,
+            )
+
+    monkeypatch.setattr(concrete, "get_engine", lambda name, **kw: _FakeEngine())
+    ask._dispatch_one("claude-via-cc", "q", 0.30, 180, agentic=True)
+    assert captured.get("agentic") is True
+
+
+def test_agentic_present_in_ask_signatures():
+    from harness.ask import _dispatch_one, run_panel, run_audit
+    for fn in (_dispatch_one, run_panel, run_audit):
+        assert "agentic" in inspect.signature(fn).parameters
+
+
+def test_agentic_flag_in_cli():
+    from harness.cli import ask_cmd
+    assert "agentic" in [p.name for p in ask_cmd.params]

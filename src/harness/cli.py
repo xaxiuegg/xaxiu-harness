@@ -1319,6 +1319,13 @@ _VALID_TASK_CLASSES = (
     "`claude-via-cc` engine (your Claude Code subscription); other engines "
     "ignore it.  E.g. ask \"...\" --engines claude-via-cc --effort max."
 ))
+@click.option("--agentic", is_flag=True, default=False, help=(
+    "Run the `claude-via-cc` engine as a full-tool agentic worker: drops "
+    "--bare and enables WebFetch/WebSearch/Task/file+Bash tools.  Web tools "
+    "function only on the subscription backend (real Anthropic); the flag is "
+    "subscription-gated, so it is inert on redirected provider engines "
+    "(reach provider web search via their direct /v1 API instead)."
+))
 def ask_cmd(
     question: str | None,
     question_file: Path | None,
@@ -1337,6 +1344,7 @@ def ask_cmd(
     no_save: bool,
     print_text: bool,
     effort: str | None,
+    agentic: bool,
 ) -> None:
     """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED + ASK-AUDIT 2026-05-27
     / W14-ASK-RERUN 2026-05-28: daily-driver cross-engine LLM call.
@@ -1701,6 +1709,7 @@ def ask_cmd(
             audit_engine_override=audit_engine_override,
             num_auditors=num_auditors,
             effort=effort or "",
+            agentic=agentic,
         )
         if not outcome.auditors:
             # Producer failed (or auditor selection failed); the audit
@@ -1746,6 +1755,7 @@ def ask_cmd(
             max_budget_usd=max_budget_usd,
             timeout_s=timeout_s,
             effort=effort or "",
+            agentic=agentic,
         )
 
     # Print summary table (always)

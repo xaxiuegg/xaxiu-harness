@@ -303,11 +303,71 @@ DEFAULT_MODEL_PER_ENGINE: dict[str, str] = {
 
 
 def _resolve_binary() -> str:
-    """Return the Claude Code binary path.  Honors
-    ``HARNESS_CLAUDE_CODE_BINARY`` env var; falls back to bare ``claude``
-    (resolved via PATH at exec time).
+    """Return the Claude Code binary path.
+
+    Resolution order:
+      1. ``HARNESS_CLAUDE_CODE_BINARY`` env var (explicit operator override).
+      2. ``claude`` on PATH (native / npm-global installs).
+      3. Auto-discovery of common off-PATH locations (W14-FRESH-CLONE-FEEDBACK
+         2026-05-29): the Claude DESKTOP app bundles + auto-updates the CLI under
+         ``%APPDATA%/Claude/claude-code/<version>/claude.exe`` (Windows) — NOT on
+         PATH, no node/npm.  Two external agentic users hit a dead Pattern B on a
+         fresh clone purely because this binary was undiscoverable; the default
+         engine (``mimo-via-claude``) silently failed and the harness looked
+         broken.
+      4. Bare ``claude`` — ``_verify_binary_available`` then surfaces an
+         actionable error if it is genuinely absent.
     """
-    return os.environ.get("HARNESS_CLAUDE_CODE_BINARY") or _DEFAULT_BINARY
+    explicit = os.environ.get("HARNESS_CLAUDE_CODE_BINARY")
+    if explicit:
+        return explicit
+    on_path = shutil.which(_DEFAULT_BINARY)
+    if on_path:
+        return on_path
+    discovered = _discover_claude_binary()
+    if discovered:
+        return discovered
+    return _DEFAULT_BINARY
+
+
+def _discover_claude_binary() -> Optional[str]:
+    """Best-effort discovery of a Claude Code CLI that is NOT on PATH.
+
+    Globs the Claude Desktop bundle (versioned dirs) + common native install
+    locations and returns the highest-semver match — so it survives the desktop
+    app's auto-updates (which would break any hardcoded version path).
+    """
+    candidates: list[Path] = []
+    # Windows desktop-bundled CLI: %APPDATA%/Claude/claude-code/<ver>/claude.exe
+    for env_base in ("APPDATA", "LOCALAPPDATA"):
+        base = os.environ.get(env_base)
+        if base:
+            candidates += Path(base).glob("Claude/claude-code/*/claude.exe")
+    # npm-global shim (Windows): %APPDATA%/npm/claude.cmd
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        candidates += Path(appdata).glob("npm/claude.cmd")
+    # Native installer / common Unix locations.  Check extensionless AND .exe,
+    # since on Windows the binary is claude.exe/.EXE (the bug that made this
+    # return None on a machine with ~/.local/bin/claude.EXE present).
+    home = Path.home()
+    for p in (
+        home / ".local" / "bin" / "claude",
+        home / ".claude" / "local" / "claude",
+        Path("/usr/local/bin/claude"),
+        Path("/opt/homebrew/bin/claude"),
+    ):
+        candidates += [p, p.with_suffix(".exe")]
+    existing = [c for c in candidates if c.exists()]
+    if not existing:
+        return None
+
+    def _semver(p: Path) -> tuple:
+        m = re.search(r"(\d+)\.(\d+)\.(\d+)", str(p))
+        return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+    existing.sort(key=_semver, reverse=True)
+    return str(existing[0])
 
 
 def _verify_binary_available(binary: str) -> tuple[bool, Optional[str]]:
@@ -480,21 +540,58 @@ class ClaudeCodeSubprocessEngine(Engine):
         budget = extra_args.get("max_budget_usd", self._max_budget_usd)
         output_format = extra_args.get("output_format", "json")
         permission_mode = extra_args.get("permission_mode", "auto")
-        # extra_args["tools"] = "default" lets callers re-enable tools
-        # for the rare case they want the agent loop.  Default is
-        # disabled (empty string) for deterministic single-inference.
-        tools = extra_args.get("tools", "")
-        cmd = [
-            self._binary,
-            "--print",
-            "--bare",
-            "--tools", tools,
-            "--model", model or self._default_model or "sonnet",
-            "--output-format", output_format,
-            "--no-session-persistence",
-            "--permission-mode", permission_mode,
-            "--max-budget-usd", f"{float(budget):.4f}",
-        ]
+        # W14-AGENTIC-MODE 2026-05-29: ``agentic=True`` drops ``--bare`` and
+        # offers a curated tool allowlist so the worker can run the
+        # client-side agent loop (WebFetch / Task / file + Bash tools).
+        #
+        # Doc-verified scope (AGENT_REFERENCE tool-availability matrix,
+        # 2026-05-29): WebFetch / WebSearch only *function* on the
+        # SUBSCRIPTION backend (real Anthropic server tools).  On a
+        # redirected provider the offer is inert — the provider's native
+        # web search ($web_search / web_search) lives on its OpenAI /v1
+        # endpoint under a different protocol, NOT the /anthropic surface
+        # Claude Code drives — and un-restricting tools reintroduces the
+        # MiMo token-bloat loop (W14-MIMO-BLOAT-INVESTIGATION).  So
+        # agentic mode is intended for claude-via-cc; provider engines
+        # should reach web search via Pattern A direct /v1 instead.
+        # GATED to subscription: dropping --bare on a redirected provider
+        # buys nothing (web tools won't function) and costs the bloat
+        # loop, so a stray agentic=True on a provider engine is ignored.
+        agentic = bool(extra_args.get("agentic", False)) and self._subscription
+        if agentic:
+            # Explicit allowlist (not "default"/"all") bounds the tool
+            # surface: the tools a real Claude worker needs, without
+            # surfacing arbitrary plugin/MCP tools from the host project.
+            tools = extra_args.get(
+                "tools",
+                "WebFetch,WebSearch,Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite",
+            )
+            cmd = [
+                self._binary,
+                "--print",
+                "--tools", tools,
+                "--model", model or self._default_model or "sonnet",
+                "--output-format", output_format,
+                "--no-session-persistence",
+                "--permission-mode", permission_mode,
+                "--max-budget-usd", f"{float(budget):.4f}",
+            ]
+        else:
+            # Default deterministic single-inference posture.
+            # extra_args["tools"] = "default" lets callers re-enable tools
+            # within --bare for the rare case they want the agent loop.
+            tools = extra_args.get("tools", "")
+            cmd = [
+                self._binary,
+                "--print",
+                "--bare",
+                "--tools", tools,
+                "--model", model or self._default_model or "sonnet",
+                "--output-format", output_format,
+                "--no-session-persistence",
+                "--permission-mode", permission_mode,
+                "--max-budget-usd", f"{float(budget):.4f}",
+            ]
         # W14-CLAUDE-VIA-CC: effort control (Opus 4.8: low|medium|high|
         # xhigh|max) is a real Claude Code flag, meaningful only when the
         # subprocess runs an actual Claude model (subscription mode).

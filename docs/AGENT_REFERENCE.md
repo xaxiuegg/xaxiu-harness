@@ -290,6 +290,29 @@ harness engines recommend latency   # → deepseek-via-claude
 
 Engine name goes to **stdout** (pipe-friendly); rationale goes to **stderr**.  Same data backs the routed default in `harness ask`.
 
+### 8.8 Web tools, `--agentic`, and the tool-availability matrix
+
+A recurring confusion (two fresh-clone agents hit it, 2026-05-29): *"why can't the `*-via-claude` engines use web search / WebFetch like a normal Claude Code session?"*  The answer is a **protocol + endpoint split**, verified against the providers' own docs — not a harness bug:
+
+- **`--bare` strips all tools.**  Pattern B engines (`mimo-via-claude`, `kimi-via-claude`, …) dispatch `claude --print --bare --tools ""` for deterministic single-inference, and to avoid a provider-side tool-call loop that ballooned MiMo input tokens 7-12× (W14-MIMO-BLOAT-INVESTIGATION).  So by default *no* tools are offered.
+- **WebSearch / WebFetch are Anthropic SERVER tools.**  In a real Claude Code session they execute on Anthropic's infrastructure.  Redirect `ANTHROPIC_BASE_URL` to a provider and that infrastructure isn't there — the provider's `/anthropic` endpoint doesn't implement Anthropic's `web_search_20250305` / web-fetch server tools.
+- **Providers DO have web search — on a different surface.**  Kimi's `$web_search` and MiMo's `web_search` are real, server-side, and documented — but on their **OpenAI-compatible `/v1` endpoint**, under a provider-specific `builtin_function` protocol with a client round-trip.  That surface is **not** the `/anthropic` surface Claude Code drives, so it never reaches a `*-via-claude` dispatch.
+
+| Capability | `claude-via-cc` (subscription → real Anthropic) | `*-via-claude` (redirected `/anthropic`) | Pattern A direct (`/v1`) |
+|---|---|---|---|
+| Text completion | ✅ | ✅ | ✅ |
+| WebSearch / WebFetch (Anthropic server tools) | ✅ via `--agentic` | ❌ endpoint doesn't implement them | ❌ (not an Anthropic endpoint) |
+| Provider-native web search (`$web_search`) | n/a | ❌ lives on `/v1`, not `/anthropic` | ✅ *(roadmap: `builtin_function` round-trip)* |
+| File / Bash / Task agent loop | ✅ via `--agentic` | ⚠️ `tools="default"` re-enables, but risks the bloat loop | n/a (non-agentic HTTP) |
+
+**To actually get web access:**
+
+1. **Orchestrator-side (works today, zero new code):** do the WebSearch/WebFetch in *your own* agent context, dump findings to markdown, pass them via `harness ask "<q>" --research findings.md`.  The provider reasons over the text; you own the I/O.
+2. **Agentic Claude worker:** `harness ask "<q>" --engines claude-via-cc --agentic` drops `--bare` and offers WebFetch/WebSearch/Task/file+Bash.  Web tools function here because the backend is *real Anthropic*.  **Subscription-gated** — the flag is inert on redirected providers (no upside, and it would re-trigger the bloat loop).
+3. **Provider-native web search (roadmap):** reach Kimi/MiMo `$web_search` via their direct `/v1` API (Pattern A) + the documented `builtin_function` round-trip — *not* through Claude Code.
+
+Sources: [Kimi web-search docs](https://platform.kimi.ai/docs/guide/use-web-search), [MiMo tools overview](https://platform.xiaomimimo.com/docs/en-US/integration/tools-overview), [MiMo Claude Code config](https://platform.xiaomimimo.com/docs/en-US/integration/claudecode).
+
 ---
 
 ## 9. Install the harness into your CLAUDE.md (agent-instructions)
