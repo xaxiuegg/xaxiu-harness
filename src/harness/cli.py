@@ -99,6 +99,35 @@ def _bootstrap_utf8_stdout() -> None:
             pass
 
 
+# W14-TRIM 2026-05-29: the verbs surfaced in the default ``harness --help``.
+# Everything else still RUNS (and is listed by ``harness advanced list``) but
+# is hidden from default help so the usable core (docs/CORE.md) stands out.
+# This is the immediately-usable half of the trim-to-core; the coupled
+# machinery (coord/observer/loops/dashboard) is deleted in a separate careful
+# refactor.  Over-hiding is low-risk: a hidden verb still works + is discoverable.
+_CORE_VISIBLE_VERBS = {
+    "ask", "ask-history", "ask-show",      # cross-vendor compare — the moat
+    "proxy",                               # OpenAI-compatible endpoint
+    "keys", "env", "env-wizard",           # credentials + guided setup
+    "doctor", "introspect", "engines",     # health + discovery
+    "budget", "audit",                     # cost + forensic ledger
+    "capabilities", "plan", "today",       # surface + orientation
+    "advanced",                            # browse the hidden verbs
+}
+
+
+def _hide_noncore_verbs() -> None:
+    """Hide non-core verbs from the default ``harness --help``.  They still
+    run and appear in ``harness advanced list``.  Idempotent; never raises
+    (purely cosmetic — must never block the CLI)."""
+    try:
+        for _name, _cmd in cli.commands.items():
+            if _name not in _CORE_VISIBLE_VERBS:
+                _cmd.hidden = True
+    except Exception:
+        pass
+
+
 def main(*args, **kwargs):
     """Entry point that wraps click with W5-DD top-level HarnessError handler.
 
@@ -114,6 +143,7 @@ def main(*args, **kwargs):
     # writes a single byte.  The 20-agent operator-review panel found
     # this was the #1 universal blocker (cp1252 crashes on -> alpha check).
     _bootstrap_utf8_stdout()
+    _hide_noncore_verbs()
 
     from harness.errors import HarnessError, handle_harness_error
     try:
