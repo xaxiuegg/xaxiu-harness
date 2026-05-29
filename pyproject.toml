@@ -38,6 +38,13 @@ dev = [
     "ruff>=0.4,<1",
     "mypy>=1.10,<2",
 ]
+mcp = [
+    # Runtime SDK for the cross-vendor MCP server (src/harness/mcp_server.py).
+    # Optional by design: `import harness.mcp_server` works WITHOUT it (the
+    # FastMCP wiring is lazy-imported); only RUNNING the server
+    # (`python -m harness.mcp_server`) requires it.
+    "mcp>=1.0,<2",
+]
 
 [project.scripts]
 harness = "harness.cli:main"

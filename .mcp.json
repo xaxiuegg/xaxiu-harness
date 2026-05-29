@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "xaxiu-harness": {
+      "command": "python",
+      "args": ["-m", "harness.mcp_server"],
+      "description": "Cross-vendor verification via the harness: cross_vendor_audit + cross_vendor_panel tools. Requires the 'mcp' extra (pip install -e '.[mcp]')."
+    }
+  }
+}
