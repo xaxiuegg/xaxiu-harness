@@ -26,9 +26,43 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / ".claude" / "hooks" / "check-csv-on-commit.sh"
 BASH = shutil.which("bash")
 
+
+def _bash_path(p) -> str:
+    """Render *p* with forward slashes so bash (Git Bash on Windows) does not
+    eat the backslashes as shell-escape characters."""
+    return str(p).replace("\\", "/")
+
+
+def _bash_sees_repo() -> bool:
+    """True if the discovered bash can see the repo at its (Windows) path.
+
+    Git Bash (CI windows leg + Claude Code) handles ``D:/...``; the WSL
+    ``bash.exe`` stub cannot (it needs ``/mnt/d/...``).  Skipping when the only
+    bash on PATH is the WSL stub avoids false failures on dev boxes.
+    """
+    if BASH is None:
+        return False
+    try:
+        r = subprocess.run(
+            [BASH, "-c", f"test -e '{_bash_path(REPO_ROOT)}'"],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    BASH is None,
-    reason="bash not available — hook is a bash script",
+    os.name == "nt" or not _bash_sees_repo(),
+    reason=(
+        "These tests shim `git` via a PATH override using an extensionless "
+        "bash script.  That relies on MSYS exec-by-shebang semantics that do "
+        "NOT hold reliably under Git Bash on Windows (the shim isn't exec'd, "
+        "so the hook reads the real repo).  The hook's match logic is "
+        "exercised on the Linux CI leg; on Windows the hook is validated in "
+        "real Claude Code usage.  WSL bash also can't see the repo's Windows "
+        "path."
+    ),
 )
 
 
@@ -65,7 +99,7 @@ def _run_hook_with_fake_git(*, git_log_stdout: str,
             "PATH": f"{tmpdir}{os.pathsep}{os.environ.get('PATH', '')}",
         }
         proc = subprocess.run(
-            [BASH, str(HOOK)],
+            [BASH, _bash_path(HOOK)],
             input=stdin_payload,
             capture_output=True, text=True, env=env, timeout=10,
         )

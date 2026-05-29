@@ -153,6 +153,10 @@ def test_project_root_does_not_exist(mock_root, tmp_path: Path) -> None:
         load_project_adapter("bad-root")
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="system-directory rejection is Windows-specific (C:\\Windows)",
+)
 @patch("harness.adapters.loader._repo_root")
 def test_project_root_under_system_dir(mock_root, tmp_path: Path) -> None:
     mock_root.return_value = tmp_path
@@ -220,7 +224,11 @@ def test_load_project_adapter_success(mock_root, tmp_path: Path) -> None:
 def test_adapter_config_without_operator() -> None:
     cfg = AdapterConfig(
         name="legacy",
-        project_root="C:\\legacy",
+        # Use the {{PROJECT_ROOT}} placeholder (which the validator explicitly
+        # allows) instead of a hardcoded "C:\\legacy" — the latter is not an
+        # absolute path on Linux, so the ubuntu CI leg rejected it and failed
+        # this operator-less test for an unrelated path reason.
+        project_root="{{PROJECT_ROOT}}/legacy",
         status_tracking=StatusTrackingConfig(
             backend="csv", config={"csv_path": "STATUS.csv"}
         ),

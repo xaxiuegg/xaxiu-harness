@@ -20,7 +20,12 @@ if ! echo "$INPUT" | grep -q 'git commit'; then
   exit 0
 fi
 
-cd "D:/xaxiu-harness-standalone" 2>/dev/null || exit 0
+# Resolve the repo root from THIS script's location rather than hardcoding an
+# absolute path.  The hook lives at <repo>/.claude/hooks/, so ../.. is the repo
+# root.  (Hardcoding "D:/xaxiu-harness-standalone" broke on the repo migration
+# and can't run on the Linux CI leg; `|| exit 0` keeps it fail-safe.)
+_HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)" || exit 0
+cd "$_HOOK_DIR/../.." 2>/dev/null || exit 0
 # W9-ONCOMMIT-HOOK-CRLF 2026-05-24: strip CR before grep.  Windows git
 # emits CRLF line endings in `git log --name-only` output; the `$`
 # anchor in `^coord/STATUS\.csv$` doesn't match before \r, so the

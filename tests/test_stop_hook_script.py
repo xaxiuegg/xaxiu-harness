@@ -25,15 +25,38 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / ".claude" / "hooks" / "check-csv-stale.sh"
+BASH = shutil.which("bash")
 
 
-def _bash_available() -> bool:
-    return shutil.which("bash") is not None
+def _bash_path(p) -> str:
+    """Render *p* with forward slashes so bash (Git Bash on Windows) does not
+    eat the backslashes as shell-escape characters."""
+    return str(p).replace("\\", "/")
+
+
+def _bash_sees_repo() -> bool:
+    """True if the discovered bash can see the repo at its (Windows) path.
+
+    Git Bash (CI windows leg + Claude Code) handles ``D:/...``; the WSL
+    ``bash.exe`` stub cannot (it needs ``/mnt/d/...``).  Skipping when the only
+    bash on PATH is the WSL stub avoids false failures on dev boxes.
+    """
+    if BASH is None:
+        return False
+    try:
+        r = subprocess.run(
+            [BASH, "-c", f"test -e '{_bash_path(REPO_ROOT)}'"],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 pytestmark = pytest.mark.skipif(
-    not _bash_available(),
-    reason="bash not available on this platform",
+    not _bash_sees_repo(),
+    reason="bash cannot see the repo at its Windows path (WSL stub) — "
+           "hook is a bash script and needs Git Bash",
 )
 
 
@@ -72,7 +95,7 @@ def _git_init(repo: Path) -> None:
 def _run_hook(hook: Path, *, cwd: Path) -> subprocess.CompletedProcess:
     """Run the (adapted) hook script and return the completed process."""
     return subprocess.run(
-        ["bash", str(hook)],
+        [BASH, _bash_path(hook)],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -103,7 +126,7 @@ def test_hook_exits_silent_when_pwd_outside_scope(tmp_path: Path) -> None:
     outside_dir = tmp_path / "elsewhere"
     outside_dir.mkdir()
     proc = subprocess.run(
-        ["bash", str(hook)],
+        [BASH, _bash_path(hook)],
         cwd=str(outside_dir),
         capture_output=True, text=True,
         env={**os.environ, "PWD": str(outside_dir)},
@@ -147,7 +170,7 @@ def test_hook_silent_when_only_mtime_drift_matches_head(tmp_path: Path) -> None:
     hook.write_text(hook_content, encoding="utf-8")
     hook.chmod(0o755)
     proc = subprocess.run(
-        ["bash", str(hook)],
+        [BASH, _bash_path(hook)],
         cwd=str(repo),
         capture_output=True, text=True,
         env={**os.environ, "PWD": str(repo)},
@@ -199,7 +222,7 @@ def test_hook_fires_when_real_content_change(tmp_path: Path) -> None:
     if debounce.exists():
         debounce.unlink()
     proc = subprocess.run(
-        ["bash", str(hook)],
+        [BASH, _bash_path(hook)],
         cwd=str(repo),
         capture_output=True, text=True,
         env={**os.environ, "PWD": str(repo)},
@@ -236,7 +259,7 @@ def test_hook_debounce_suppresses_within_5min(tmp_path: Path) -> None:
     hook.write_text(hook_content, encoding="utf-8")
     hook.chmod(0o755)
     proc = subprocess.run(
-        ["bash", str(hook)],
+        [BASH, _bash_path(hook)],
         cwd=str(repo),
         capture_output=True, text=True,
         env={**os.environ, "PWD": str(repo)},

@@ -17,9 +17,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # This module imports Windows-only dependencies (ctypes.windll).  On
-# non-Windows platforms the import will fail during collection, matching the
-# behaviour of tests/test_install_smoke.py which also imports dpapi at module
-# level.
+# non-Windows platforms the import fails at *collection* time, which the
+# ubuntu CI leg counts as an error.  DPAPI is Windows-only by design (see the
+# NotImplementedError it raises elsewhere), so skip the whole module on
+# non-Windows rather than emit a false failure.
+if sys.platform != "win32":  # pragma: no cover - platform guard
+    pytest.skip(
+        "DPAPI is Windows-only (ctypes.windll)", allow_module_level=True
+    )
+
 from harness.errors import ConfigCorruption
 import harness.secrets.dpapi as dpapi
 from harness.secrets.dpapi import (
