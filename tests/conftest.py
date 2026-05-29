@@ -84,50 +84,43 @@ def pytest_collection_modifyitems(config, items):  # noqa: D401 - pytest hook
 
 
 # W14-RELIABILITY 2026-05-29: some test leaves a thread that blocks Python's
-# interpreter-shutdown join (``threading._wait_for_tstate_lock``), so the
-# process never exits.  Linux drained it; Windows HANGS — a fully-passing run
-# then exits 1 after the runner SIGINT's it (``KeyboardInterrupt`` at
-# threading.py:359).  The CI-GREEN-4/5 attempts proved the offending thread is
-# NOT visible at sessionfinish, so it blocks during atexit / interpreter
-# shutdown (e.g. ``concurrent.futures._python_exit`` joining a stuck worker) —
-# *after* the hooks.  So we stop trying to detect it and bypass the shutdown
-# join: record the real exit status at sessionfinish, then ``os._exit`` from
-# ``pytest_unconfigure`` (which runs AFTER the terminal summary, so the report
-# still prints and the status is intact).  Coverage runs are exempt — they need
-# atexit to flush ``.coverage`` and that CI step is non-blocking anyway.
-_FORCED_EXIT_CODE: dict[str, object] = {"value": None}
-
-
+# shutdown join (``threading._wait_for_tstate_lock``), so the process never
+# exits.  Linux drained it; Windows HANGS — a fully-passing run then exits 1
+# after the runner SIGINT's it (``KeyboardInterrupt`` at threading.py:359).
+# Iterating the exit point LATER (conditional sessionfinish -> unconfigure)
+# never helped: the hang is *during* the finalization phase, before those hooks
+# fire and before any straggler is even visible.  So go EARLIER instead — a
+# ``tryfirst`` sessionfinish runs at the very start of finalization (after the
+# tests + their teardowns, before the terminal summary / asyncio loop cleanup /
+# the hanging join) — and ``os._exit`` there with the already-final status,
+# preempting the entire finalization phase deterministically on every platform.
+# The reporter's counts are populated by now, so we print a concise result line
+# in lieu of pytest's native summary.  Coverage runs are exempt (they need
+# atexit to flush ``.coverage``; that CI step is non-blocking anyway).
+@pytest.hookimpl(tryfirst=True)
 def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - pytest hook
-    import sys
-
-    if any("--cov" in a for a in sys.argv):
-        return  # leave value None -> no force-exit; let coverage flush
-    try:
-        _FORCED_EXIT_CODE["value"] = int(exitstatus)
-    except (TypeError, ValueError):
-        _FORCED_EXIT_CODE["value"] = getattr(exitstatus, "value", 1)
-
-
-def pytest_unconfigure(config):  # noqa: D401 - pytest hook
-    code = _FORCED_EXIT_CODE["value"]
-    if code is None:
-        return  # collection error / coverage run -> normal exit path
     import os
     import sys
     import threading
 
-    # Diagnostic only — name any straggler so a future change can root-fix it.
-    main = threading.main_thread()
-    lingering = [
-        t for t in threading.enumerate()
-        if t is not main and t.is_alive() and not t.daemon
+    if any("--cov" in a for a in sys.argv):
+        return  # let the (non-blocking) coverage run flush via atexit
+
+    rep = session.config.pluginmanager.get_plugin("terminalreporter")
+    stats = getattr(rep, "stats", {}) if rep is not None else {}
+    n = lambda k: len(stats.get(k, []))  # noqa: E731
+    stragglers = [
+        t.name for t in threading.enumerate()
+        if t is not threading.main_thread() and t.is_alive() and not t.daemon
     ]
-    if lingering:
-        sys.stderr.write(
-            "\n[conftest] lingering non-daemon threads at exit: "
-            + ", ".join(repr(t.name) for t in lingering) + "\n"
-        )
+    sys.stderr.write(
+        f"\n[conftest] forcing clean exit (Windows finalization-hang "
+        f"workaround): {n('passed')} passed, {n('failed')} failed, "
+        f"{n('error')} error, {n('skipped')} skipped, "
+        f"exitstatus={int(exitstatus)}"
+        + (f"; stragglers={stragglers}" if stragglers else "")
+        + "\n"
+    )
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(int(code))
+    os._exit(int(exitstatus))
