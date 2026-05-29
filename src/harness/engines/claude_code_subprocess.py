@@ -424,16 +424,6 @@ def _engine_name_for_mimo_key(api_key: str) -> str:
     return "mimo-payg"
 
 
-# W14-AGENTIC-MODE 2026-05-29: the tool allowlist offered when --agentic is
-# set (subscription-only).  Explicit (not "default"/"all") to bound the
-# surface to what a real Claude worker needs without exposing arbitrary
-# host-project plugin/MCP tools.  WebFetch/WebSearch function only on the
-# real-Anthropic (subscription) backend — see AGENT_REFERENCE §8.8.
-_AGENTIC_TOOL_ALLOWLIST = (
-    "WebFetch,WebSearch,Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite"
-)
-
-
 class ClaudeCodeSubprocessEngine(Engine):
     """Engine that dispatches via the local ``claude`` CLI binary.
 
@@ -476,18 +466,10 @@ class ClaudeCodeSubprocessEngine(Engine):
         max_budget_usd: Optional[float] = None,
         timeout_s: Optional[int] = None,
         verify_binary: bool = True,
-        subscription: bool = False,
     ) -> None:
         super().__init__(api_key=api_key)
         self._base_url = base_url
         self._default_model = default_model
-        # W14-CLAUDE-VIA-CC: subscription mode runs the operator's Claude
-        # Code subscription (claude login OAuth) rather than an injected
-        # provider key.  _build_env must then set NO ANTHROPIC_API_KEY (a
-        # set key forces API/pay-per-token billing and overrides the
-        # subscription) and dispatch must not short-circuit on the empty
-        # key.  See [claude-via-subscription-not-api] in memory.
-        self._subscription = subscription
         self._binary = binary or _resolve_binary()
         self._max_budget_usd = (
             max_budget_usd if max_budget_usd is not None
@@ -550,48 +532,18 @@ class ClaudeCodeSubprocessEngine(Engine):
         budget = extra_args.get("max_budget_usd", self._max_budget_usd)
         output_format = extra_args.get("output_format", "json")
         permission_mode = extra_args.get("permission_mode", "auto")
-        # W14-AGENTIC-MODE 2026-05-29: ``agentic=True`` drops ``--bare`` and
-        # offers a curated tool allowlist so the worker can run the
-        # client-side agent loop (WebFetch / Task / file + Bash tools).
-        #
-        # Doc-verified scope (AGENT_REFERENCE tool-availability matrix,
-        # 2026-05-29): WebFetch / WebSearch only *function* on the
-        # SUBSCRIPTION backend (real Anthropic server tools).  On a
-        # redirected provider the offer is inert — the provider's native
-        # web search ($web_search / web_search) lives on its OpenAI /v1
-        # endpoint under a different protocol, NOT the /anthropic surface
-        # Claude Code drives — and un-restricting tools reintroduces the
-        # MiMo token-bloat loop (W14-MIMO-BLOAT-INVESTIGATION).  So
-        # agentic mode is intended for claude-via-cc; provider engines
-        # should reach web search via Pattern A direct /v1 instead.
-        # GATED to subscription: dropping tool restrictions on a redirected
-        # provider buys nothing (web tools won't function) and costs the
-        # bloat loop, so a stray agentic=True on a provider is ignored.
-        agentic = bool(extra_args.get("agentic", False)) and self._subscription
-
-        # W14-CLAUDE-VIA-CC-AUTH-FIX 2026-05-29: --bare is INCOMPATIBLE with
-        # subscription auth.  Per code.claude.com/docs/en/authentication:
-        # "Bare mode does not read CLAUDE_CODE_OAUTH_TOKEN.  If your script
-        # passes --bare, authenticate with ANTHROPIC_API_KEY or an
-        # apiKeyHelper instead."  --bare ALSO skips the /login credential
-        # store.  Subscription dispatch injects NO key (it must, or billing
-        # flips to pay-per-token), so under --bare it has NO auth path at
-        # all and always returns "Not logged in".  Therefore: --bare iff
-        # NOT subscription.  Providers keep --bare — they auth via the
-        # injected ANTHROPIC_API_KEY (which --bare DOES read) and --bare
-        # suppresses the provider-side tool-bloat loop
-        # (W14-MIMO-BLOAT-INVESTIGATION).
-        use_bare = not self._subscription
-        # Tool posture: agentic → curated allowlist; else deterministic
-        # single-inference (empty).  ``extra_args["tools"]`` overrides both.
-        tools = (
-            extra_args.get("tools", _AGENTIC_TOOL_ALLOWLIST) if agentic
-            else extra_args.get("tools", "")
-        )
-        cmd = [self._binary, "--print"]
-        if use_bare:
-            cmd.append("--bare")
-        cmd += [
+        # ``--tools ""`` (default) makes the dispatch a single inference
+        # rather than an agent loop; callers that need tool use can pass
+        # ``extra_args["tools"]``.  All Pattern B providers run under
+        # ``--bare``: deterministic single-shot, auth via the injected
+        # ANTHROPIC_API_KEY (which --bare reads), and it suppresses the
+        # provider-side tool-call loop that ballooned MiMo input tokens
+        # 7-12x (W14-MIMO-BLOAT-INVESTIGATION).
+        tools = extra_args.get("tools", "")
+        cmd = [
+            self._binary,
+            "--print",
+            "--bare",
             "--tools", tools,
             "--model", model or self._default_model or "sonnet",
             "--output-format", output_format,
@@ -599,13 +551,6 @@ class ClaudeCodeSubprocessEngine(Engine):
             "--permission-mode", permission_mode,
             "--max-budget-usd", f"{float(budget):.4f}",
         ]
-        # W14-CLAUDE-VIA-CC: effort control (Opus 4.8: low|medium|high|
-        # xhigh|max) is a real Claude Code flag, meaningful only when the
-        # subprocess runs an actual Claude model (subscription mode).
-        # Redirected-provider engines ignore it, so emit it only there.
-        effort = extra_args.get("effort")
-        if effort and self._subscription:
-            cmd += ["--effort", str(effort).strip().lower()]
         return cmd
 
     def _build_env(self) -> dict[str, str]:
@@ -639,14 +584,10 @@ class ClaudeCodeSubprocessEngine(Engine):
         for k in keys_to_purge:
             env.pop(k, None)
 
-        # Now set OUR provider-routed values.
-        # SUBSCRIPTION mode (claude-via-cc) injects NO key so Claude Code
-        # falls back to the operator's stored `claude login` OAuth — a set
-        # ANTHROPIC_API_KEY/AUTH_TOKEN would force API/pay-per-token billing
-        # and override the subscription ([claude-via-subscription-not-api]).
-        if not self._subscription:
-            env["ANTHROPIC_API_KEY"] = self._api_key
-            env["ANTHROPIC_AUTH_TOKEN"] = self._api_key
+        # Now set OUR provider-routed values: inject the provider key as
+        # both ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN.
+        env["ANTHROPIC_API_KEY"] = self._api_key
+        env["ANTHROPIC_AUTH_TOKEN"] = self._api_key
         if self._base_url:
             env["ANTHROPIC_BASE_URL"] = self._base_url
         # No base_url means use Claude Code's built-in default;
@@ -658,10 +599,7 @@ class ClaudeCodeSubprocessEngine(Engine):
         # actual model, internal routing fails or falls back to
         # Anthropic's default.  Set ANTHROPIC_MODEL too for callers
         # that omit ``--model`` on the command line.
-        # SUBSCRIPTION mode SKIPS the alias override: against the real
-        # Anthropic backend we want NATIVE opus/sonnet/haiku resolution,
-        # and the model is chosen via `--model` on the command line.
-        if self._default_model and not self._subscription:
+        if self._default_model:
             env["ANTHROPIC_MODEL"] = self._default_model
             env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self._default_model
             env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self._default_model
@@ -694,7 +632,7 @@ class ClaudeCodeSubprocessEngine(Engine):
         extra_args: Optional[dict] = None,
     ) -> EngineResponse:
         extra = extra_args or {}
-        if not self._api_key and not self._subscription:
+        if not self._api_key:
             return EngineResponse(
                 success=False,
                 text="",
