@@ -83,21 +83,23 @@ def pytest_collection_modifyitems(config, items):  # noqa: D401 - pytest hook
             item.add_marker(skip)
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - pytest hook
     """Force a deterministic process exit if non-daemon threads are lingering.
 
-    W14-RELIABILITY 2026-05-29: several suites build a FastAPI/Starlette
-    ``TestClient`` (dashboard/proxy tests) without the ``with`` context
-    manager.  Starlette then leaves a non-daemon anyio *portal* thread alive;
-    at interpreter shutdown the main thread blocks forever in
-    ``threading._wait_for_tstate_lock`` waiting for it to die.  On Linux this
-    happened to drain; on Windows it HANGS — the whole suite (locally, and the
-    CI windows leg) never terminates, so a fully-passing run reported exit 1
-    after the runner SIGINT'd it (``KeyboardInterrupt`` at threading.py).
+    W14-RELIABILITY 2026-05-29: some test leaves a non-daemon helper thread
+    alive (a FastAPI/Starlette ``TestClient`` portal, a server thread, or an
+    un-shutdown ``concurrent.futures`` executor).  At interpreter shutdown the
+    main thread then blocks forever in ``threading._wait_for_tstate_lock``
+    waiting for it to die.  Linux happened to drain it; Windows HANGS — the
+    suite (locally, and the CI windows leg) never terminates, so a passing run
+    exits 1 after the runner SIGINT's it (``KeyboardInterrupt`` at threading.py).
 
-    This guard fires ONLY when such threads are actually still alive after the
-    session finished — i.e. exactly the hang condition — so healthy runs are
-    completely unaffected.  We flush first and preserve the real exit status.
+    Runs ``trylast`` (after the terminal summary) and fires ONLY when such
+    threads are actually still alive — i.e. exactly the hang condition — so
+    healthy runs are unaffected.  It also DUMPS the offending thread names +
+    stacks to stderr so CI logs pinpoint the leak source for a root fix, then
+    force-exits preserving the real status.
     """
     import os
     import sys
@@ -110,6 +112,15 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - pytest hook
     ]
     if not lingering:
         return  # clean run — let pytest exit normally
+    sys.stderr.write(
+        "\n[conftest] forcing exit — lingering non-daemon threads would hang "
+        "shutdown: " + ", ".join(repr(t.name) for t in lingering) + "\n"
+    )
+    try:
+        import faulthandler
+        faulthandler.dump_traceback(file=sys.stderr)  # stacks -> pinpoint source
+    except Exception:
+        pass
     sys.stdout.flush()
     sys.stderr.flush()
     try:

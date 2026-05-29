@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Literal
 
@@ -362,11 +363,21 @@ def write_engine_health(state: dict[str, EngineHealth]) -> None:
     _atomic_write_json(ENGINE_HEALTH_PATH, payload)
 
 
+# Serialises the read-modify-write below within a process.  Without it, two
+# threads (e.g. the proxy's multi-key pool updating engine health concurrently)
+# race the tempfile + ``os.replace`` dance — on Windows that surfaces as
+# ``PermissionError(13, 'Access is denied')`` because a file open in one thread
+# can't be replaced by another; on any OS it risks lost updates (last-writer
+# wins on a stale read).
+_ENGINE_HEALTH_WRITE_LOCK = threading.Lock()
+
+
 def update_engine_health(name: str, patch: dict[str, Any]) -> None:
-    """Partially update one engine entry and persist."""
-    state = read_engine_health()
-    current = state.get(name, EngineHealth())
-    current_data = current.model_dump(mode="json")
-    current_data.update(patch)
-    state[name] = EngineHealth.model_validate(current_data)
-    write_engine_health(state)
+    """Partially update one engine entry and persist (thread-safe)."""
+    with _ENGINE_HEALTH_WRITE_LOCK:
+        state = read_engine_health()
+        current = state.get(name, EngineHealth())
+        current_data = current.model_dump(mode="json")
+        current_data.update(patch)
+        state[name] = EngineHealth.model_validate(current_data)
+        write_engine_health(state)
