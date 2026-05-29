@@ -81,3 +81,39 @@ def pytest_collection_modifyitems(config, items):  # noqa: D401 - pytest hook
         test_name = tail.split("[", 1)[0]  # strip any parametrize suffix
         if spec == "*" or test_name in spec:
             item.add_marker(skip)
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - pytest hook
+    """Force a deterministic process exit if non-daemon threads are lingering.
+
+    W14-RELIABILITY 2026-05-29: several suites build a FastAPI/Starlette
+    ``TestClient`` (dashboard/proxy tests) without the ``with`` context
+    manager.  Starlette then leaves a non-daemon anyio *portal* thread alive;
+    at interpreter shutdown the main thread blocks forever in
+    ``threading._wait_for_tstate_lock`` waiting for it to die.  On Linux this
+    happened to drain; on Windows it HANGS — the whole suite (locally, and the
+    CI windows leg) never terminates, so a fully-passing run reported exit 1
+    after the runner SIGINT'd it (``KeyboardInterrupt`` at threading.py).
+
+    This guard fires ONLY when such threads are actually still alive after the
+    session finished — i.e. exactly the hang condition — so healthy runs are
+    completely unaffected.  We flush first and preserve the real exit status.
+    """
+    import os
+    import sys
+    import threading
+
+    main = threading.main_thread()
+    lingering = [
+        t for t in threading.enumerate()
+        if t is not main and t.is_alive() and not t.daemon
+    ]
+    if not lingering:
+        return  # clean run — let pytest exit normally
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        code = int(exitstatus)
+    except (TypeError, ValueError):
+        code = getattr(exitstatus, "value", 1)
+    os._exit(code)
