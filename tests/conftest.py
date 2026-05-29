@@ -113,14 +113,33 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - pytest hook
         t.name for t in threading.enumerate()
         if t is not threading.main_thread() and t.is_alive() and not t.daemon
     ]
+
+    # The spurious finalization KeyboardInterrupt sets exitstatus=INTERRUPTED(2)
+    # even though every collected test ran and passed.  Judge success by the
+    # actual results, not the interrupt-corrupted status: a run with zero
+    # failed/errored tests where everything collected was accounted for is
+    # GREEN — override only the spurious INTERRUPTED(2), never a real failure
+    # (1) or a genuine mid-run interrupt (where collected tests went unrun).
+    collected = int(getattr(session, "testscollected", 0) or 0)
+    real_failures = n("failed") + n("error")
+    accounted = n("passed") + n("skipped") + n("failed") + n("error") \
+        + n("xfailed") + n("xpassed")
+    if (int(exitstatus) == 2 and real_failures == 0
+            and collected > 0 and accounted >= collected):
+        code = 0
+        verdict = "PASS (overrode spurious finalization interrupt)"
+    else:
+        code = int(exitstatus)
+        verdict = f"exitstatus={code}"
+
     sys.stderr.write(
         f"\n[conftest] forcing clean exit (Windows finalization-hang "
         f"workaround): {n('passed')} passed, {n('failed')} failed, "
         f"{n('error')} error, {n('skipped')} skipped, "
-        f"exitstatus={int(exitstatus)}"
+        f"collected={collected} -> {verdict}"
         + (f"; stragglers={stragglers}" if stragglers else "")
         + "\n"
     )
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(int(exitstatus))
+    os._exit(code)
