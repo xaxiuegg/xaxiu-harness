@@ -135,11 +135,13 @@ class TestInstallVerify:
             f"`harness --help` exited {result.returncode}:\n"
             f"stdout={result.stdout}\nstderr={result.stderr}"
         )
-        # The help text should mention at least the SDK-relevant verbs
-        for verb in ("dispatch", "review", "preflight", "today",
-                     "cost-today"):
+        # The help text should list the core verbs.  (W14-TRIM 2026-05-29
+        # decluttered `--help` to the ~17-verb usable core via a hidden=True
+        # allowlist; engineering-tier verbs like dispatch/review/preflight now
+        # live under `harness advanced` and are intentionally hidden here.)
+        for verb in ("ask", "proxy", "today", "doctor"):
             assert verb in result.stdout, (
-                f"`harness --help` missing verb '{verb}':\n"
+                f"`harness --help` missing core verb '{verb}':\n"
                 f"{result.stdout}"
             )
 

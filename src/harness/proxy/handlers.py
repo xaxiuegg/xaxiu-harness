@@ -190,7 +190,11 @@ def run_claude_subprocess(
     ``_run`` is a test seam — if provided, called instead of
     ``subprocess.run``.  Signature must match ``subprocess.run``.
     """
-    binary = claude_binary or _resolve_claude_binary()
+    # When a test injects ``_run``, the real binary is never spawned, so don't
+    # require it on PATH — CI runners have no ``claude`` binary, and demanding
+    # one here turned the happy-path test into a spurious 502.  Production
+    # (``_run is None``) still resolves the real binary unchanged.
+    binary = claude_binary or ("claude" if _run is not None else _resolve_claude_binary())
     runner = _run or subprocess.run
 
     cmd = [
