@@ -1882,8 +1882,21 @@ def ask_cmd(
             click.echo()
             role = roles[i] if (roles and i < len(roles)) else ""
             label = f"{role}: {r.engine}" if role else r.engine
+            # W14-ASK-NOISE (reviewer gap #3): flag a syntactically-OK but
+            # garbage response so it doesn't silently corrupt the compare.
+            noise = getattr(r, "noise", "") if r.ok else ""
+            if noise:
+                label += f"  ⚠ {noise}"
             click.echo(click.style(f"### {label}", fg="yellow", bold=True))
             click.echo()
+            if noise:
+                click.echo(click.style(
+                    f"⚠ possible low-quality response ({noise}): this engine "
+                    f"may have returned an empty body or leaked tool-call "
+                    f"markup — weight it accordingly in the comparison below.",
+                    fg="red",
+                ))
+                click.echo()
             click.echo(r.text if r.ok else f"FAILED: {r.error}")
 
     failed = [r for r in results if not r.ok]

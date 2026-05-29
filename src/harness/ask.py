@@ -94,6 +94,41 @@ class AskResult:
     error: str
     winning_alias: str
     attempt_count: int
+    # W14-ASK-NOISE 2026-05-29 (reviewer gap #3): a short quality flag for a
+    # response that succeeded transport-wise but is semantically garbage —
+    # "empty" or "tool-noise".  "" means the answer looks real.  Surfaced in
+    # the cross-vendor compare so provider machinery leakage (e.g. MiMo
+    # emitting tool-call markup) doesn't silently corrupt the comparison.
+    noise: str = ""
+
+
+# Literal machinery tokens that indicate a provider leaked its tool-call /
+# function-call scaffolding into the answer text instead of returning prose.
+# Deliberately SPECIFIC (full tags / sentinel tokens), never bare words like
+# "function", so a legitimate prose answer about functions is not flagged.
+_TOOL_NOISE_MARKERS: tuple[str, ...] = (
+    "<tool_call>", "</tool_call>", "<tool_calls>", '"tool_calls":',
+    "<|tool_calls_section_begin|>", "<|tool_call_begin|>",
+    "<｜tool▁calls▁begin｜>", "<｜tool▁call▁begin｜>",
+    "<function_calls>", "<invoke name=",
+    "$web_search", '"builtin_function"',
+)
+
+
+def _assess_noise(text: str) -> str:
+    """Classify a *successful* engine response for obvious garbage.
+
+    Returns ``"empty"`` (blank/whitespace body), ``"tool-noise"`` (provider
+    tool-call scaffolding leaked into the text), or ``""`` when the response
+    looks like a real answer.  Conservative by design — only unambiguous
+    machinery tokens count, so a genuine prose answer is never flagged.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return "empty"
+    if any(marker in stripped for marker in _TOOL_NOISE_MARKERS):
+        return "tool-noise"
+    return ""
 
 
 def _slugify(question: str, max_len: int = 40) -> str:
@@ -159,6 +194,7 @@ def _dispatch_one(
             error=resp.error if not resp.success else "",
             winning_alias="kimi-cli",
             attempt_count=1,
+            noise=_assess_noise(resp.text) if resp.success else "",
         )
 
     try:
@@ -191,6 +227,7 @@ def _dispatch_one(
         error=resp.error if resp and not result.success else "",
         winning_alias=result.winning_alias,
         attempt_count=result.attempt_count,
+        noise=_assess_noise(resp.text) if (resp and result.success) else "",
     )
 
 
