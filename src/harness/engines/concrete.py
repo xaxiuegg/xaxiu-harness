@@ -900,14 +900,6 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
             )
         return KimiCliEngine(api_key=api_key)
 
-    if name_lower == "claude-via-cc":
-        # W14-CLAUDE-VIA-CC: subscription Claude via Claude Code subprocess.
-        # NO key resolution — auth is the operator's stored `claude login`
-        # OAuth, not an env-var key.  Distinct from the direct-API
-        # 'anthropic' engine.  See [claude-via-subscription-not-api] in memory.
-        from harness.engines.claude_code_subprocess import ClaudeViaCcEngine
-        return ClaudeViaCcEngine()
-
     if name_lower not in _ENV_VAR_MAP:
         raise RuntimeError(
             f"Unknown engine '{name}'. Supported: {list(_ENV_VAR_MAP.keys())}"

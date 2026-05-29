@@ -132,12 +132,10 @@ def _dispatch_one(
     if agentic:
         extra["agentic"] = True
 
-    # Direct-dispatch engines (no poolable HTTP key): claude-via-cc uses the
-    # subscription OAuth; kimi-cli is a local-CLI subprocess agent (subagents +
-    # web research via the Kimi CLI).  Both bypass the multi-key pool and
-    # dispatch directly.  ``effort``/``agentic`` are honoured only where
-    # meaningful; other engines ignore the extra keys.
-    if engine in ("claude-via-cc", "kimi-cli"):
+    # Direct-dispatch engine (no poolable HTTP key): kimi-cli is a local-CLI
+    # subprocess agent (subagents + web research via the Kimi CLI).  It
+    # bypasses the multi-key pool and dispatches directly.
+    if engine == "kimi-cli":
         try:
             from harness.engines.concrete import get_engine
             resp = get_engine(engine).dispatch(
@@ -159,8 +157,7 @@ def _dispatch_one(
             cost_usd=float(getattr(resp, "cost_usd", 0.0) or 0.0),
             text=resp.text if resp.success else "",
             error=resp.error if not resp.success else "",
-            winning_alias=("subscription" if engine == "claude-via-cc"
-                           else "kimi-cli"),
+            winning_alias="kimi-cli",
             attempt_count=1,
         )
 

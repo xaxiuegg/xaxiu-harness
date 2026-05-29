@@ -494,7 +494,7 @@ class TestFactoryIntegration:
         from harness.secrets import resolve as resolve_module
         monkeypatch.setattr(
             resolve_module, "resolve_key",
-            lambda env_var, prefer_dpapi=True: "tp-test-key-from-fixture",
+            lambda env_var, **kw: "tp-test-key-from-fixture",
         )
         from harness.engines.concrete import get_engine
         eng = get_engine("mimo-via-claude")
@@ -509,7 +509,7 @@ class TestFactoryIntegration:
         from harness.secrets import resolve as resolve_module
         monkeypatch.setattr(
             resolve_module, "resolve_key",
-            lambda env_var, prefer_dpapi=True: None,
+            lambda env_var, **kw: None,
         )
         from harness.engines.concrete import get_engine
         with pytest.raises(RuntimeError, match="mimo-via-claude"):
@@ -951,7 +951,7 @@ class TestKimiViaClaudeCodeEngine:
         from harness.secrets import resolve as resolve_module
         monkeypatch.setattr(
             resolve_module, "resolve_key",
-            lambda env_var, prefer_dpapi=True: "sk-test-kimi-from-factory",
+            lambda env_var, **kw: "sk-test-kimi-from-factory",
         )
         from harness.engines.concrete import get_engine
         eng = get_engine("kimi-via-claude")
@@ -965,7 +965,7 @@ class TestKimiViaClaudeCodeEngine:
         from harness.secrets import resolve as resolve_module
         monkeypatch.setattr(
             resolve_module, "resolve_key",
-            lambda env_var, prefer_dpapi=True: None,
+            lambda env_var, **kw: None,
         )
         from harness.engines.concrete import get_engine
         with pytest.raises(RuntimeError, match="kimi-via-claude"):
@@ -1178,7 +1178,7 @@ class TestDeepSeekViaClaudeCode:
         from harness.secrets import resolve as resolve_module
         monkeypatch.setattr(
             resolve_module, "resolve_key",
-            lambda env_var, prefer_dpapi=True: "sk-test-deepseek",
+            lambda env_var, **kw: "sk-test-deepseek",
         )
         from harness.engines.concrete import get_engine
         eng = get_engine("deepseek-via-claude")

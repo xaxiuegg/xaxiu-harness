@@ -942,36 +942,6 @@ class KimiViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
         return "kimi-via-claude"
 
 
-class ClaudeViaCcEngine(ClaudeCodeSubprocessEngine):
-    """Claude (Anthropic) via the operator's Claude Code SUBSCRIPTION.
-
-    W14-CLAUDE-VIA-CC: runs the local ``claude`` binary with NO injected
-    key and NO base_url, so it uses the operator's stored ``claude login``
-    OAuth credential (the subscription) rather than the pay-per-token
-    Messages API.  This is the harness's TOS-correct way to dispatch a
-    real Claude model — distinct from the (dead-for-this-operator)
-    direct-API ``AnthropicConcrete`` engine in concrete.py.
-
-    Honours an ``effort`` extra_arg (Opus 4.8: low|medium|high|xhigh|max)
-    via the Claude Code ``--effort`` flag.  Default model ``opus`` resolves
-    to the current Opus (4.8) on the subscription.  See
-    [claude-via-subscription-not-api] in memory.
-    """
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(
-            api_key="",  # subscription auth: NO key (claude login OAuth)
-            base_url=PROVIDER_ANTHROPIC_ENDPOINTS["anthropic-default"],  # ""
-            default_model=DEFAULT_MODEL_PER_ENGINE["anthropic-default"],
-            subscription=True,
-            **kwargs,
-        )
-
-    @property
-    def name(self) -> str:
-        return "claude-via-cc"
-
-
 class DeepSeekViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
     """DeepSeek via subprocess Claude Code.
 
