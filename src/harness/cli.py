@@ -45,14 +45,50 @@ from harness.budget import (
 )
 
 # Observer primitive (roster #20)
-from harness.observer.flags import (
-    FlagSeverity,
-    ensure_flag_dirs,
-    list_pending_flags,
-    ack_flag,
-)
-from harness.observer.state import read_state, write_state, ObserverState
-from harness.observer.scheduler import register_tasks, unregister_tasks
+# W14-TRIM 2026-05-29: lazy observer accessors.  The (hidden) observer verbs
+# reference these as module globals; defining them as thin wrappers that import
+# on first CALL (not at module load) keeps observer.* OFF the core
+# `import harness.cli` path — the reliability gate guarded by
+# tests/test_core_import_isolation.py.  FlagSeverity (an enum, accessed as
+# FlagSeverity.X) can't be wrapped, so its one consumer imports it locally.
+def read_state(*a, **k):
+    from harness.observer.state import read_state as _f
+    return _f(*a, **k)
+
+
+def write_state(*a, **k):
+    from harness.observer.state import write_state as _f
+    return _f(*a, **k)
+
+
+def ObserverState(*a, **k):
+    from harness.observer.state import ObserverState as _C
+    return _C(*a, **k)
+
+
+def ensure_flag_dirs(*a, **k):
+    from harness.observer.flags import ensure_flag_dirs as _f
+    return _f(*a, **k)
+
+
+def list_pending_flags(*a, **k):
+    from harness.observer.flags import list_pending_flags as _f
+    return _f(*a, **k)
+
+
+def ack_flag(*a, **k):
+    from harness.observer.flags import ack_flag as _f
+    return _f(*a, **k)
+
+
+def register_tasks(*a, **k):
+    from harness.observer.scheduler import register_tasks as _f
+    return _f(*a, **k)
+
+
+def unregister_tasks(*a, **k):
+    from harness.observer.scheduler import unregister_tasks as _f
+    return _f(*a, **k)
 
 
 @click.group()
@@ -6277,6 +6313,7 @@ def observer_status() -> None:
 @click.option("--severity", type=click.Choice(["high", "critical", "all"]), default="all")
 def observer_flags(severity: str) -> None:
     """List pending flags."""
+    from harness.observer.flags import FlagSeverity
     pending = list_pending_flags()
     severities = [FlagSeverity.HIGH, FlagSeverity.CRITICAL] if severity == "all" else [FlagSeverity(severity)]
     total = 0
