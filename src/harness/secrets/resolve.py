@@ -38,7 +38,8 @@ def default_env_path(start: Path | None = None) -> Path:
 
 def resolve_key(name: str, *,
                 env_file_path: Path | None = None,
-                prefer_dpapi: bool = False) -> str | None:
+                prefer_dpapi: bool = False,
+                prefer_live_user: bool = False) -> str | None:
     """Return the secret value for *name* via the cross-platform fallback chain.
 
     Returns None if the key isn't found anywhere (caller decides whether
@@ -50,7 +51,23 @@ def resolve_key(name: str, *,
             via :func:`default_env_path`.
         prefer_dpapi: when True, check DPAPI BEFORE .env (legacy
             Windows-operator flow).  Default False: env > .env > DPAPI.
+        prefer_live_user: when True, the CURRENT persisted Windows
+            User-scope value (read live from the registry) wins over the
+            process-env snapshot.  See :func:`live_user_env`.  Default
+            False so env-always-wins semantics are unchanged for CI /
+            shell-export / Docker callers.
     """
+    # P16 2026-05-29: on Windows the process env is a snapshot taken at launch;
+    # a key the operator rotates in User-scope afterwards (setx / System
+    # Properties / the harness keys form) NEVER reaches a still-running process
+    # (e.g. a long Claude Code session).  When prefer_live_user=True the live
+    # User-scope value wins over that stale snapshot — self-healing rotation
+    # without a session restart.  Opt-in to preserve env-always-wins by default.
+    if prefer_live_user:
+        live = live_user_env(name)
+        if live:
+            return live
+
     # 1. Explicit OS env var ALWAYS wins (CI / shell exports / Docker)
     env_val = os.environ.get(name)
     if env_val:
@@ -75,6 +92,27 @@ def resolve_key(name: str, *,
             return dpapi_val
 
     return None
+
+
+def live_user_env(name: str) -> str | None:
+    """Return the CURRENT persisted Windows User-scope env var for *name*.
+
+    Reads ``HKCU\\Environment`` directly via ``winreg``, bypassing the
+    process-environment snapshot.  This is the fix for the env-snapshot
+    staleness class (P16): a long-running process keeps the value it was
+    launched with, so a key the operator rotates in User-scope afterwards
+    never reaches it.  Returns None on non-Windows, or when the var is
+    absent / unreadable — callers then fall back to ``os.environ``.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _ = winreg.QueryValueEx(key, name)
+        return value or None
+    except (FileNotFoundError, OSError):
+        return None
 
 
 def _try_dpapi(name: str) -> str | None:

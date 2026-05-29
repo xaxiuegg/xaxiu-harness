@@ -257,15 +257,29 @@ def test_resolve_kimi_upstream_pid_file(tmp_path: Path, monkeypatch: pytest.Monk
     assert _resolve_kimi_upstream() == KIMI_PROXY_URL
 
 
-def test_resolve_kimi_upstream_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_kimi_upstream_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # Isolate from a running proxy: clear override env vars AND chdir to a dir
+    # with no .harness/proxy.pid, else _resolve_kimi_upstream routes to the
+    # live local proxy (the documented test-isolation follow-up).
     monkeypatch.delenv("HARNESS_PROXY_URL", raising=False)
+    monkeypatch.delenv("KIMI_API_BASE_URL", raising=False)
+    monkeypatch.delenv("KIMI_BASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
     assert _resolve_kimi_upstream() == KIMI_URL
 
 
 def test_kimi_success(
-    monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete
+    monkeypatch: pytest.MonkeyPatch, kimi_engine: KimiConcrete, tmp_path
 ) -> None:
     """W5-V: Kimi streams (data:<json> SSE format, no space after colon)."""
+    # Isolate from a running proxy (.harness/proxy.pid) so the direct Kimi
+    # endpoint is exercised, not the local proxy.
+    monkeypatch.delenv("HARNESS_PROXY_URL", raising=False)
+    monkeypatch.delenv("KIMI_API_BASE_URL", raising=False)
+    monkeypatch.delenv("KIMI_BASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

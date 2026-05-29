@@ -795,6 +795,17 @@ class QwenConcrete(Engine):
 # Factory
 # ---------------------------------------------------------------------------
 
+def _prefer_live_user() -> bool:
+    """P16 2026-05-29: in real runs, prefer the LIVE Windows User-scope key
+    (read from the registry) over the stale process-env snapshot, so a key the
+    operator rotates mid-session self-heals without a restart.  DISABLED under
+    pytest (PYTEST_CURRENT_TEST present) so tests drive key resolution via
+    monkeypatched os.environ deterministically + cross-platform — otherwise a
+    real User-scope key would leak past a test's setenv on Windows.  No-op on
+    non-Windows regardless (live_user_env returns None there)."""
+    return "PYTEST_CURRENT_TEST" not in os.environ
+
+
 def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
     """Return a concrete engine instance for the given backend name.
 
@@ -831,7 +842,7 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
             MimoViaClaudeCodeEngine,
         )
         from harness.secrets.resolve import resolve_key
-        api_key = resolve_key("MIMO_API_KEY", prefer_dpapi=prefer_dpapi)
+        api_key = resolve_key("MIMO_API_KEY", prefer_dpapi=prefer_dpapi, prefer_live_user=_prefer_live_user())
         if not api_key:
             raise RuntimeError(
                 "No API key for mimo-via-claude. Set MIMO_API_KEY "
@@ -844,7 +855,7 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
             DeepSeekViaClaudeCodeEngine,
         )
         from harness.secrets.resolve import resolve_key
-        api_key = resolve_key("DEEPSEEK_API_KEY", prefer_dpapi=prefer_dpapi)
+        api_key = resolve_key("DEEPSEEK_API_KEY", prefer_dpapi=prefer_dpapi, prefer_live_user=_prefer_live_user())
         if not api_key:
             raise RuntimeError(
                 "No API key for deepseek-via-claude. Set DEEPSEEK_API_KEY "
@@ -862,7 +873,7 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
             KimiViaClaudeCodeEngine,
         )
         from harness.secrets.resolve import resolve_key
-        api_key = resolve_key("KIMI_API_KEY", prefer_dpapi=prefer_dpapi)
+        api_key = resolve_key("KIMI_API_KEY", prefer_dpapi=prefer_dpapi, prefer_live_user=_prefer_live_user())
         if not api_key:
             raise RuntimeError(
                 "No API key for kimi-via-claude. Set KIMI_API_KEY "
@@ -892,7 +903,7 @@ def get_engine(name: str, *, prefer_dpapi: bool = True) -> Engine:
     # DPAPI fallback, with prefer_dpapi=True still respected for
     # legacy Windows-operator flow.
     from harness.secrets.resolve import resolve_key
-    api_key = resolve_key(env_var, prefer_dpapi=prefer_dpapi)
+    api_key = resolve_key(env_var, prefer_dpapi=prefer_dpapi, prefer_live_user=_prefer_live_user())
 
     if not api_key:
         raise RuntimeError(
