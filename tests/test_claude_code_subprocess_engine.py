@@ -76,13 +76,41 @@ def _stub_binary_check(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestResolveBinary:
-    def test_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # W14-FRESH-CLONE-REMEDIATION P1: with no env override AND nothing
+        # discoverable (PATH miss + bundle-glob miss), fall back to bare
+        # "claude" (resolved at spawn time).  Must mock BOTH which +
+        # discovery or a real local install leaks in on the dev machine.
         monkeypatch.delenv("HARNESS_CLAUDE_CODE_BINARY", raising=False)
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess.shutil.which",
+            lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess._discover_claude_binary",
+            lambda: None,
+        )
         assert _resolve_binary() == "claude"
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HARNESS_CLAUDE_CODE_BINARY", "/custom/claude")
         assert _resolve_binary() == "/custom/claude"
+
+    def test_discovery_used_when_off_path(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # P1: env absent + PATH miss → the auto-discovered bundle path wins
+        # over the bare fallback.
+        monkeypatch.delenv("HARNESS_CLAUDE_CODE_BINARY", raising=False)
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess.shutil.which",
+            lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            "harness.engines.claude_code_subprocess._discover_claude_binary",
+            lambda: "/disco/claude.exe",
+        )
+        assert _resolve_binary() == "/disco/claude.exe"
 
 
 class TestResolveMimoTpRegion:

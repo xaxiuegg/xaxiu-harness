@@ -138,10 +138,21 @@ def test_agentic_drops_bare_and_offers_web_tools():
     assert "WebFetch" in tools and "WebSearch" in tools and "Task" in tools
 
 
-def test_non_agentic_keeps_bare_and_empty_tools():
+def test_subscription_non_agentic_drops_bare_keeps_empty_tools():
+    # W14-CLAUDE-VIA-CC-AUTH-FIX: subscription can NEVER use --bare (bare
+    # ignores CLAUDE_CODE_OAUTH_TOKEN + the /login credential store per
+    # code.claude.com/docs/en/authentication), so even the non-agentic
+    # single-shot drops --bare.  Tools stay empty (deterministic).
     cmd = _engine()._build_command("opus", {})
-    assert "--bare" in cmd
+    assert "--bare" not in cmd
     assert cmd[cmd.index("--tools") + 1] == ""
+
+
+def test_subscription_always_drops_bare():
+    """Both subscription modes (agentic + non-agentic) must omit --bare."""
+    e = _engine()
+    assert "--bare" not in e._build_command("opus", {})
+    assert "--bare" not in e._build_command("opus", {"agentic": True})
 
 
 def test_agentic_gated_to_subscription():
@@ -157,6 +168,19 @@ def test_agentic_gated_to_subscription():
     cmd = prov._build_command("m", {"agentic": True})
     assert "--bare" in cmd, "provider agentic must stay --bare (gated)"
     assert cmd[cmd.index("--tools") + 1] == ""
+
+
+def test_provider_keeps_bare_non_agentic():
+    """Provider engines auth via the injected ANTHROPIC_API_KEY (which
+    --bare DOES read) and keep --bare to suppress the tool-bloat loop."""
+    from harness.engines.claude_code_subprocess import (
+        ClaudeCodeSubprocessEngine,
+    )
+    prov = ClaudeCodeSubprocessEngine(
+        api_key="x", base_url="https://e/anthropic",
+        default_model="m", verify_binary=False,
+    )
+    assert "--bare" in prov._build_command("m", {})
 
 
 def test_agentic_composes_with_effort():

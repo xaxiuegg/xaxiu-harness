@@ -424,6 +424,16 @@ def _engine_name_for_mimo_key(api_key: str) -> str:
     return "mimo-payg"
 
 
+# W14-AGENTIC-MODE 2026-05-29: the tool allowlist offered when --agentic is
+# set (subscription-only).  Explicit (not "default"/"all") to bound the
+# surface to what a real Claude worker needs without exposing arbitrary
+# host-project plugin/MCP tools.  WebFetch/WebSearch function only on the
+# real-Anthropic (subscription) backend — see AGENT_REFERENCE §8.8.
+_AGENTIC_TOOL_ALLOWLIST = (
+    "WebFetch,WebSearch,Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite"
+)
+
+
 class ClaudeCodeSubprocessEngine(Engine):
     """Engine that dispatches via the local ``claude`` CLI binary.
 
@@ -554,44 +564,41 @@ class ClaudeCodeSubprocessEngine(Engine):
         # MiMo token-bloat loop (W14-MIMO-BLOAT-INVESTIGATION).  So
         # agentic mode is intended for claude-via-cc; provider engines
         # should reach web search via Pattern A direct /v1 instead.
-        # GATED to subscription: dropping --bare on a redirected provider
-        # buys nothing (web tools won't function) and costs the bloat
-        # loop, so a stray agentic=True on a provider engine is ignored.
+        # GATED to subscription: dropping tool restrictions on a redirected
+        # provider buys nothing (web tools won't function) and costs the
+        # bloat loop, so a stray agentic=True on a provider is ignored.
         agentic = bool(extra_args.get("agentic", False)) and self._subscription
-        if agentic:
-            # Explicit allowlist (not "default"/"all") bounds the tool
-            # surface: the tools a real Claude worker needs, without
-            # surfacing arbitrary plugin/MCP tools from the host project.
-            tools = extra_args.get(
-                "tools",
-                "WebFetch,WebSearch,Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite",
-            )
-            cmd = [
-                self._binary,
-                "--print",
-                "--tools", tools,
-                "--model", model or self._default_model or "sonnet",
-                "--output-format", output_format,
-                "--no-session-persistence",
-                "--permission-mode", permission_mode,
-                "--max-budget-usd", f"{float(budget):.4f}",
-            ]
-        else:
-            # Default deterministic single-inference posture.
-            # extra_args["tools"] = "default" lets callers re-enable tools
-            # within --bare for the rare case they want the agent loop.
-            tools = extra_args.get("tools", "")
-            cmd = [
-                self._binary,
-                "--print",
-                "--bare",
-                "--tools", tools,
-                "--model", model or self._default_model or "sonnet",
-                "--output-format", output_format,
-                "--no-session-persistence",
-                "--permission-mode", permission_mode,
-                "--max-budget-usd", f"{float(budget):.4f}",
-            ]
+
+        # W14-CLAUDE-VIA-CC-AUTH-FIX 2026-05-29: --bare is INCOMPATIBLE with
+        # subscription auth.  Per code.claude.com/docs/en/authentication:
+        # "Bare mode does not read CLAUDE_CODE_OAUTH_TOKEN.  If your script
+        # passes --bare, authenticate with ANTHROPIC_API_KEY or an
+        # apiKeyHelper instead."  --bare ALSO skips the /login credential
+        # store.  Subscription dispatch injects NO key (it must, or billing
+        # flips to pay-per-token), so under --bare it has NO auth path at
+        # all and always returns "Not logged in".  Therefore: --bare iff
+        # NOT subscription.  Providers keep --bare — they auth via the
+        # injected ANTHROPIC_API_KEY (which --bare DOES read) and --bare
+        # suppresses the provider-side tool-bloat loop
+        # (W14-MIMO-BLOAT-INVESTIGATION).
+        use_bare = not self._subscription
+        # Tool posture: agentic → curated allowlist; else deterministic
+        # single-inference (empty).  ``extra_args["tools"]`` overrides both.
+        tools = (
+            extra_args.get("tools", _AGENTIC_TOOL_ALLOWLIST) if agentic
+            else extra_args.get("tools", "")
+        )
+        cmd = [self._binary, "--print"]
+        if use_bare:
+            cmd.append("--bare")
+        cmd += [
+            "--tools", tools,
+            "--model", model or self._default_model or "sonnet",
+            "--output-format", output_format,
+            "--no-session-persistence",
+            "--permission-mode", permission_mode,
+            "--max-budget-usd", f"{float(budget):.4f}",
+        ]
         # W14-CLAUDE-VIA-CC: effort control (Opus 4.8: low|medium|high|
         # xhigh|max) is a real Claude Code flag, meaningful only when the
         # subprocess runs an actual Claude model (subscription mode).
