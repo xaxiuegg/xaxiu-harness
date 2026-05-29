@@ -83,48 +83,51 @@ def pytest_collection_modifyitems(config, items):  # noqa: D401 - pytest hook
             item.add_marker(skip)
 
 
-@pytest.hookimpl(trylast=True)
+# W14-RELIABILITY 2026-05-29: some test leaves a thread that blocks Python's
+# interpreter-shutdown join (``threading._wait_for_tstate_lock``), so the
+# process never exits.  Linux drained it; Windows HANGS — a fully-passing run
+# then exits 1 after the runner SIGINT's it (``KeyboardInterrupt`` at
+# threading.py:359).  The CI-GREEN-4/5 attempts proved the offending thread is
+# NOT visible at sessionfinish, so it blocks during atexit / interpreter
+# shutdown (e.g. ``concurrent.futures._python_exit`` joining a stuck worker) —
+# *after* the hooks.  So we stop trying to detect it and bypass the shutdown
+# join: record the real exit status at sessionfinish, then ``os._exit`` from
+# ``pytest_unconfigure`` (which runs AFTER the terminal summary, so the report
+# still prints and the status is intact).  Coverage runs are exempt — they need
+# atexit to flush ``.coverage`` and that CI step is non-blocking anyway.
+_FORCED_EXIT_CODE: dict[str, object] = {"value": None}
+
+
 def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - pytest hook
-    """Force a deterministic process exit if non-daemon threads are lingering.
+    import sys
 
-    W14-RELIABILITY 2026-05-29: some test leaves a non-daemon helper thread
-    alive (a FastAPI/Starlette ``TestClient`` portal, a server thread, or an
-    un-shutdown ``concurrent.futures`` executor).  At interpreter shutdown the
-    main thread then blocks forever in ``threading._wait_for_tstate_lock``
-    waiting for it to die.  Linux happened to drain it; Windows HANGS — the
-    suite (locally, and the CI windows leg) never terminates, so a passing run
-    exits 1 after the runner SIGINT's it (``KeyboardInterrupt`` at threading.py).
+    if any("--cov" in a for a in sys.argv):
+        return  # leave value None -> no force-exit; let coverage flush
+    try:
+        _FORCED_EXIT_CODE["value"] = int(exitstatus)
+    except (TypeError, ValueError):
+        _FORCED_EXIT_CODE["value"] = getattr(exitstatus, "value", 1)
 
-    Runs ``trylast`` (after the terminal summary) and fires ONLY when such
-    threads are actually still alive — i.e. exactly the hang condition — so
-    healthy runs are unaffected.  It also DUMPS the offending thread names +
-    stacks to stderr so CI logs pinpoint the leak source for a root fix, then
-    force-exits preserving the real status.
-    """
+
+def pytest_unconfigure(config):  # noqa: D401 - pytest hook
+    code = _FORCED_EXIT_CODE["value"]
+    if code is None:
+        return  # collection error / coverage run -> normal exit path
     import os
     import sys
     import threading
 
+    # Diagnostic only — name any straggler so a future change can root-fix it.
     main = threading.main_thread()
     lingering = [
         t for t in threading.enumerate()
         if t is not main and t.is_alive() and not t.daemon
     ]
-    if not lingering:
-        return  # clean run — let pytest exit normally
-    sys.stderr.write(
-        "\n[conftest] forcing exit — lingering non-daemon threads would hang "
-        "shutdown: " + ", ".join(repr(t.name) for t in lingering) + "\n"
-    )
-    try:
-        import faulthandler
-        faulthandler.dump_traceback(file=sys.stderr)  # stacks -> pinpoint source
-    except Exception:
-        pass
+    if lingering:
+        sys.stderr.write(
+            "\n[conftest] lingering non-daemon threads at exit: "
+            + ", ".join(repr(t.name) for t in lingering) + "\n"
+        )
     sys.stdout.flush()
     sys.stderr.flush()
-    try:
-        code = int(exitstatus)
-    except (TypeError, ValueError):
-        code = getattr(exitstatus, "value", 1)
-    os._exit(code)
+    os._exit(int(code))
