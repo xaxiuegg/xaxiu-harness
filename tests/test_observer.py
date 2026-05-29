@@ -522,7 +522,7 @@ def test_cli_observer_cycle_now_runs_cycle() -> None:
         observer_dir = Path(fs) / "observer"
         with patch("harness.observer.state.DEFAULT_OBSERVER_DIR", observer_dir), \
              patch("harness.observer.flags.DEFAULT_OBSERVER_DIR", observer_dir), \
-             patch("harness.cli.run_cycle") as mock_cycle:
+             patch("harness.observer.cycle.run_cycle") as mock_cycle:
             mock_cycle.return_value = CycleReport(
                 cycle_id="c1",
                 started_at="t1",

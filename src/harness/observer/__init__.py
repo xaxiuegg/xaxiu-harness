@@ -7,6 +7,11 @@ tasks; audits via cross-engine dispatch.
 from __future__ import annotations
 
 from harness.observer.flags import Flag, FlagSeverity
-from harness.observer.cycle import run_cycle, CycleReport
 
-__all__ = ["Flag", "FlagSeverity", "run_cycle", "CycleReport"]
+# W14-TRIM 2026-05-29: run_cycle / CycleReport are intentionally NOT re-exported
+# at package level.  Re-exporting them here made `import harness.observer.<x>`
+# (or any submodule import) pull in observer.cycle, which transitively imports
+# ALL of coord.* (~3.2k LOC) — putting the heavy machinery on the core
+# `import harness.cli` path (reliability risk: a bug there breaks `ask` at
+# startup).  Import them directly from harness.observer.cycle where needed.
+__all__ = ["Flag", "FlagSeverity"]

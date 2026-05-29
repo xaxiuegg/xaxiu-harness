@@ -45,7 +45,6 @@ from harness.budget import (
 )
 
 # Observer primitive (roster #20)
-from harness.observer.cycle import run_cycle
 from harness.observer.flags import (
     FlagSeverity,
     ensure_flag_dirs,
@@ -6371,6 +6370,9 @@ def observer_ack(flag_id: str) -> None:
 @click.pass_context
 def observer_cycle_now(ctx: click.Context, engine: str, audit_window: int, dry_run: bool) -> None:
     """Run one observer cycle immediately."""
+    # W14-TRIM 2026-05-29: lazy import keeps observer.cycle (and the coord.*
+    # subtree it pulls) OFF the core `import harness.cli` path.
+    from harness.observer.cycle import run_cycle
     state = read_state()
     if state.status == "uninitialized":
         click.echo("error: observer not initialized", err=True)
