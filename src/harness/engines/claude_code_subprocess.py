@@ -298,7 +298,7 @@ DEFAULT_MODEL_PER_ENGINE: dict[str, str] = {
     # (kimi-k2.6-code as of 2026-05-26).  When Moonshot updates the
     # underlying model the alias stays stable.
     "kimi-via-cc":      "kimi-for-coding",
-    "anthropic-default": "sonnet",
+    "anthropic-default": "opus",  # W14-CLAUDE-VIA-CC: Opus 4.8 via subscription
 }
 
 
@@ -406,10 +406,18 @@ class ClaudeCodeSubprocessEngine(Engine):
         max_budget_usd: Optional[float] = None,
         timeout_s: Optional[int] = None,
         verify_binary: bool = True,
+        subscription: bool = False,
     ) -> None:
         super().__init__(api_key=api_key)
         self._base_url = base_url
         self._default_model = default_model
+        # W14-CLAUDE-VIA-CC: subscription mode runs the operator's Claude
+        # Code subscription (claude login OAuth) rather than an injected
+        # provider key.  _build_env must then set NO ANTHROPIC_API_KEY (a
+        # set key forces API/pay-per-token billing and overrides the
+        # subscription) and dispatch must not short-circuit on the empty
+        # key.  See [claude-via-subscription-not-api] in memory.
+        self._subscription = subscription
         self._binary = binary or _resolve_binary()
         self._max_budget_usd = (
             max_budget_usd if max_budget_usd is not None
@@ -487,6 +495,13 @@ class ClaudeCodeSubprocessEngine(Engine):
             "--permission-mode", permission_mode,
             "--max-budget-usd", f"{float(budget):.4f}",
         ]
+        # W14-CLAUDE-VIA-CC: effort control (Opus 4.8: low|medium|high|
+        # xhigh|max) is a real Claude Code flag, meaningful only when the
+        # subprocess runs an actual Claude model (subscription mode).
+        # Redirected-provider engines ignore it, so emit it only there.
+        effort = extra_args.get("effort")
+        if effort and self._subscription:
+            cmd += ["--effort", str(effort).strip().lower()]
         return cmd
 
     def _build_env(self) -> dict[str, str]:
@@ -520,9 +535,14 @@ class ClaudeCodeSubprocessEngine(Engine):
         for k in keys_to_purge:
             env.pop(k, None)
 
-        # Now set OUR provider-routed values
-        env["ANTHROPIC_API_KEY"] = self._api_key
-        env["ANTHROPIC_AUTH_TOKEN"] = self._api_key
+        # Now set OUR provider-routed values.
+        # SUBSCRIPTION mode (claude-via-cc) injects NO key so Claude Code
+        # falls back to the operator's stored `claude login` OAuth — a set
+        # ANTHROPIC_API_KEY/AUTH_TOKEN would force API/pay-per-token billing
+        # and override the subscription ([claude-via-subscription-not-api]).
+        if not self._subscription:
+            env["ANTHROPIC_API_KEY"] = self._api_key
+            env["ANTHROPIC_AUTH_TOKEN"] = self._api_key
         if self._base_url:
             env["ANTHROPIC_BASE_URL"] = self._base_url
         # No base_url means use Claude Code's built-in default;
@@ -534,7 +554,10 @@ class ClaudeCodeSubprocessEngine(Engine):
         # actual model, internal routing fails or falls back to
         # Anthropic's default.  Set ANTHROPIC_MODEL too for callers
         # that omit ``--model`` on the command line.
-        if self._default_model:
+        # SUBSCRIPTION mode SKIPS the alias override: against the real
+        # Anthropic backend we want NATIVE opus/sonnet/haiku resolution,
+        # and the model is chosen via `--model` on the command line.
+        if self._default_model and not self._subscription:
             env["ANTHROPIC_MODEL"] = self._default_model
             env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self._default_model
             env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self._default_model
@@ -567,7 +590,7 @@ class ClaudeCodeSubprocessEngine(Engine):
         extra_args: Optional[dict] = None,
     ) -> EngineResponse:
         extra = extra_args or {}
-        if not self._api_key:
+        if not self._api_key and not self._subscription:
             return EngineResponse(
                 success=False,
                 text="",
@@ -813,6 +836,36 @@ class KimiViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):
     @property
     def name(self) -> str:
         return "kimi-via-claude"
+
+
+class ClaudeViaCcEngine(ClaudeCodeSubprocessEngine):
+    """Claude (Anthropic) via the operator's Claude Code SUBSCRIPTION.
+
+    W14-CLAUDE-VIA-CC: runs the local ``claude`` binary with NO injected
+    key and NO base_url, so it uses the operator's stored ``claude login``
+    OAuth credential (the subscription) rather than the pay-per-token
+    Messages API.  This is the harness's TOS-correct way to dispatch a
+    real Claude model — distinct from the (dead-for-this-operator)
+    direct-API ``AnthropicConcrete`` engine in concrete.py.
+
+    Honours an ``effort`` extra_arg (Opus 4.8: low|medium|high|xhigh|max)
+    via the Claude Code ``--effort`` flag.  Default model ``opus`` resolves
+    to the current Opus (4.8) on the subscription.  See
+    [claude-via-subscription-not-api] in memory.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(
+            api_key="",  # subscription auth: NO key (claude login OAuth)
+            base_url=PROVIDER_ANTHROPIC_ENDPOINTS["anthropic-default"],  # ""
+            default_model=DEFAULT_MODEL_PER_ENGINE["anthropic-default"],
+            subscription=True,
+            **kwargs,
+        )
+
+    @property
+    def name(self) -> str:
+        return "claude-via-cc"
 
 
 class DeepSeekViaClaudeCodeEngine(ClaudeCodeSubprocessEngine):

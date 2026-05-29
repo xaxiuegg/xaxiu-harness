@@ -111,6 +111,7 @@ def _dispatch_one(
     timeout_s: int,
     *,
     model_override: str = "",
+    effort: str = "",
 ) -> AskResult:
     """Dispatch via dispatch_with_pool so multi-key + failover apply.
 
@@ -119,16 +120,46 @@ def _dispatch_one(
     the recommender flags it (``recommend('audit').model_override``).
     """
     started = time.monotonic()
+    extra: dict = {"max_budget_usd": max_budget_usd, "timeout_s": timeout_s}
+    if effort:
+        extra["effort"] = effort
+
+    # claude-via-cc uses the subscription OAuth (no poolable key), so it
+    # bypasses the multi-key pool and dispatches the engine directly.
+    # ``effort`` (Opus 4.8: low|medium|high|xhigh|max) is honoured only by
+    # this engine; other engines ignore the extra key.
+    if engine == "claude-via-cc":
+        try:
+            from harness.engines.concrete import get_engine
+            resp = get_engine("claude-via-cc").dispatch(
+                question, model_override or "", extra,
+            )
+        except Exception as exc:
+            return AskResult(
+                engine=engine, ok=False,
+                elapsed_s=time.monotonic() - started,
+                tokens_in=0, tokens_out=0, cost_usd=0.0,
+                text="", error=f"{type(exc).__name__}: {exc}",
+                winning_alias="", attempt_count=1,
+            )
+        return AskResult(
+            engine=engine, ok=bool(resp.success),
+            elapsed_s=time.monotonic() - started,
+            tokens_in=int(resp.tokens_in or 0),
+            tokens_out=int(resp.tokens_out or 0),
+            cost_usd=float(getattr(resp, "cost_usd", 0.0) or 0.0),
+            text=resp.text if resp.success else "",
+            error=resp.error if not resp.success else "",
+            winning_alias="subscription", attempt_count=1,
+        )
+
     try:
         from harness.engines.pool_dispatch import dispatch_with_pool
         result = dispatch_with_pool(
             engine,
             question,
             model=model_override,
-            extra_args={
-                "max_budget_usd": max_budget_usd,
-                "timeout_s": timeout_s,
-            },
+            extra_args=extra,
             max_retries=3,
         )
     except Exception as exc:
@@ -161,6 +192,7 @@ def run_panel(
     *,
     max_budget_usd: float = 0.30,
     timeout_s: int = 180,
+    effort: str = "",
 ) -> list[AskResult]:
     """Fire the cross-engine panel in parallel.  Returns one
     AskResult per engine in the same order as ``engines``."""
@@ -169,6 +201,7 @@ def run_panel(
         future_to_engine = {
             pool.submit(
                 _dispatch_one, eng, question, max_budget_usd, timeout_s,
+                effort=effort,
             ): eng
             for eng in engines
         }
@@ -319,6 +352,7 @@ def run_audit(
     timeout_s: int = 180,
     audit_engine_override: str = "",
     num_auditors: int = 1,
+    effort: str = "",
 ) -> AuditOutcome:
     """Run producer → auditor(s).
 
@@ -342,6 +376,7 @@ def run_audit(
 
     producer = _dispatch_one(
         producer_engine, question, max_budget_usd, timeout_s,
+        effort=effort,
     )
     if not producer.ok:
         return AuditOutcome(

@@ -1311,6 +1311,14 @@ _VALID_TASK_CLASSES = (
 @click.option("--print-text", is_flag=True, default=False,
               help="Print full response text to stdout (default: "
                    "table + path only).")
+@click.option("--effort",
+              type=click.Choice(["low", "medium", "high", "xhigh", "max"],
+                                case_sensitive=False),
+              default=None, help=(
+    "Opus 4.8 effort level (low|medium|high|xhigh|max).  Only affects the "
+    "`claude-via-cc` engine (your Claude Code subscription); other engines "
+    "ignore it.  E.g. ask \"...\" --engines claude-via-cc --effort max."
+))
 def ask_cmd(
     question: str | None,
     question_file: Path | None,
@@ -1328,6 +1336,7 @@ def ask_cmd(
     timeout_s: int,
     no_save: bool,
     print_text: bool,
+    effort: str | None,
 ) -> None:
     """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED + ASK-AUDIT 2026-05-27
     / W14-ASK-RERUN 2026-05-28: daily-driver cross-engine LLM call.
@@ -1691,6 +1700,7 @@ def ask_cmd(
             timeout_s=timeout_s,
             audit_engine_override=audit_engine_override,
             num_auditors=num_auditors,
+            effort=effort or "",
         )
         if not outcome.auditors:
             # Producer failed (or auditor selection failed); the audit
@@ -1735,6 +1745,7 @@ def ask_cmd(
             engines=engine_list,
             max_budget_usd=max_budget_usd,
             timeout_s=timeout_s,
+            effort=effort or "",
         )
 
     # Print summary table (always)

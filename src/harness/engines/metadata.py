@@ -301,6 +301,40 @@ _ENGINE_METADATA: Dict[str, EngineMetadata] = {
         ),
     ),
 
+    "claude-via-cc": EngineMetadata(
+        name="claude-via-cc",
+        vendor="anthropic",
+        description=(
+            "Claude (Anthropic) via the operator's Claude Code SUBSCRIPTION "
+            "(claude login OAuth), run as a Claude Code subprocess — NOT the "
+            "pay-per-token API.  Honours an effort knob (Opus 4.8: low|medium"
+            "|high|xhigh|max) via the --effort flag."
+        ),
+        protocol_surfaces=("anthropic",),
+        default_model="opus",
+        available_models=("opus", "sonnet", "haiku", "claude-opus-4-8"),
+        key_env="",  # subscription auth — no env-var key
+        key_prefixes=(),
+        ua_gating="",
+        recommended_task_classes=(),  # explicit-pin only; never auto-routed
+        latency_class="medium",
+        cost_per_smoke_usd=0.0,  # subscription quota, not metered per-call
+        consumption_surfaces={
+            "http_direct": "no (subscription OAuth, not an API key)",
+            "proxy_upstream": "(not registered)",
+            "pattern_b": "claude-via-cc (Claude Code subprocess, subscription)",
+            "swarm": "(not wired)",
+        },
+        notes=(
+            "Distinct from the 'anthropic' direct-API engine: that one uses "
+            "an sk-ant- key against api.anthropic.com (pay-per-token); this "
+            "spawns the local claude binary with NO key so it uses the "
+            "operator's subscription.  Requires a prior `claude login`.  "
+            "Reachable via `harness ask --engines claude-via-cc [--effort X]` "
+            "— bypasses the key-pool since there is no poolable key."
+        ),
+    ),
+
     "gemini": EngineMetadata(
         name="gemini",
         vendor="google",
