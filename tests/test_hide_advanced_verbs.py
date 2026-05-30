@@ -26,14 +26,13 @@ from harness import cli as _cli
 
 
 HIDDEN_VERBS = [
-    "spec-register",
-    "spec-verify",
+    # PATH-A-TRIM 2026-05-29: spec-register / spec-verify / engines-cooldowns
+    # removed with the coord/loops machinery they depended on.
     "spec-init",
     "lint-spec",
     "panic-dump",
     "swarm-verify",
     "engines-reliability",
-    "engines-cooldowns",
     "burst",
     "lock",
     "replay",
@@ -66,11 +65,24 @@ def test_daily_use_verbs_NOT_hidden():
     it was unhidden (was in HIDDEN_VERBS pre-W14-COORD-UNHIDE).
     """
     visible_required = [
-        "daily", "today", "morning-brief", "preflight", "dispatch",
-        "env", "env-wizard", "profile", "status", "doctor",
-        "engines-heal", "session", "budget", "observer", "loop",
-        "adapter", "queue", "memory", "dashboard-serve",
-        "coord",  # W14-COORD-UNHIDE 2026-05-27
+        "daily",
+        "today",
+        "morning-brief",
+        "preflight",
+        "dispatch",
+        "env",
+        "env-wizard",
+        "profile",
+        "status",
+        "doctor",
+        "engines-heal",
+        "session",
+        "budget",
+        "adapter",
+        "queue",
+        "memory",
+        # PATH-A-TRIM 2026-05-29: observer / loop / dashboard-serve / coord
+        # removed with their machinery; dropped from the visible-required list.
         "proxy",  # W14-PROXY-UNHIDE 2026-05-28 (sub-agent test feedback)
     ]
     for verb_name in visible_required:
@@ -92,9 +104,7 @@ def test_hidden_verb_still_callable_via_help(verb_name):
     the verb itself (proves the command is registered + reachable)."""
     runner = CliRunner()
     result = runner.invoke(_cli.cli, [verb_name, "--help"])
-    assert result.exit_code == 0, (
-        f"verb {verb_name} --help failed: {result.output[:200]}"
-    )
+    assert result.exit_code == 0, f"verb {verb_name} --help failed: {result.output[:200]}"
     # Help output should mention the verb name OR the docstring
     assert verb_name in result.output or "Usage:" in result.output
 
@@ -147,6 +157,7 @@ def test_default_help_omits_hidden_verbs():
     # Click's --help puts each verb on its own line indented; check the
     # verb does NOT start a line (with optional leading whitespace).
     import re
+
     for verb_name in HIDDEN_VERBS:
         # Short-name verbs could collide with prose mentioning them
         # (low risk but pedantic).  Test those strict; long-name verbs
@@ -161,6 +172,4 @@ def test_default_help_omits_hidden_verbs():
             # Long-name verbs: just check they're not in the verb listing
             # by looking for the indented prefix
             indented = f"\n  {verb_name}"
-            assert indented not in result.output, (
-                f"hidden verb {verb_name} appears in --help"
-            )
+            assert indented not in result.output, f"hidden verb {verb_name} appears in --help"

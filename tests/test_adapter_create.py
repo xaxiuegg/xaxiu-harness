@@ -17,7 +17,6 @@ def test_scaffold_creates_expected_layout(tmp_path: Path) -> None:
     assert pdir.exists()
     assert (pdir / "adapters" / "my-project" / "harness-adapter.yaml").exists()
     assert (pdir / "coord" / "STATUS.csv").exists()
-    assert (pdir / "coord" / "dev_loop" / "state.json").exists()
     assert (pdir / "spec" / ".gitkeep").exists()
     assert (pdir / "runs" / ".gitkeep").exists()
 
@@ -36,22 +35,20 @@ def test_scaffold_refuses_existing_target(tmp_path: Path) -> None:
         scaffold_adapter("existing", target_dir=tmp_path)
 
 
-def test_scaffold_state_json_is_valid_loopstate(tmp_path: Path) -> None:
-    from harness.loops.state import LoopState, read_state
-    paths = scaffold_adapter("p", target_dir=tmp_path)
-    state = read_state(paths["state_json"])
-    assert isinstance(state, LoopState)
-    assert state.loop_status == "armed"
-
-
 def test_cli_adapter_create(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path) as iso:
         iso_path = Path(iso)
-        result = runner.invoke(cli, [
-            "adapter", "create", "my-project",
-            "--target-dir", str(iso_path),
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "adapter",
+                "create",
+                "my-project",
+                "--target-dir",
+                str(iso_path),
+            ],
+        )
     assert result.exit_code == 0, result.output
     assert "created project:" in result.output
     assert "my-project" in result.output
@@ -62,9 +59,15 @@ def test_cli_adapter_create_refuses_existing(tmp_path: Path) -> None:
     with runner.isolated_filesystem(temp_dir=tmp_path) as iso:
         iso_path = Path(iso)
         (iso_path / "dup").mkdir()
-        result = runner.invoke(cli, [
-            "adapter", "create", "dup",
-            "--target-dir", str(iso_path),
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "adapter",
+                "create",
+                "dup",
+                "--target-dir",
+                str(iso_path),
+            ],
+        )
     assert result.exit_code == 1
     assert "already exists" in result.output

@@ -32,9 +32,7 @@ def test_dispatch_missing_args(runner: CliRunner) -> None:
 
 @patch("harness.cli.dispatch_packet")
 def test_dispatch_success(mock_dispatch, runner: CliRunner) -> None:
-    mock_dispatch.return_value = MagicMock(
-        success=True, text="ok", error=None, fallback_chain=[]
-    )
+    mock_dispatch.return_value = MagicMock(success=True, text="ok", error=None, fallback_chain=[])
     result = runner.invoke(cli, ["dispatch", "-p", "myproj", "--packet", "p.md"])
     assert result.exit_code == 0
     assert "ok" in result.output
@@ -60,7 +58,9 @@ def test_dispatch_failure(mock_dispatch, runner: CliRunner) -> None:
 
 @patch("harness.cli._repo_root")
 @patch("harness.cli.load_template")
-def test_init_success(mock_load_template, mock_repo_root, runner: CliRunner, tmp_path: Path) -> None:
+def test_init_success(
+    mock_load_template, mock_repo_root, runner: CliRunner, tmp_path: Path
+) -> None:
     from harness.adapters.schema import AdapterConfig, StatusTrackingConfig, ObserverConfig
 
     adapters_dir = tmp_path / "adapters"
@@ -88,7 +88,9 @@ def test_init_success(mock_load_template, mock_repo_root, runner: CliRunner, tmp
 
 @patch("harness.cli._repo_root")
 @patch("harness.cli.load_template")
-def test_init_refuses_overwrite(mock_load_template, mock_repo_root, runner: CliRunner, tmp_path: Path) -> None:
+def test_init_refuses_overwrite(
+    mock_load_template, mock_repo_root, runner: CliRunner, tmp_path: Path
+) -> None:
     adapters_dir = tmp_path / "adapters"
     adapters_dir.mkdir(parents=True, exist_ok=True)
     mock_repo_root.return_value = tmp_path
@@ -106,7 +108,9 @@ def test_init_refuses_overwrite(mock_load_template, mock_repo_root, runner: CliR
 
 @patch("harness.cli._repo_root")
 @patch("harness.cli.load_template")
-def test_init_force_overwrite(mock_load_template, mock_repo_root, runner: CliRunner, tmp_path: Path) -> None:
+def test_init_force_overwrite(
+    mock_load_template, mock_repo_root, runner: CliRunner, tmp_path: Path
+) -> None:
     from harness.adapters.schema import AdapterConfig, StatusTrackingConfig, ObserverConfig
 
     adapters_dir = tmp_path / "adapters"
@@ -161,7 +165,9 @@ def test_status_report_adapter_not_found(mock_load_project_adapter, runner: CliR
 
 
 @patch("harness.cli.load_project_adapter")
-def test_status_report_csv_success(mock_load_project_adapter, runner: CliRunner, tmp_path: Path) -> None:
+def test_status_report_csv_success(
+    mock_load_project_adapter, runner: CliRunner, tmp_path: Path
+) -> None:
     from harness.adapters.schema import AdapterConfig, StatusTrackingConfig, ObserverConfig
 
     csv_file = tmp_path / "STATUS.csv"
@@ -181,7 +187,9 @@ def test_status_report_csv_success(mock_load_project_adapter, runner: CliRunner,
 
 
 @patch("harness.cli.load_project_adapter")
-def test_status_report_json_success(mock_load_project_adapter, runner: CliRunner, tmp_path: Path) -> None:
+def test_status_report_json_success(
+    mock_load_project_adapter, runner: CliRunner, tmp_path: Path
+) -> None:
     from harness.adapters.schema import AdapterConfig, StatusTrackingConfig, ObserverConfig
 
     csv_file = tmp_path / "STATUS.csv"
@@ -310,11 +318,8 @@ def test_lock_release(mock_update, runner: CliRunner) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_observer_group_exists(runner: CliRunner) -> None:
-    """The observer-tick stub was replaced by the observer group (#20)."""
-    result = runner.invoke(cli, ["observer", "--help"])
-    assert result.exit_code == 0
-    assert "observer" in result.output.lower()
+# PATH-A-TRIM 2026-05-29: test_observer_group_exists removed — the observer
+# command group was deleted with the observer machinery.
 
 
 def test_retro_stub(runner: CliRunner) -> None:
@@ -329,11 +334,8 @@ def test_install_stub(runner: CliRunner) -> None:
     assert "pending Wave 4" in result.output
 
 
-def test_dashboard_serve_stub(runner: CliRunner) -> None:
-    with patch("harness.dashboard.server.serve") as mock_serve:
-        result = runner.invoke(cli, ["dashboard-serve"])
-        assert result.exit_code == 0
-        mock_serve.assert_called_once_with(host="127.0.0.1", port=7878)
+# PATH-A-TRIM 2026-05-29: test_dashboard_serve_stub removed — the
+# dashboard-serve verb + harness.dashboard package were deleted.
 
 
 def test_loops_stub(runner: CliRunner) -> None:

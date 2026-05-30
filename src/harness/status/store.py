@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from harness.coord.lockfile import file_lock
+from harness.lockfile import file_lock
 from harness.errors import StateLockTimeout
 from harness.status.schema import Status, StatusRow
 
@@ -65,9 +65,7 @@ def read_status(path: Path | None = None) -> list[StatusRow]:
                     continue
                 mapped[_FIELD_MAP.get(k, k)] = v.strip()
             if extras:
-                merged_extra = ",".join(
-                    str(x).strip() for x in extras if x is not None
-                )
+                merged_extra = ",".join(str(x).strip() for x in extras if x is not None)
                 existing_notes = mapped.get("notes", "")
                 mapped["notes"] = (
                     f"{existing_notes},{merged_extra}" if existing_notes else merged_extra
@@ -75,9 +73,7 @@ def read_status(path: Path | None = None) -> list[StatusRow]:
             try:
                 rows.append(StatusRow.model_validate(mapped))
             except Exception as exc:
-                raise ValueError(
-                    f"Row {line_num} validation failed: {exc}"
-                ) from exc
+                raise ValueError(f"Row {line_num} validation failed: {exc}") from exc
     return rows
 
 
@@ -92,9 +88,10 @@ def _check_disk_space(target_dir: Path, needed_bytes: int = _MIN_FREE_BYTES) -> 
     corrupts the canonical STATUS.csv.
     """
     import shutil as _shutil
+
     try:
         stat = _shutil.disk_usage(str(target_dir))
-    except OSError as exc:
+    except OSError:
         # If we can't measure free space, don't block the write
         return
     if stat.free < needed_bytes:
@@ -106,6 +103,7 @@ def _check_disk_space(target_dir: Path, needed_bytes: int = _MIN_FREE_BYTES) -> 
 
 def _sha256_of(path: Path) -> str:
     import hashlib
+
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -141,6 +139,7 @@ def write_status(path: Path, rows: list[StatusRow]) -> None:
         if path.exists():
             try:
                 import shutil as _shutil
+
                 _shutil.copy2(path, bak_path)
             except OSError:
                 pass  # bak is best-effort
@@ -153,10 +152,7 @@ def write_status(path: Path, rows: list[StatusRow]) -> None:
                 writer.writeheader()
                 for row in rows:
                     data = row.model_dump(mode="json")
-                    mapped = {
-                        csv_col: data.get(attr, "")
-                        for csv_col, attr in _FIELD_MAP.items()
-                    }
+                    mapped = {csv_col: data.get(attr, "") for csv_col, attr in _FIELD_MAP.items()}
                     writer.writerow(mapped)
                 fh.flush()
                 os.fsync(fh.fileno())
@@ -170,6 +166,7 @@ def write_status(path: Path, rows: list[StatusRow]) -> None:
                 if bak_path.exists():
                     try:
                         import shutil as _shutil
+
                         _shutil.copy2(bak_path, path)
                     except OSError:
                         pass
@@ -236,22 +233,15 @@ def verify(path: Path, expected_cadence_minutes: int | None = None) -> list[str]
         for line_num, raw in enumerate(reader, start=2):
             if raw is None:
                 continue
-            mapped = {
-                _FIELD_MAP.get(k, k): v.strip() if v else ""
-                for k, v in raw.items()
-            }
+            mapped = {_FIELD_MAP.get(k, k): v.strip() if v else "" for k, v in raw.items()}
             mapped = {k: v for k, v in mapped.items() if k}
             raw_rows.append(mapped)
             try:
                 StatusRow.model_validate(mapped)
             except Exception as exc:
-                issues.append(
-                    f"Row {line_num} ({mapped.get('id', '?')}): {exc}"
-                )
+                issues.append(f"Row {line_num} ({mapped.get('id', '?')}): {exc}")
 
-    in_progress_rows = [
-        r for r in raw_rows if r.get("status") == "in_progress"
-    ]
+    in_progress_rows = [r for r in raw_rows if r.get("status") == "in_progress"]
 
     # Stale file detection
     if expected_cadence_minutes is not None:
@@ -269,8 +259,6 @@ def verify(path: Path, expected_cadence_minutes: int | None = None) -> list[str]
         for raw in in_progress_rows:
             updated = raw.get("updated", "-")
             if updated != "-" and updated < today_str:
-                issues.append(
-                    f"Row {raw.get('id', '?')} is in_progress but last updated {updated}"
-                )
+                issues.append(f"Row {raw.get('id', '?')} is in_progress but last updated {updated}")
 
     return issues
