@@ -27,7 +27,7 @@ from typing import Any
 
 from harness._constants import PROJECT_NAME_REGEX, SUPPORTED_BACKENDS
 from harness.adapters.loader import load_project_adapter
-from harness.adapters.schema import AdapterConfig, RoutingRule
+from harness.adapters.schema import AdapterConfig
 from harness.engines import guards  # M-3 fix: forensic classification on every response
 from harness.engines.base import EngineResponse
 from harness.engines.concrete import get_engine
@@ -55,8 +55,9 @@ def _dispatch_full_by_default() -> bool:
 # preserves the agent's context budget by giving them the first +
 # last lines + a "[N chars elided]" marker.  When the agent needs
 # more, they call .full() (W11-CONTEXT-FRUGAL-RETURN-LAZY).
-def _extract_summary(text: str, *, max_chars: int = 300,
-                     head_lines: int = 5, tail_lines: int = 5) -> str:
+def _extract_summary(
+    text: str, *, max_chars: int = 300, head_lines: int = 5, tail_lines: int = 5
+) -> str:
     """Return a head+tail extract of *text* capped at ~max_chars.
 
     Strategy:
@@ -78,17 +79,12 @@ def _extract_summary(text: str, *, max_chars: int = 300,
         head_chars = max_chars // 2
         tail_chars = max_chars - head_chars - 30  # reserve for marker
         elided = len(text) - head_chars - tail_chars
-        return (
-            text[:head_chars]
-            + f"\n[{elided} chars elided]\n"
-            + text[-tail_chars:]
-        )
+        return text[:head_chars] + f"\n[{elided} chars elided]\n" + text[-tail_chars:]
     head = "\n".join(lines[:head_lines])
     tail = "\n".join(lines[-tail_lines:])
     elided_lines = len(lines) - head_lines - tail_lines
     summary = (
-        f"{head}\n[{elided_lines} lines / "
-        f"{len(text) - len(head) - len(tail)} chars elided]\n{tail}"
+        f"{head}\n[{elided_lines} lines / {len(text) - len(head) - len(tail)} chars elided]\n{tail}"
     )
     # Final cap (defensive — head + tail could exceed max_chars on
     # pathological long-line content)
@@ -101,14 +97,13 @@ def _extract_summary(text: str, *, max_chars: int = 300,
 # W11-CONTEXT-FRUGAL-RETURN-SCHEMA 2026-05-25: extract the first
 # ~200 chars of an error string as a top-level signal the agent
 # can check without reading the full body / traceback.
-def _extract_error_excerpt(error: str | None, *,
-                            max_chars: int = 200) -> str | None:
+def _extract_error_excerpt(error: str | None, *, max_chars: int = 200) -> str | None:
     if not error:
         return None
     err = str(error).strip()
     if len(err) <= max_chars:
         return err
-    return err[:max_chars - 3] + "..."
+    return err[: max_chars - 3] + "..."
 
 
 # W9-SILENT-EXCEPTION-AUDIT 2026-05-24: every telemetry / log / cost-
@@ -125,8 +120,7 @@ def _swallow_telemetry(label: str, exc: BaseException) -> None:
     Log at DEBUG so the operator sees it under -v but the default
     log volume stays clean.
     """
-    logger.debug("dispatch telemetry swallowed [%s]: %s: %s",
-                 label, type(exc).__name__, exc)
+    logger.debug("dispatch telemetry swallowed [%s]: %s: %s", label, type(exc).__name__, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +141,7 @@ _NON_PRODUCTION_BACKENDS: frozenset[str] = frozenset({"mock"})
 def _production_backends() -> list[str]:
     return [b for b in SUPPORTED_BACKENDS if b not in _NON_PRODUCTION_BACKENDS]
 
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -157,12 +152,12 @@ class DispatchResult:
     """Immutable result of a complete dispatch attempt (including fallbacks)."""
 
     success: bool
-    engine_used: str           # final engine that produced (or failed) the response
+    engine_used: str  # final engine that produced (or failed) the response
     fallback_chain: list[str]  # ordered list of engines tried, including the last
-    text: str                  # engine response text (empty on total failure)
+    text: str  # engine response text (empty on total failure)
     error: str | None
-    dispatch_id: str           # UUID written to history.db
-    tokens_used: int = 0       # = tokens_in + tokens_out (legacy aggregate)
+    dispatch_id: str  # UUID written to history.db
+    tokens_used: int = 0  # = tokens_in + tokens_out (legacy aggregate)
     cost_usd: float = 0.0
     # W7-WORKER-BUDGET-HOOK 2026-05-23: split tokens so callers (e.g.
     # worker.py's budget recorder) can attribute inputs and outputs
@@ -180,8 +175,8 @@ class DispatchResult:
     # FRUGAL-RETURN-LAZY row, after existing tests pass under the
     # new default), `text` becomes "" by default and the SDK wrapper
     # surfaces `.full()` lazy-fetch from `content_ref`.
-    summary: str = ""               # head+tail extract; ≤300 chars typical
-    truncated: bool = False         # True when full text NOT loaded in .text
+    summary: str = ""  # head+tail extract; ≤300 chars typical
+    truncated: bool = False  # True when full text NOT loaded in .text
     error_excerpt: str | None = None  # first ~200 chars of error (top-level signal)
     content_ref: str | None = None  # opaque ref for lazy retrieval (set when cache populated)
 
@@ -206,9 +201,7 @@ def _read_packet(path: str) -> str:
     p = Path(path)
     size = p.stat().st_size
     if size > MAX_PACKET_BYTES:
-        raise ValueError(
-            f"Packet file {size} bytes exceeds limit {MAX_PACKET_BYTES}"
-        )
+        raise ValueError(f"Packet file {size} bytes exceeds limit {MAX_PACKET_BYTES}")
     return p.read_text(encoding="utf-8")
 
 
@@ -228,8 +221,10 @@ _INJECTION_PATTERNS: list[tuple[str, "_re.Pattern[str]"]] = [
     # Python env access
     ("env_var_python", _re.compile(r"os\.environ(?:\[[^\]]+\]|\.get\()")),
     # DPAPI exfiltration
-    ("dpapi_direct", _re.compile(r"(decrypt_secret|read_secret|list_secrets)\s*\(",
-                                  _re.IGNORECASE)),
+    (
+        "dpapi_direct",
+        _re.compile(r"(decrypt_secret|read_secret|list_secrets)\s*\(", _re.IGNORECASE),
+    ),
     # Outbound HTTP primitives
     ("net_invoke", _re.compile(r"Invoke-WebRequest|Invoke-RestMethod", _re.IGNORECASE)),
     ("net_curl", _re.compile(r"\bcurl\s+(?:[-A-Za-z]+\s+)*https?://")),
@@ -253,7 +248,7 @@ def scan_packet_for_injection(text: str) -> list[tuple[str, str]]:
     for name, pat in _INJECTION_PATTERNS:
         m = pat.search(text)
         if m is not None:
-            excerpt = text[max(0, m.start() - 20): m.end() + 40][:120]
+            excerpt = text[max(0, m.start() - 20) : m.end() + 40][:120]
             findings.append((name, excerpt))
     return findings
 
@@ -379,9 +374,7 @@ def _pick_initial_engine(
                 burst_engine = _resolve_burst_engine(health)
                 if burst_engine is not None:
                     # M-1 fix: audit BURST consultation reached via rule.
-                    _audit_routing_change(
-                        "burst_start", burst_engine, new_value="rule-selected"
-                    )
+                    _audit_routing_change("burst_start", burst_engine, new_value="rule-selected")
                     return burst_engine, model, extra
                 # No active burst — fall through to default selection.
                 break
@@ -412,6 +405,7 @@ def _pick_initial_engine(
         # Falls through to the priority-only winner if all are
         # filtered out — operator still gets a starting engine.
         from harness.engines.routing import filter_eligible_engines
+
         priority_order = [name for name, _prio in eligible]
         healthy_first, _skip_reasons = filter_eligible_engines(
             priority_order,
@@ -563,8 +557,7 @@ def dispatch_packet(
     # definition not the threat model; the threat is engine-A output
     # being relayed verbatim as engine-B input, which guards.py covers
     # post-hoc.
-    if (not trusted_source
-            and os.environ.get("HARNESS_ALLOW_UNSAFE_PACKETS", "").lower() != "1"):
+    if not trusted_source and os.environ.get("HARNESS_ALLOW_UNSAFE_PACKETS", "").lower() != "1":
         injections = scan_packet_for_injection(packet_content)
         if injections:
             pattern_names = ",".join(name for name, _ in injections)
@@ -577,28 +570,10 @@ def dispatch_packet(
                 dispatch_id="",
             )
 
-    # ---- 4.6 WIRE-PROVENANCE-VERIFY (2026-05-21) --------------------------
-    # If the packet has been registered in coord/spec_provenance.jsonl,
-    # require the on-disk SHA to match the registered SHA.  When no
-    # registration exists, dispatch proceeds (provenance is opt-in).
-    try:
-        from harness.coord.provenance import verify as _verify_provenance
-        prov_log = Path("coord") / "spec_provenance.jsonl"
-        if prov_log.exists():
-            matches, msg = _verify_provenance(Path(packet_path))
-            # Only fail when a registration exists AND the SHA disagrees.
-            # "no registration for ..." is OK — provenance is opt-in.
-            if not matches and "no registration" not in msg:
-                return DispatchResult(
-                    success=False,
-                    engine_used="",
-                    fallback_chain=[],
-                    text="",
-                    error=f"packet_provenance_mismatch: {msg}",
-                    dispatch_id="",
-                )
-    except Exception:
-        pass  # provenance is best-effort; never block on its own errors
+    # ---- 4.6 WIRE-PROVENANCE-VERIFY — retired (PATH-A-TRIM 2026-05-29) ----
+    # The opt-in spec-provenance check depended on the deleted coord package
+    # (coord.provenance).  Removed with the coord/ machinery in the harness
+    # retirement to a thin ask/proxy/keys core.
 
     # ---- 5. Read engine health (once per dispatch) -------------------------
     try:
@@ -655,8 +630,7 @@ def dispatch_packet(
         else:
             # Auto-route: rule selected kimi but heuristic says it'll fail
             logger.info(
-                "auto-routing long-form packet (%d chars) kimi → mimo per "
-                "WIRE-LONGFORM-AVOID-KIMI",
+                "auto-routing long-form packet (%d chars) kimi → mimo per WIRE-LONGFORM-AVOID-KIMI",
                 len(packet_content),
             )
             initial_engine = "mimo"
@@ -670,12 +644,12 @@ def dispatch_packet(
         # markers are present.  Hardcoding mimo-v2.5-pro here would
         # dead-code the auto-routing shipped in b795857.
         _ENGINE_DEFAULT_MODELS = {
-            "kimi":      "kimi-for-coding",
-            "deepseek":  "deepseek-v4-flash",
+            "kimi": "kimi-for-coding",
+            "deepseek": "deepseek-v4-flash",
             "anthropic": "claude-sonnet-4-5-20250929",
-            "gemini":    "gemini-2.0-flash",
-            "mimo":      "auto",            # sentinel → MiMoConcrete picks Pro or Std
-            "mock":      "mock-model",
+            "gemini": "gemini-2.0-flash",
+            "mimo": "auto",  # sentinel → MiMoConcrete picks Pro or Std
+            "mock": "mock-model",
         }
         model = _ENGINE_DEFAULT_MODELS.get(initial_engine, "")
 
@@ -719,6 +693,7 @@ def dispatch_packet(
     if wave_id is not None:
         try:
             from harness.status import hooks as _status_hooks
+
             _status_hooks.on_dispatch_start(
                 task_id=dispatch_id,
                 wave_id=wave_id,
@@ -778,7 +753,9 @@ def dispatch_packet(
             if force_engine is not None and current_engine != force_engine:
                 logger.warning(
                     "force_engine=%r served by engine_used=%r via fallback chain %r",
-                    force_engine, current_engine, list(tried),
+                    force_engine,
+                    current_engine,
+                    list(tried),
                 )
 
             try:
@@ -806,6 +783,7 @@ def dispatch_packet(
             if wave_id is not None:
                 try:
                     from harness.status import hooks as _status_hooks
+
                     _status_hooks.on_dispatch_complete(
                         task_id=dispatch_id,
                         wave_id=wave_id,
@@ -822,6 +800,7 @@ def dispatch_packet(
             # diagnostic gap.
             try:
                 from harness.budget import record_dispatch as _record
+
                 _record(
                     task_id=dispatch_id,
                     engine=current_engine,
@@ -851,6 +830,7 @@ def dispatch_packet(
             _content_ref: str | None = None
             try:
                 from harness.engines import dispatch_cache as _dc
+
                 _cache_payload = {
                     "dispatch_id": dispatch_id,
                     "engine_used": current_engine,
@@ -940,6 +920,7 @@ def dispatch_packet(
                 if wave_id is not None:
                     try:
                         from harness.status import hooks as _status_hooks
+
                         _status_hooks.on_dispatch_complete(
                             task_id=dispatch_id,
                             wave_id=wave_id,
@@ -968,7 +949,8 @@ def dispatch_packet(
         if bypass_chain and force_engine is not None:
             try:
                 state_db.update_dispatch_status(
-                    dispatch_id, "force_engine_failed_no_fallback",
+                    dispatch_id,
+                    "force_engine_failed_no_fallback",
                     latency_ms=response.latency_ms,
                 )
             except Exception as _exc:
@@ -986,6 +968,7 @@ def dispatch_packet(
         # fallback chain to skip engines that are no-key / terminated /
         # over-budget.  Opt-out via HARNESS_DISPATCH_SKIP_HEALTH_FILTER=1.
         from harness.engines.routing import filter_eligible_engines
+
         _raw_remaining = [n for n in _production_backends() if n not in tried]
         remaining, _skip_reasons = filter_eligible_engines(_raw_remaining)
         if _skip_reasons:
@@ -993,7 +976,8 @@ def dispatch_packet(
             for _eng, _reason in _skip_reasons.items():
                 logger.info(
                     "dispatch fallback skip: engine=%r reason=%r",
-                    _eng, _reason,
+                    _eng,
+                    _reason,
                 )
         if not remaining:
             try:
@@ -1023,6 +1007,7 @@ def dispatch_packet(
             if wave_id is not None:
                 try:
                     from harness.status import hooks as _status_hooks
+
                     _status_hooks.on_dispatch_complete(
                         task_id=dispatch_id,
                         wave_id=wave_id,
@@ -1075,6 +1060,7 @@ def dispatch_packet(
         # Best-effort; never block dispatch on alarm I/O.
         try:
             from harness.engine_alarm import check_engine_alarm, fire_dead_engine_alarm
+
             is_dead, streak, transition = check_engine_alarm(current_engine)
             if transition:
                 fire_dead_engine_alarm(current_engine, streak)

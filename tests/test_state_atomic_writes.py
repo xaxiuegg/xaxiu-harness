@@ -17,8 +17,6 @@ W9 consolidates them all behind one helper that:
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -90,9 +88,7 @@ def test_atomic_write_json_cleans_up_temp_file_on_failure(tmp_path):
         atomic_write_json(target, {"bad": object()}, set_mode_0600=False)
     # No .tmp leftover in tmp_path
     leftovers = list(tmp_path.glob("*.tmp"))
-    assert leftovers == [], (
-        f"Temp file leaked after failed write: {leftovers}"
-    )
+    assert leftovers == [], f"Temp file leaked after failed write: {leftovers}"
 
 
 # -- Kill-during-write simulation -----------------------------------------
@@ -141,8 +137,10 @@ def test_atomic_write_yaml_creates_yaml_file(tmp_path):
     atomic_write_yaml(target, {"key": "value", "nested": {"a": 1}})
     assert target.exists()
     import yaml as _y
+
     assert _y.safe_load(target.read_text(encoding="utf-8")) == {
-        "key": "value", "nested": {"a": 1},
+        "key": "value",
+        "nested": {"a": 1},
     }
 
 
@@ -169,21 +167,8 @@ def test_heartbeat_atomic_write_delegates_to_canonical(tmp_path, monkeypatch):
     assert called[0][2] is False  # heartbeat sets its own 0644
 
 
-def test_observer_state_atomic_write_delegates_to_canonical(tmp_path, monkeypatch):
-    from harness.observer import state as obs_state
-
-    called: list[tuple] = []
-    original = atomic_write_json
-
-    def _capture(path, data, *, set_mode_0600=True):
-        called.append((str(path), data, set_mode_0600))
-        return original(path, data, set_mode_0600=set_mode_0600)
-
-    monkeypatch.setattr("harness.state.files.atomic_write_json", _capture)
-    target = tmp_path / "observer-state.json"
-    obs_state._atomic_write(target, {"cycles": 0})
-    assert called
-    assert called[0][2] is True  # observer is sensitive (default 0600)
+# PATH-A-TRIM 2026-05-29: test_observer_state_atomic_write_delegates_to_canonical
+# removed — the observer.state module it exercised was deleted.
 
 
 def test_reliability_digest_publish_uses_atomic_write(tmp_path, monkeypatch):

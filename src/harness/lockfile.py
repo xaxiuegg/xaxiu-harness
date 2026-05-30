@@ -1,4 +1,8 @@
-"""Cross-process file locks for coord/ writes (LOCK-COORD-DIR, 2026-05-21).
+"""Cross-process file locks (LOCK-COORD-DIR, 2026-05-21).
+
+Relocated from harness.coord.lockfile to harness.lockfile in the
+PATH-A-TRIM (2026-05-29): the coord package was deleted but this advisory
+file-lock is a core utility (used by harness.status.store for STATUS.csv).
 
 Stdlib-only implementation — uses ``msvcrt`` on Windows and ``fcntl`` on
 POSIX so we don't add a new dependency.  Locks are advisory:
@@ -17,7 +21,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Iterator, Optional

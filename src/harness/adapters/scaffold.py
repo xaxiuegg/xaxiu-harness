@@ -21,15 +21,16 @@ def scaffold_adapter(
     Creates:
       <target>/<name>/adapters/<name>/harness-adapter.yaml (from template, placeholders resolved)
       <target>/<name>/coord/STATUS.csv (empty header only)
-      <target>/<name>/coord/dev_loop/state.json (default LoopState)
       <target>/<name>/spec/.gitkeep
       <target>/<name>/runs/.gitkeep
 
     Returns a dict of the written paths.  Raises if the target already
     exists (refuses to overwrite operator state).
+
+    PATH-A-TRIM 2026-05-29: no longer seeds coord/dev_loop/state.json — the
+    autonomous dev-loop machinery was deleted in the harness retirement.
     """
     from harness.adapters.loader import load_template
-    from harness.loops.state import LoopState, write_state
 
     project_root = project_root or Path.cwd()
     project_dir = Path(target_dir) / project_name
@@ -59,12 +60,7 @@ def scaffold_adapter(
         encoding="utf-8",
     )
 
-    # 3. dev_loop seed
-    dev_loop = coord_dir / "dev_loop"
-    dev_loop.mkdir()
-    write_state(dev_loop / "state.json", LoopState())
-
-    # 4. spec/ + runs/ placeholders
+    # 3. spec/ + runs/ placeholders
     (project_dir / "spec").mkdir()
     (project_dir / "spec" / ".gitkeep").write_text("", encoding="utf-8")
     (project_dir / "runs").mkdir()
@@ -74,5 +70,4 @@ def scaffold_adapter(
         "project_dir": project_dir,
         "adapter_yaml": adapter_yaml,
         "status_csv": coord_dir / "STATUS.csv",
-        "state_json": dev_loop / "state.json",
     }
