@@ -20,6 +20,15 @@
             "command": "bash D:/xaxiu-harness-standalone/.claude/hooks/check-csv-on-commit.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash D:/xaxiu-harness-standalone/.claude/hooks/ruff-format.sh"
+          }
+        ]
       }
     ],
     "Stop": [

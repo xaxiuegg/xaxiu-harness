@@ -2,6 +2,19 @@
 
 You are working in the **xaxiu-harness** project at `D:\xaxiu-harness-standalone\` (migrated 2026-05-22 from `D:\Projects\xaxiu-harness\` — see MIGRATION.md).  Cross-project multi-engine LLM dispatch + monitoring tool, successor to `xaxiu-swarm`. **This is NOT the warehouse project** — different session scope.  This project has its own isolated Claude Code memory directory at `~/.claude/projects/D--xaxiu-harness-standalone/memory/` (57 entries as of 2026-05-28; check `MEMORY.md` index for the live count) — warehouse-specific memory is intentionally NOT loaded here.
 
+## ⚠ Path A — the harness is being retired to a thin core (2026-05-30, operator directive)
+
+The operator chose **Path A**: keep the subscription keys (Claude / Kimi-Code / MiMo Token-Plan are UA-gated → CLI-only, so off-the-shelf gateways like LiteLLM/OpenRouter can't use them), trim bespoke infra, and lean on the vendor CLIs + native Claude Code skills. For NEW cross-vendor work, prefer the native skills over the big harness verbs:
+
+| Want | Use (Path A) | Retiring |
+|---|---|---|
+| Cross-vendor compare | **`/compare`** (MiMo + Kimi + Claude via CLIs, side-by-side) | `harness ask --engines` / `--panel` |
+| Web-grounded MiMo / headless browser | **`/mimo-research`** (MiMo via `opencode serve` + Playwright MCP — verified headless) | — |
+| Cross-vendor fact-check / audit | **`/harness-audit`** | — |
+| Agentic multi-file dispatch | **`xaxiu-swarm --backend kimi`** + the **Kimi CLI** | harness `coord` / `dispatch` |
+
+Engine-headless ground truth (every Windows trap): **`C:\Users\xaxiu\ENGINE-HEADLESS-PLAYBOOK.md`**. The `/compare` + `/mimo-research` skills are user-level (`~/.claude/skills/`) and reuse `C:\Users\xaxiu\oc-mimo-runner\mimo-headless.ps1`. `harness ask` / `proxy` still work and stay for now; `coord` / `dashboard` / `observer` / `loops` are trim candidates. **Don't add new bespoke machinery — wire native features to the CLIs.**
+
 ## First action in any fresh session / clone / worktree (READ FIRST)
 
 **Always run this single command first, before anything else:**
