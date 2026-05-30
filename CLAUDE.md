@@ -12,8 +12,9 @@ The operator chose **Path A**: keep the subscription keys (Claude / Kimi-Code / 
 | Web-grounded MiMo / headless browser | **`/mimo-research`** (MiMo via `opencode serve` + Playwright MCP — verified headless) | — |
 | Cross-vendor fact-check / audit | **`/harness-audit`** | — |
 | Agentic multi-file dispatch | **`xaxiu-swarm --backend kimi`** + the **Kimi CLI** | harness `coord` / `dispatch` |
+| Verify Kimi/MiMo are wired right (ANY use) | **`/engine-check`** — version-gate + live-key + UTF-8 preflight, per-engine review-class probe, failure→fix table. Run it BEFORE concluding an engine "isn't working". | — |
 
-Engine-headless ground truth (every Windows trap): **`C:\Users\xaxiu\ENGINE-HEADLESS-PLAYBOOK.md`**. The `/compare` + `/mimo-research` skills are user-level (`~/.claude/skills/`) and reuse `C:\Users\xaxiu\oc-mimo-runner\mimo-headless.ps1`. `harness ask` / `proxy` still work and stay for now; `coord` / `dashboard` / `observer` / `loops` are trim candidates. **Don't add new bespoke machinery — wire native features to the CLIs.**
+Engine-headless ground truth (every Windows trap): **`C:\Users\xaxiu\ENGINE-HEADLESS-PLAYBOOK.md`**, distilled into the self-contained **`/engine-check`** skill. The `/compare` + `/mimo-research` + `/engine-check` skills are user-level (`~/.claude/skills/`) and reuse `C:\Users\xaxiu\oc-mimo-runner\mimo-headless.ps1`. **Most common Kimi failure: the headless `kimi-cli` falls behind the operator's Kimi (was 1.39 vs 1.46) and server-side content-filters review/code prompts (HTTP 400) — fix with `uv tool upgrade kimi-cli`, NOT prompt reframing. See [[kimi-cli-version-content-filter]].** `harness ask` / `proxy` still work and stay for now; `coord` / `dashboard` / `observer` / `loops` are trim candidates. **Don't add new bespoke machinery — wire native features to the CLIs.**
 
 ## First action in any fresh session / clone / worktree (READ FIRST)
 
