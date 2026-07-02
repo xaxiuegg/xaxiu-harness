@@ -16,7 +16,7 @@ The operator chose **Path A**: keep the subscription keys (Claude / Kimi-Code / 
 | Cheap parallel fan-out (batch review/audit/classify over many items/files) | **`/fanout`** (`~/.claude/skills/fanout/fanout.py`) — same shape as a Claude Workflow (parallel + structured JSON + cross-vendor verify + resume cache) but on Kimi/MiMo/DeepSeek, **off the Claude weekly limit**. Has `--dry-run` cost preview + resume cache (repeats near-free). | Claude **`Workflow`** for cross-vendor/batch fan-out |
 | Authenticated browser extract (logged-in page, real session) | **`/webbridge`** — Kimi WebBridge drives your REAL logged-in Chrome/Edge via a local daemon; read-only `navigate`+`evaluate` wrapper (stale-pid-safe, auto start/stop). `snapshot` is broken→use evaluate. For UNauth web → `/mimo-research`. | — |
 
-Engine-headless ground truth (every Windows trap): **`C:\Users\xaxiu\ENGINE-HEADLESS-PLAYBOOK.md`**, distilled into the self-contained **`/engine-check`** skill. The `/compare` + `/mimo-research` + `/engine-check` skills are user-level (`~/.claude/skills/`) and reuse `C:\Users\xaxiu\oc-mimo-runner\mimo-headless.ps1`. **Most common Kimi failure: the headless `kimi-cli` falls behind the operator's Kimi (was 1.39 vs 1.46) and server-side content-filters review/code prompts (HTTP 400) — fix with `uv tool upgrade kimi-cli`, NOT prompt reframing. See [[kimi-cli-version-content-filter]].** `harness ask` / `proxy` still work and stay for now; `coord` / `dashboard` / `observer` / `loops` are trim candidates. **Don't add new bespoke machinery — wire native features to the CLIs.**
+Engine-headless ground truth (every Windows trap): **`C:\Users\xaxiu\ENGINE-HEADLESS-PLAYBOOK.md`**, distilled into the self-contained **`/engine-check`** skill. The `/compare` + `/mimo-research` + `/engine-check` skills are user-level (`~/.claude/skills/`) and reuse `C:\Users\xaxiu\oc-mimo-runner\mimo-headless.ps1`. **Most common Kimi failure: the headless `kimi-cli` falls behind the operator's Kimi (was 1.39 vs 1.46) and server-side content-filters review/code prompts (HTTP 400) — fix with `uv tool upgrade kimi-cli`, NOT prompt reframing. See [[kimi-cli-version-content-filter]].** `harness ask` / `proxy` still work and stay; `coord` / `dashboard` / `observer` / `loops` / `orchestrator` were DELETED 2026-05-30 (commit 9504e0e), and the 31 remaining dev-loop-era verbs were deleted 2026-07-01 (commit ee49704, cli.py 7,161→3,750 lines, 53→22 verbs). Full pre-trim state restorable from `archive/pre-trim-2026-05-29`. **Don't add new bespoke machinery — wire native features to the CLIs.**
 
 ## First action in any fresh session / clone / worktree (READ FIRST)
 
@@ -43,56 +43,29 @@ If `pip install -e .` is genuinely impossible (no network, locked-down env) BUT 
 
 ## What this project is (load-bearing framing)
 
-xaxiu-harness is the operator's command surface and observability layer for delegating dev work to multiple LLMs.  **Three operating modes**, low → high autonomy:
+xaxiu-harness is the operator's **cross-vendor LLM command surface** (post-Path-A thin core, see docs/CORE.md): ask the same question to several engines and compare, with cost tracking and an OpenAI-compatible proxy. The value is the cross-vendor layer, not any single engine. The former multi-agent coordinator / dashboard / observer machinery is deleted — agentic multi-file work goes to xaxiu-swarm, in-session orchestration to native Claude.
 
-1. **Cross-engine panel** (`harness ask`) — fire the same question at 3+ engines in parallel; compare answers side-by-side.  $0.20-0.30 per panel via Pattern B routing.
-2. **Agentic dev manager** — single Claude session orchestrating in real time, with full dev authority, captured directives, forensic audit trail, per-engine budget caps.
-3. **Multi-agent coordinator** (`harness coord`) — Planner/Worker pattern with isolated git worktrees, stateful 4-key proxy with circuit breaker + auto-quarantine, replan-from-failure, integration phase.  The mode that justifies the proxy + worktree + multi-key infra.
-
-Underneath: cross-platform key resolution, JSONL audit ledger with redaction, replay, budget meter, observer flags, FastAPI dashboard.  "Ask 3 LLMs" is the lowest-autonomy surface, not the project's scope.  Operator-facing docs in [docs/OPERATOR_GUIDE.md](docs/OPERATOR_GUIDE.md), agent-facing in [docs/AGENT_REFERENCE.md](docs/AGENT_REFERENCE.md).
+Underneath: cross-platform key resolution, JSONL audit ledger with redaction, budget meter. Operator-facing docs in [docs/OPERATOR_GUIDE.md](docs/OPERATOR_GUIDE.md), agent-facing in [docs/AGENT_REFERENCE.md](docs/AGENT_REFERENCE.md).
 
 ## Current state — v0.6.x (v2 production-hardened + Phase-5 operator UX + W14 agentic-operator/security PM-2026-05-28 layered on top)
 
 Current version: see `pyproject.toml` + `src/harness/__init__.py::__version__` for the live value (these are the only sources that don't go stale — every other count in this doc is a snapshot).
 
 
-**v1 core** (single-Claude dev manager, in-session orchestration):
+**The thin core** (post-trim 2026-05-30 / 2026-07-01; 22 verbs, live list via `harness --help`):
 
 | Component | Files |
 |---|---|
-| Adapter schema, loader, NL→YAML | [src/harness/adapters/](src/harness/adapters/) |
-| CLI — full verb list via `harness --help` / `harness capabilities` (live count beats stale doc numbers; P6 audit fix 2026-05-27) | [src/harness/cli.py](src/harness/cli.py) |
-| Engine ABC + 6 concrete (kimi/deepseek/anthropic/gemini/mimo/qwen) + MockEngine + auto-fallback (mock excluded from prod chain) | [src/harness/engines/](src/harness/engines/) |
-| State layer (JSON + SQLite + JSONL+redact; lazy init_db) | [src/harness/state/](src/harness/state/) |
-| DPAPI secrets | [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
+| `ask` / `ask-history` / `ask-show` — cross-vendor compare (routed / `--audit` / `--panel`), the moat | [src/harness/ask.py](src/harness/ask.py), [src/harness/audit_prompt.py](src/harness/audit_prompt.py), [src/harness/cli.py](src/harness/cli.py) |
+| `proxy` — OpenAI-compatible endpoint, 4 upstreams, multi-key pool + circuit breaker | [src/harness/proxy/](src/harness/proxy/) |
+| `engines` (+`describe`/`compatibility-matrix`/`recommend`, `engines-heal`) | [src/harness/engines/](src/harness/engines/) |
+| `keys` / `env` / `env-wizard` / `env-rotate` — credentials (DPAPI + live User-scope) | [src/harness/keys/](src/harness/keys/), [src/harness/secrets/dpapi.py](src/harness/secrets/dpapi.py) |
+| `doctor` / `introspect` / `capabilities` — health + one-call surface discovery | [src/harness/introspect.py](src/harness/introspect.py) |
+| `audit` / `budget` — cost + forensic JSONL ledger (redacted) | [src/harness/budget.py](src/harness/budget.py) |
+| `today` / `plan` / `session` — orientation + the ok-to-stop gate | [src/harness/session/](src/harness/session/) |
 | HarnessError L1-L5 taxonomy | [src/harness/errors.py](src/harness/errors.py), [spec/errors.md](spec/errors.md) |
-| Operator-modes (7 CLI flags + 11 YAML keys + OperatorSection) | [src/harness/operator/](src/harness/operator/), [spec/operator-modes.md](spec/operator-modes.md) |
-| Status tracker primitive (#19) | [src/harness/status/](src/harness/status/), [spec/status-tracker.md](spec/status-tracker.md) |
-| Observer primitive (#20) — armed via Task Scheduler | [src/harness/observer/](src/harness/observer/), [spec/observer.md](spec/observer.md) |
-| Heartbeat + state-inspect | [src/harness/heartbeat.py](src/harness/heartbeat.py), [src/harness/state/inspect.py](src/harness/state/inspect.py) |
-| Dashboard (FastAPI + WebSocket) | [src/harness/dashboard/](src/harness/dashboard/) |
-| Loops productization — `harness loop init/tick/start/stop/status` | [src/harness/loops/](src/harness/loops/) |
-| Replay (decision archaeology) | [src/harness/replay.py](src/harness/replay.py) |
-| Budget meter + per-engine cost ledger | [src/harness/budget.py](src/harness/budget.py) |
-| Session-handoff monitor (proactive transfer rec) | [src/harness/session/](src/harness/session/), [spec/session-handoff-monitor.md](spec/session-handoff-monitor.md) |
 
-**v2 architecture** (planner / worker / proxy / coordinator — multi-agent w/ worktrees):
-
-| Component | Files |
-|---|---|
-| **Spec** | [spec/multi-agent-harness-architecture.md](spec/multi-agent-harness-architecture.md) |
-| v2/A — Stateful 4-key proxy + circuit breaker + auto-quarantine on flap | [src/harness/proxy/](src/harness/proxy/) |
-| v2/B — Coord schemas + Planner + replan-from-failure + plan-from-NL | [src/harness/coord/schemas.py](src/harness/coord/schemas.py), [src/harness/coord/planner.py](src/harness/coord/planner.py) |
-| v2/C — Worker + worktree + checkpoint + progress-stream + heartbeat | [src/harness/coord/worker.py](src/harness/coord/worker.py), [src/harness/coord/worktree.py](src/harness/coord/worktree.py), [src/harness/coord/checkpoint.py](src/harness/coord/checkpoint.py) |
-| v2/D — Coordinator + Integrator + canceller + notify hook + `harness coord` CLI (13 subcommands as of 2026-05-28; check `harness coord --help` for the live count) | [src/harness/coord/coordinator.py](src/harness/coord/coordinator.py), [src/harness/coord/integrator.py](src/harness/coord/integrator.py), [src/harness/coord/canceller.py](src/harness/coord/canceller.py), [src/harness/coord/notify.py](src/harness/coord/notify.py) |
-| v2/E — Operator UX: dashboard /v2/* JSON + HTML detail + cost panel + WS embed | [src/harness/dashboard/v2_routes.py](src/harness/dashboard/v2_routes.py), [src/harness/dashboard/app.py](src/harness/dashboard/app.py) |
-| v2/F — Production hardening: MockEngine + V2-FIRST-RUN smoke + budget meter wired to worker telemetry | [src/harness/engines/mock.py](src/harness/engines/mock.py), [tests/test_coord_smoke_e2e.py](tests/test_coord_smoke_e2e.py) |
-| Operator-config sub-schemas (session_handoff / kill_conditions / production_hygiene_balance) | [src/harness/adapters/schema.py](src/harness/adapters/schema.py) |
-| Spec lint (pre-flight) | [src/harness/lint.py](src/harness/lint.py) |
-| Replay (extended to v2 coord runs) | [src/harness/replay.py](src/harness/replay.py) |
-| Chat observer (meta-audit of session transcript) | [src/harness/observer/chat.py](src/harness/observer/chat.py) |
-
-`harness coord` subcommands: `plan`, `plan-from-description`, `run`, `work`, `retry`, `rerun-failed`, `integrate`, `replan`, `status`, `watch`, `list`, `cancel`, `cleanup`.
+Deleted machinery (coord / dashboard / observer / loops / orchestrator + 31 dev-loop-era verbs): restorable from `archive/pre-trim-2026-05-29`; do not re-add. Some orphaned modules (heartbeat.py, replay.py, lint.py, cost_widget.py, status/, ...) still exist pending a follow-up sweep — they have no CLI surface.
 
 Smoke test: `PYTHONPATH=src python -c "from harness.cli import cli; print(sorted(cli.commands.keys()))"`.
 Tests: run `python -m pytest tests/ -m "not slow" -q --tb=no` for the live count.  (P6 audit fix 2026-05-27: removed the stale "990/990" snapshot — the suite has grown well past that and hard numbers in this file go stale faster than commits land.)
@@ -135,9 +108,9 @@ Native subagents shipped so far: `cross-vendor-panel` (bridge), `creativity` + `
 - **Wave-splitting**: when a wave touches N independent modules, split into N packets, fan out via `xaxiu-swarm swarm --max-concurrent N`.
 - **When uncertain → deploy more Kimi.** Dispatch 2-3 packets with alternative framings rather than agonizing alone.
 
-## Dev loop (autonomous)
+## Dev loop (RETIRED 2026-07-01)
 
-[coord/dev_loop/](coord/dev_loop/) is the prototype autonomous loop driving this project. Shared state in `state.json`. Four supervisors (creativity/developing/testing/integrating) per [supervisors/](coord/dev_loop/supervisors/). Manager logic in `manager.md`. Engine routing rules in `dispatch-rules.md`. Currently runs as in-session ScheduleWakeup ticks; will run via `bin/register-dev-loop-task.ps1` (Windows Task Scheduler) when operator activates persistent mode.
+[coord/dev_loop/](coord/dev_loop/) was the prototype autonomous loop (data/docs kept as history; the `loops`/`observer` machinery is deleted). Native Claude equivalents replace it: `/loop` skill or ScheduleWakeup for in-session ticks, the scheduled-tasks MCP for persistent cadence, and `harness ask --panel` for the cross-vendor observability the loop used to provide.
 
 ## Memory entries this session inherits
 

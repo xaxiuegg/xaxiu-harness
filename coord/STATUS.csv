@@ -574,3 +574,7 @@ PATH-A-MIGRATION,Refactor,Begin retiring the harness to a thin core — prefer n
 2026-05-30T034641Z,Dispatch,Dispatch 2026-05-30T034641Z,shipped,Claude,-,2026-05-30,task=7969d3544007413e937d9dc50c732a91; outcome=success
 2026-05-30T044640Z,Dispatch,Dispatch 2026-05-30T044640Z,shipped,Claude,-,2026-05-30,task=81d0f83bd25646b09722890738052cda; outcome=success
 2026-05-30T054640Z,Dispatch,Dispatch 2026-05-30T054640Z,shipped,Claude,-,2026-05-30,task=45468f01a8744bf0a988a94f33dae655; outcome=success
+TRIM-G32,Hardening,G32 source-trace hardening of ask --audit auditor prompt + /fanout verify lane,shipped,Claude,S,2026-07-01,commit 2b0ad30; FALSE POSITIVE marking rides CORRECTIONS field; parser untouched
+TRIM-QWEN-UPSTREAM,Refactor,Retire qwen-http proxy upstream (Qwen retired 2026-06-01) 5->4 upstreams,shipped,Claude,S,2026-07-01,commit dc7397a; inherited working-tree diff validated + committed
+TRIM-COORD-SWARM-ROUTE,Decision,Route coord+dashboard to xaxiu-swarm,killed,Claude,-,2026-07-01,moot: machinery deleted 9504e0e; swarm probed READY (deepseek 2.7s) but agentic kimi backend retired 2026-06-24; natives + swarm/deepseek cover it
+TRIM-CLI-SHRINK,Refactor,Shrink cli.py 7161->3750 lines / 53->22 verbs (31 dead verbs deleted),shipped,Claude,L,2026-07-01,commit ee49704; suite 2310/0; docs gate green; follow-up: orphan-module sweep chip
