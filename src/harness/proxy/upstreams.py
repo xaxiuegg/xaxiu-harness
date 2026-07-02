@@ -93,18 +93,6 @@ _UPSTREAMS: Dict[str, UpstreamSpec] = {
         default_model="deepseek-chat",
         description="DeepSeek v4 via direct HTTP.  PAYG, OpenAI-compat.",
     ),
-    "qwen-http": UpstreamSpec(
-        name="qwen-http",
-        transport="http",
-        key_env="DASHSCOPE_API_KEY",
-        base_url=(
-            "https://dashscope.aliyuncs.com/compatible-mode/"
-            "v1/chat/completions"
-        ),
-        default_model="qwen-plus",
-        description="Qwen 3.6 Plus via Alibaba DashScope (OpenAI-compat "
-                    "mode).  PAYG.",
-    ),
     "mimo-via-claude-code": UpstreamSpec(
         name="mimo-via-claude-code",
         transport="claude-code-subprocess",

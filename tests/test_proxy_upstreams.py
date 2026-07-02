@@ -56,7 +56,6 @@ class TestUpstreamRegistry:
         assert names == {
             "kimi-http",
             "deepseek-http",
-            "qwen-http",
             "mimo-via-claude-code",
             "kimi-via-claude-code",
         }
@@ -81,12 +80,6 @@ class TestPerUpstreamShape:
         assert spec.transport == "http"
         assert spec.key_env == "DEEPSEEK_API_KEY"
         assert "api.deepseek.com" in spec.base_url
-
-    def test_qwen_http(self) -> None:
-        spec = get_upstream("qwen-http")
-        assert spec.transport == "http"
-        assert spec.key_env == "DASHSCOPE_API_KEY"
-        assert "dashscope.aliyuncs.com" in spec.base_url
 
     def test_mimo_via_claude_code(self) -> None:
         spec = get_upstream("mimo-via-claude-code")

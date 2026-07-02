@@ -572,3 +572,5 @@ PATH-A-MIGRATION,Refactor,Begin retiring the harness to a thin core — prefer n
 2026-05-30T014640Z,Dispatch,Dispatch 2026-05-30T014640Z,shipped,Claude,-,2026-05-30,task=56e4eb3eb8d4453cb938e81397c28d26; outcome=success
 2026-05-30T024645Z,Dispatch,Dispatch 2026-05-30T024645Z,shipped,Claude,-,2026-05-30,task=9b24acffe1eb43749a76a3c64e520e91; outcome=success
 2026-05-30T034641Z,Dispatch,Dispatch 2026-05-30T034641Z,shipped,Claude,-,2026-05-30,task=7969d3544007413e937d9dc50c732a91; outcome=success
+2026-05-30T044640Z,Dispatch,Dispatch 2026-05-30T044640Z,shipped,Claude,-,2026-05-30,task=81d0f83bd25646b09722890738052cda; outcome=success
+2026-05-30T054640Z,Dispatch,Dispatch 2026-05-30T054640Z,shipped,Claude,-,2026-05-30,task=45468f01a8744bf0a988a94f33dae655; outcome=success

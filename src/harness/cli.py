@@ -238,15 +238,15 @@ def _agent_instructions_snippet(
             f"                                     `ask history` with a space fires a NEW ask)\n"
             f"harness ask-show <id>                Render one past ask (also hyphenated)\n"
             f"harness proxy start --upstream X     OpenAI-compatible HTTP proxy\n"
-            f"                                     on 127.0.0.1:7879.  5 upstreams:\n"
+            f"                                     on 127.0.0.1:7879.  4 upstreams:\n"
             f"                                     kimi-http (default), deepseek-http,\n"
-            f"                                     qwen-http, mimo-via-claude-code,\n"
+            f"                                     mimo-via-claude-code,\n"
             f"                                     kimi-via-claude-code (subprocess\n"
             f"                                     upstreams are TOS-compliant for\n"
             f"                                     UA-gated providers like MiMo Token\n"
             f"                                     Plan and Kimi Code subscription —\n"
             f"                                     DO NOT hand-roll a custom shim).\n"
-            f"harness proxy upstreams              List all 5 upstreams with details\n"
+            f"harness proxy upstreams              List all 4 upstreams with details\n"
             f"harness engines describe <name>      Per-engine metadata: protocols,\n"
             f"                                     UA-gating, key prefixes, models,\n"
             f"                                     recommended task classes.\n"
@@ -348,7 +348,7 @@ def _agent_instructions_snippet(
             f"For sub-routine LLM calls from third-party tools that "
             f"want an OpenAI-compatible `/v1/chat/completions`:\n\n"
             f"```bash\n"
-            f"python -m harness proxy upstreams                       # see all 5 upstreams\n"
+            f"python -m harness proxy upstreams                       # see all 4 upstreams\n"
             f"python -m harness proxy start                           # Kimi (default)\n"
             f"python -m harness proxy start --upstream deepseek-http  # direct DeepSeek\n"
             f"python -m harness proxy start --upstream mimo-via-claude-code\n"
@@ -358,8 +358,8 @@ def _agent_instructions_snippet(
             f"```\n\n"
             f"Then point the consuming tool at "
             f"`OPENAI_API_BASE=http://127.0.0.1:7879/v1`.  Multi-key "
-            f"pool + circuit breaker apply.  Five upstreams: "
-            f"`kimi-http` (default), `deepseek-http`, `qwen-http` "
+            f"pool + circuit breaker apply.  Four upstreams: "
+            f"`kimi-http` (default), `deepseek-http` "
             f"(direct HTTP); `mimo-via-claude-code`, "
             f"`kimi-via-claude-code` (TOS-compliant Claude Code "
             f"subprocess for User-Agent-gated providers).  **DO NOT "
@@ -379,7 +379,7 @@ def _agent_instructions_snippet(
             f"  --packet packet.md\n"
             f"```\n\n"
             f"Backends: `kimi` (CLI, agentic), `kimi-api`, `deepseek`, "
-            f"`qwen`, `mimo` (TOS-compliant via Claude Code subprocess).  "
+            f"`mimo` (TOS-compliant via Claude Code subprocess).  "
             f"NOT required for `harness ask` or `harness proxy` — clone "
             f"only if you need agentic multi-file work.\n\n"
             f"### 4. Engine discovery — query before guessing\n\n"
@@ -430,7 +430,7 @@ def _agent_instructions_snippet(
             f"**The single command a fresh session should run first.**  "
             f"`python -m harness introspect --format json` returns one "
             f"structured snapshot covering: harness version + path, "
-            f"available verbs (ask modes / proxy state / 5 upstream "
+            f"available verbs (ask modes / proxy state / 4 upstream "
             f"options / engine metadata / swarm sibling status), per-"
             f"engine key + protocol + UA-gating status, installed-snippet "
             f"freshness (warns if stale), wrapper-script + PATH status, "
@@ -447,7 +447,7 @@ def _agent_instructions_snippet(
             f"table.  Same data introspect surfaces in summary form; "
             f"use directly when you need the per-check fix-hints.  Note "
             f"the strategic plan's $195/mo budget covers MiMo + DeepSeek "
-            f"+ Qwen — Kimi is no longer in the rotation.\n\n"
+            f"+ Kimi (Qwen retired 2026-06-01).\n\n"
             f"### Support verbs\n\n"
             f"- `python -m harness doctor` — 7-check health table\n"
             f"- `python -m harness keys serve` — browser form for "
@@ -472,9 +472,9 @@ def _agent_instructions_snippet(
             f"`packet.md` (panel/audit modes) or the lone "
             f"`<engine>.md` (routed) for the answer.\n\n"
             f"2. **`python -m harness proxy start [--upstream <name>]`** "
-            f"— OpenAI-compatible endpoint on 127.0.0.1:7879.  Five "
-            f"upstreams: `kimi-http` (default), `deepseek-http`, "
-            f"`qwen-http` (direct HTTP); `mimo-via-claude-code`, "
+            f"— OpenAI-compatible endpoint on 127.0.0.1:7879.  Four "
+            f"upstreams: `kimi-http` (default), `deepseek-http` "
+            f"(direct HTTP); `mimo-via-claude-code`, "
             f"`kimi-via-claude-code` (TOS-compliant Claude Code "
             f"subprocess for User-Agent-gated providers).  Run "
             f"`harness proxy upstreams` for the full list.  Set "
@@ -6728,7 +6728,7 @@ def proxy_group() -> None:
     """OpenAI-compatible HTTP proxy.  Routes /v1/chat/completions
     requests from third-party tools (litellm-based clients, ApplyPilot,
     etc.) to one of 5 upstreams: kimi-http (default), deepseek-http,
-    qwen-http, mimo-via-claude-code, kimi-via-claude-code.  The two
+    mimo-via-claude-code, kimi-via-claude-code.  The two
     subprocess upstreams are TOS-compliant for User-Agent-gated
     providers (MiMo Token Plan, Kimi Code subscription).
 
@@ -6748,7 +6748,7 @@ def proxy_group() -> None:
     help=(
         "Upstream selector.  Run `harness proxy upstreams` to see all "
         "options.  HTTP-direct: kimi-http (default), deepseek-http, "
-        "qwen-http.  TOS-compliant subprocess: mimo-via-claude-code, "
+        "(no direct-HTTP MiMo). TOS-compliant subprocess: mimo-via-claude-code, "
         "kimi-via-claude-code."
     ),
 )

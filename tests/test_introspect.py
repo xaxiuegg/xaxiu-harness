@@ -313,9 +313,9 @@ class TestBuildSnapshot:
     def test_verbs_section_lists_proxy_upstreams(self) -> None:
         snap = build_snapshot(probe=False)
         upstreams = set(snap["verbs"]["proxy"]["upstream_options"])
-        # All 5 W14-PROXY-UPSTREAMS entries surface here
+        # All 4 W14-PROXY-UPSTREAMS entries surface here (qwen-http retired 2026-06-01)
         assert {
-            "kimi-http", "deepseek-http", "qwen-http",
+            "kimi-http", "deepseek-http",
             "mimo-via-claude-code", "kimi-via-claude-code",
         }.issubset(upstreams)
 
