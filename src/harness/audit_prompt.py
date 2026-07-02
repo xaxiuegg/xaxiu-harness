@@ -30,6 +30,7 @@ Design notes
   VERDICT is surfaced as ``"UNKNOWN"`` so callers can react rather
   than silently treating it as PASS.
 """
+
 from __future__ import annotations
 
 import re
@@ -41,6 +42,18 @@ You are auditing another engine's answer to the question below.
 Your job: judge whether the candidate answer is correct, complete, and
 well-reasoned.  Hallucinations, factual errors, important omissions, and
 dangerously overstated claims are all in scope.
+
+Source-trace rule — do NOT judge on plausibility alone:
+- For each specific claim in the candidate answer, verify it against the
+  source material included in the question (code, quoted text, data), or
+  against your own knowledge when no source is provided.
+- A claim that extrapolates a pattern to a new target ("X has the same
+  risk/behavior as Y") WITHOUT citing the target's own evidence, and that
+  you cannot verify from the provided material, is a FALSE POSITIVE:
+  list it under CORRECTIONS prefixed "FALSE POSITIVE:" and name the
+  category error.
+- If a load-bearing claim is unverifiable from the material given, say
+  so under CORRECTIONS rather than letting it pass.
 
 QUESTION:
 {question}
@@ -96,13 +109,11 @@ _VERDICT_RE = re.compile(
 _NEXT_HEADER = r"(?:CORRECTIONS|MISSED(?:\s+CONSIDERATIONS)?|OVERALL)"
 
 _SUMMARY_RE = re.compile(
-    r"ONE[- ]LINE\s+SUMMARY\s*:\s*(.*?)"
-    + r"(?=\n\s*" + _NEXT_HEADER + r"\s*:|\Z)",
+    r"ONE[- ]LINE\s+SUMMARY\s*:\s*(.*?)" + r"(?=\n\s*" + _NEXT_HEADER + r"\s*:|\Z)",
     re.IGNORECASE | re.DOTALL,
 )
 _CORRECTIONS_RE = re.compile(
-    r"CORRECTIONS\s*:\s*(.*?)"
-    + r"(?=\n\s*(?:MISSED(?:\s+CONSIDERATIONS)?|OVERALL)\s*:|\Z)",
+    r"CORRECTIONS\s*:\s*(.*?)" + r"(?=\n\s*(?:MISSED(?:\s+CONSIDERATIONS)?|OVERALL)\s*:|\Z)",
     re.IGNORECASE | re.DOTALL,
 )
 _MISSED_RE = re.compile(

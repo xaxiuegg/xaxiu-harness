@@ -1,10 +1,11 @@
 """W14-HARNESS-ASK 2026-05-26 / W14-ASK-ROUTED 2026-05-27: tests for the
 daily-driver ask CLI (routed default + --task + --panel modes)."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -30,8 +31,9 @@ from harness.engines.routing_recommend import Recommendation
 # ---------------------------------------------------------------------------
 
 
-def _mock_pool_result(text: str = "OK", success: bool = True,
-                     cost: float = 0.01) -> PoolDispatchResult:
+def _mock_pool_result(
+    text: str = "OK", success: bool = True, cost: float = 0.01
+) -> PoolDispatchResult:
     """Build a successful PoolDispatchResult for mocking."""
     resp = EngineResponse(
         success=success,
@@ -45,13 +47,16 @@ def _mock_pool_result(text: str = "OK", success: bool = True,
     return PoolDispatchResult(
         success=success,
         response=resp,
-        attempts=[PoolAttempt(
-            alias="k1", env_var="KIMI_API_KEY",
-            success=success,
-            category="up" if success else "auth-failed",
-            error="",
-            latency_ms=500,
-        )],
+        attempts=[
+            PoolAttempt(
+                alias="k1",
+                env_var="KIMI_API_KEY",
+                success=success,
+                category="up" if success else "auth-failed",
+                error="",
+                latency_ms=500,
+            )
+        ],
         winning_alias="k1" if success else "",
     )
 
@@ -147,14 +152,21 @@ class TestRunPanel:
 
 class TestSavePanel:
     def _make_result(
-        self, engine: str = "mimo-via-claude",
+        self,
+        engine: str = "mimo-via-claude",
         text: str = "response text",
     ) -> AskResult:
         return AskResult(
-            engine=engine, ok=True, elapsed_s=12.3,
-            tokens_in=100, tokens_out=50, cost_usd=0.01,
-            text=text, error="",
-            winning_alias="k1", attempt_count=1,
+            engine=engine,
+            ok=True,
+            elapsed_s=12.3,
+            tokens_in=100,
+            tokens_out=50,
+            cost_usd=0.01,
+            text=text,
+            error="",
+            winning_alias="k1",
+            attempt_count=1,
         )
 
     def test_writes_question_md(self, tmp_path: Path) -> None:
@@ -163,20 +175,28 @@ class TestSavePanel:
         assert "my question" in content
 
     def test_writes_per_engine_files(self, tmp_path: Path) -> None:
-        save_panel("q", [
-            self._make_result("kimi-via-claude", "k-resp"),
-            self._make_result("mimo-via-claude", "m-resp"),
-        ], tmp_path)
+        save_panel(
+            "q",
+            [
+                self._make_result("kimi-via-claude", "k-resp"),
+                self._make_result("mimo-via-claude", "m-resp"),
+            ],
+            tmp_path,
+        )
         kimi = (tmp_path / "kimi-via-claude.md").read_text(encoding="utf-8")
         mimo = (tmp_path / "mimo-via-claude.md").read_text(encoding="utf-8")
         assert "k-resp" in kimi
         assert "m-resp" in mimo
 
     def test_writes_summary_json(self, tmp_path: Path) -> None:
-        save_panel("q", [
-            self._make_result("kimi-via-claude"),
-            self._make_result("mimo-via-claude"),
-        ], tmp_path)
+        save_panel(
+            "q",
+            [
+                self._make_result("kimi-via-claude"),
+                self._make_result("mimo-via-claude"),
+            ],
+            tmp_path,
+        )
         summary = json.loads(
             (tmp_path / "summary.json").read_text(encoding="utf-8"),
         )
@@ -187,10 +207,14 @@ class TestSavePanel:
         assert summary["max_latency_s"] == pytest.approx(12.3)
 
     def test_writes_packet_md(self, tmp_path: Path) -> None:
-        save_panel("my question", [
-            self._make_result("kimi-via-claude", "kimi says X"),
-            self._make_result("mimo-via-claude", "mimo says Y"),
-        ], tmp_path)
+        save_panel(
+            "my question",
+            [
+                self._make_result("kimi-via-claude", "kimi says X"),
+                self._make_result("mimo-via-claude", "mimo says Y"),
+            ],
+            tmp_path,
+        )
         packet = (tmp_path / "packet.md").read_text(encoding="utf-8")
         # Question + both responses concatenated
         assert "my question" in packet
@@ -202,15 +226,19 @@ class TestSavePanel:
 
     def test_handles_failed_result(self, tmp_path: Path) -> None:
         failed = AskResult(
-            engine="kimi-via-claude", ok=False, elapsed_s=5.0,
-            tokens_in=0, tokens_out=0, cost_usd=0.0,
-            text="", error="timeout after 180s",
-            winning_alias="", attempt_count=3,
+            engine="kimi-via-claude",
+            ok=False,
+            elapsed_s=5.0,
+            tokens_in=0,
+            tokens_out=0,
+            cost_usd=0.0,
+            text="",
+            error="timeout after 180s",
+            winning_alias="",
+            attempt_count=3,
         )
         save_panel("q", [failed], tmp_path)
-        per_engine = (
-            tmp_path / "kimi-via-claude.md"
-        ).read_text(encoding="utf-8")
+        per_engine = (tmp_path / "kimi-via-claude.md").read_text(encoding="utf-8")
         assert "FAILED" in per_engine
         assert "timeout" in per_engine
 
@@ -237,8 +265,10 @@ class TestSavePanel:
         packet.md wrapping one engine's output adds zero value.
         """
         save_panel(
-            "q", [self._make_result("mimo-via-claude", "answer")],
-            tmp_path, mode="routed",
+            "q",
+            [self._make_result("mimo-via-claude", "answer")],
+            tmp_path,
+            mode="routed",
         )
         assert (tmp_path / "question.md").exists()
         assert (tmp_path / "mimo-via-claude.md").exists()
@@ -248,7 +278,10 @@ class TestSavePanel:
 
     def test_summary_mode_field_routed(self, tmp_path: Path) -> None:
         save_panel(
-            "q", [self._make_result()], tmp_path, mode="routed",
+            "q",
+            [self._make_result()],
+            tmp_path,
+            mode="routed",
         )
         summary = json.loads(
             (tmp_path / "summary.json").read_text(encoding="utf-8"),
@@ -257,7 +290,10 @@ class TestSavePanel:
 
     def test_summary_mode_field_panel(self, tmp_path: Path) -> None:
         save_panel(
-            "q", [self._make_result()], tmp_path, mode="panel",
+            "q",
+            [self._make_result()],
+            tmp_path,
+            mode="panel",
         )
         summary = json.loads(
             (tmp_path / "summary.json").read_text(encoding="utf-8"),
@@ -267,7 +303,9 @@ class TestSavePanel:
     def test_extra_summary_merges(self, tmp_path: Path) -> None:
         """extra_summary keys are surfaced in summary.json (used by --audit)."""
         save_panel(
-            "q", [self._make_result()], tmp_path,
+            "q",
+            [self._make_result()],
+            tmp_path,
             mode="audit",
             extra_summary={"verdict": "PASS", "auditor_engine": "deepseek-via-claude"},
         )
@@ -295,23 +333,37 @@ class TestAskCli:
         runner = CliRunner()
         result = runner.invoke(cli, ["ask"])
         assert result.exit_code != 0
-        assert "question" in (result.output + result.stderr_bytes.decode(
-            "utf-8", errors="replace",
-        )).lower() or "error" in result.output.lower()
+        assert (
+            "question"
+            in (
+                result.output
+                + result.stderr_bytes.decode(
+                    "utf-8",
+                    errors="replace",
+                )
+            ).lower()
+            or "error" in result.output.lower()
+        )
 
     def test_dispatches_with_question_argument(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         with patch(
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="answer"),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test question",
-                "--no-save",
-                "--engines", "kimi-via-claude",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test question",
+                    "--no-save",
+                    "--engines",
+                    "kimi-via-claude",
+                ],
+            )
         assert result.exit_code == 0
         # Summary table includes the engine
         assert "kimi-via-claude" in result.output
@@ -324,12 +376,17 @@ class TestAskCli:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="reply"),
         ):
-            result = runner.invoke(cli, [
-                "ask",
-                "--file", str(q_file),
-                "--no-save",
-                "--engines", "mimo-via-claude",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "--file",
+                    str(q_file),
+                    "--no-save",
+                    "--engines",
+                    "mimo-via-claude",
+                ],
+            )
         assert result.exit_code == 0
         assert "mimo-via-claude" in result.output
 
@@ -339,11 +396,17 @@ class TestAskCli:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="saved-response"),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test",
-                "--engines", "kimi-via-claude",
-                "--output", str(tmp_path / "panel"),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--engines",
+                    "kimi-via-claude",
+                    "--output",
+                    str(tmp_path / "panel"),
+                ],
+            )
         assert result.exit_code == 0
         out = tmp_path / "panel"
         assert (out / "question.md").exists()
@@ -357,28 +420,39 @@ class TestAskCli:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="VISIBLE-RESPONSE-TEXT"),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test",
-                "--no-save",
-                "--print-text",
-                "--engines", "kimi-via-claude",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--no-save",
+                    "--print-text",
+                    "--engines",
+                    "kimi-via-claude",
+                ],
+            )
         assert result.exit_code == 0
         assert "VISIBLE-RESPONSE-TEXT" in result.output
 
     def test_fail_exit_code_when_engine_fails(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         with patch(
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(success=False),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test",
-                "--no-save",
-                "--engines", "kimi-via-claude",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--no-save",
+                    "--engines",
+                    "kimi-via-claude",
+                ],
+            )
         assert result.exit_code == 1
 
 
@@ -393,7 +467,9 @@ def _mock_recommendation(
     alternates: tuple[str, ...] = ("deepseek-via-claude",),
 ) -> Recommendation:
     return Recommendation(
-        engine=engine, alternates=alternates, rationale=rationale,
+        engine=engine,
+        alternates=alternates,
+        rationale=rationale,
     )
 
 
@@ -413,9 +489,14 @@ class TestAskRoutedDefault:
                 return_value=_mock_pool_result(text="routed-answer"),
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test question", "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test question",
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 0
         # Recommender consulted exactly once for task="default"
         mock_rec.assert_called_once()
@@ -429,7 +510,8 @@ class TestAskRoutedDefault:
         assert "mimo-via-claude" in result.output
 
     def test_task_flag_passes_through_to_recommender(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         with (
@@ -442,9 +524,16 @@ class TestAskRoutedDefault:
                 return_value=_mock_pool_result(text="fast-answer"),
             ),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--no-save", "--task", "latency",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--no-save",
+                    "--task",
+                    "latency",
+                ],
+            )
         assert result.exit_code == 0
         mock_rec.assert_called_once()
         args, kwargs = mock_rec.call_args
@@ -455,16 +544,30 @@ class TestAskRoutedDefault:
         """Click.Choice surfaces clean error on typo; recommender is
         not silently invoked with fallback."""
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "ask", "test", "--no-save", "--task", "fastest",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "test",
+                "--no-save",
+                "--task",
+                "fastest",
+            ],
+        )
         # Click exit code for invalid value is 2
         assert result.exit_code == 2
         # Message names the bad value
-        assert "fastest" in (result.output + (
-            result.stderr_bytes.decode("utf-8", errors="replace")
-            if hasattr(result, "stderr_bytes") else ""
-        )).lower()
+        assert (
+            "fastest"
+            in (
+                result.output
+                + (
+                    result.stderr_bytes.decode("utf-8", errors="replace")
+                    if hasattr(result, "stderr_bytes")
+                    else ""
+                )
+            ).lower()
+        )
 
     def test_routed_mode_writes_no_packet_md(self, tmp_path: Path) -> None:
         """End-to-end: bare ask saves question.md + <engine>.md +
@@ -481,9 +584,15 @@ class TestAskRoutedDefault:
                 return_value=_mock_pool_result(text="answer"),
             ),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--output", str(out),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--output",
+                    str(out),
+                ],
+            )
         assert result.exit_code == 0
         assert (out / "question.md").exists()
         assert (out / "mimo-via-claude.md").exists()
@@ -510,17 +619,21 @@ class TestAskPanelFlag:
                 return_value=_mock_pool_result(text="response"),
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--no-save", "--panel",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--no-save",
+                    "--panel",
+                ],
+            )
         assert result.exit_code == 0
         # Recommender is NOT consulted for --panel mode
         mock_rec.assert_not_called()
         # All 3 Pattern B engines were dispatched
         assert mock_dispatch.call_count == 3
-        engines_called = {
-            call.args[0] for call in mock_dispatch.call_args_list
-        }
+        engines_called = {call.args[0] for call in mock_dispatch.call_args_list}
         assert engines_called == set(DEFAULT_ENGINES)
 
     def test_panel_mode_writes_packet_md(self, tmp_path: Path) -> None:
@@ -530,9 +643,16 @@ class TestAskPanelFlag:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="resp"),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--output", str(out), "--panel",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--output",
+                    str(out),
+                    "--panel",
+                ],
+            )
         assert result.exit_code == 0
         # Panel mode writes packet.md
         assert (out / "packet.md").exists()
@@ -557,11 +677,18 @@ class TestAskEnginesPin:
                 return_value=_mock_pool_result(text="pinned"),
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--no-save",
-                "--task", "latency",  # would pick deepseek if recommender ran
-                "--engines", "kimi-via-claude",  # pinned
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--no-save",
+                    "--task",
+                    "latency",  # would pick deepseek if recommender ran
+                    "--engines",
+                    "kimi-via-claude",  # pinned
+                ],
+            )
         assert result.exit_code == 0
         # Pin short-circuits recommender entirely
         mock_rec.assert_not_called()
@@ -575,18 +702,25 @@ class TestAskEnginesPin:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="pinned"),
         ) as mock_dispatch:
-            result = runner.invoke(cli, [
-                "ask", "test", "--no-save",
-                "--panel",  # ignored
-                "--engines", "kimi-via-claude",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--no-save",
+                    "--panel",  # ignored
+                    "--engines",
+                    "kimi-via-claude",
+                ],
+            )
         assert result.exit_code == 0
         # Only the pinned engine dispatched (panel ignored)
         assert mock_dispatch.call_count == 1
         assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
 
     def test_handoff_step7_invocation_unchanged(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """HANDOFF.md step 7 verifies setup with:
 
@@ -601,12 +735,18 @@ class TestAskEnginesPin:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="OK"),
         ) as mock_dispatch:
-            result = runner.invoke(cli, [
-                "ask", "Reply with the single word OK.",
-                "--engines", "mimo-via-claude",
-                "--no-save",
-                "--max-budget-usd", "0.05",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "Reply with the single word OK.",
+                    "--engines",
+                    "mimo-via-claude",
+                    "--no-save",
+                    "--max-budget-usd",
+                    "0.05",
+                ],
+            )
         assert result.exit_code == 0
         assert mock_dispatch.call_count == 1
         assert mock_dispatch.call_args_list[0].args[0] == "mimo-via-claude"
@@ -623,6 +763,7 @@ class TestAuditPrompt:
 
     def test_build_audit_prompt_includes_question(self) -> None:
         from harness.audit_prompt import build_audit_prompt
+
         prompt = build_audit_prompt(
             question="Is MiMo Anthropic-only?",
             producer_engine="mimo-via-claude",
@@ -636,11 +777,19 @@ class TestAuditPrompt:
         assert "CORRECTIONS:" in prompt
         assert "MISSED CONSIDERATIONS:" in prompt
         assert "OVERALL:" in prompt
+        # G32 2026-07-01: source-trace hardening — auditor must verify
+        # claims against provided material, not plausibility-check them,
+        # and flag unverifiable pattern-extrapolations as FALSE POSITIVE.
+        assert "Source-trace rule" in prompt
+        assert "FALSE POSITIVE" in prompt
 
     def test_build_audit_prompt_strips_whitespace(self) -> None:
         from harness.audit_prompt import build_audit_prompt
+
         prompt = build_audit_prompt(
-            question="  q  \n", producer_engine="X", producer_response="\n  a  \n",
+            question="  q  \n",
+            producer_engine="X",
+            producer_response="\n  a  \n",
         )
         # No stray leading/trailing whitespace inside the rendered fields
         assert "QUESTION:\nq\n" in prompt
@@ -652,6 +801,7 @@ class TestParseAuditVerdict:
 
     def test_full_pass_verdict(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         text = (
             "VERDICT: PASS\n"
             "ONE-LINE SUMMARY: Answer is correct and complete.\n"
@@ -668,6 +818,7 @@ class TestParseAuditVerdict:
 
     def test_partial_verdict_with_corrections(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         text = (
             "VERDICT: PARTIAL\n"
             "ONE-LINE SUMMARY: Mostly right; missed one protocol path.\n"
@@ -685,6 +836,7 @@ class TestParseAuditVerdict:
 
     def test_fail_verdict(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         text = (
             "VERDICT: FAIL\n"
             "ONE-LINE SUMMARY: Off-topic.\n"
@@ -697,6 +849,7 @@ class TestParseAuditVerdict:
 
     def test_missing_verdict_returns_unknown(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         text = "Sorry I don't have a verdict for this question."
         v = parse_audit_verdict(text)
         assert v["verdict"] == "UNKNOWN"
@@ -705,6 +858,7 @@ class TestParseAuditVerdict:
     def test_handles_one_line_summary_variants(self) -> None:
         """LLMs sometimes drop the hyphen ("ONE LINE SUMMARY")."""
         from harness.audit_prompt import parse_audit_verdict
+
         text = (
             "VERDICT: PASS\n"
             "ONE LINE SUMMARY: looks fine.\n"
@@ -718,6 +872,7 @@ class TestParseAuditVerdict:
 
     def test_case_insensitive_headers(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         text = (
             "verdict: pass\n"
             "one-line summary: yep\n"
@@ -731,12 +886,14 @@ class TestParseAuditVerdict:
 
     def test_empty_text_safe(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         v = parse_audit_verdict("")
         assert v["verdict"] == "UNKNOWN"
         assert v["raw"] == ""
 
     def test_none_text_safe(self) -> None:
         from harness.audit_prompt import parse_audit_verdict
+
         v = parse_audit_verdict(None)  # type: ignore[arg-type]
         assert v["verdict"] == "UNKNOWN"
 
@@ -747,12 +904,14 @@ class TestRunAudit:
     def test_producer_failure_skips_auditor(self) -> None:
         """If the producer fails, the audit step is skipped."""
         from harness.ask import run_audit
+
         with patch(
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(success=False),
         ) as mock_dispatch:
             outcome = run_audit(
-                "q", producer_engine="mimo-via-claude",
+                "q",
+                producer_engine="mimo-via-claude",
             )
         # Dispatch fired exactly once (just the producer)
         assert mock_dispatch.call_count == 1
@@ -766,6 +925,7 @@ class TestRunAudit:
         the auditor is always a different engine label (D-i: engine-
         label dedup)."""
         from harness.ask import run_audit
+
         producer_resp = _mock_pool_result(text="producer answer")
         auditor_resp = _mock_pool_result(
             text=(
@@ -787,7 +947,8 @@ class TestRunAudit:
             ) as mock_dispatch,
         ):
             outcome = run_audit(
-                "q", producer_engine="mimo-via-claude",
+                "q",
+                producer_engine="mimo-via-claude",
             )
         # Recommender called with audit class + exclude={producer}
         mock_rec.assert_called_once()
@@ -813,10 +974,9 @@ class TestRunAudit:
 
     def test_audit_engine_override_skips_recommender(self) -> None:
         from harness.ask import run_audit
+
         producer_resp = _mock_pool_result(text="answer")
-        auditor_resp = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
+        auditor_resp = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
         with (
             patch(
                 "harness.engines.routing_recommend.recommend",
@@ -827,7 +987,8 @@ class TestRunAudit:
             ) as mock_dispatch,
         ):
             outcome = run_audit(
-                "q", producer_engine="mimo-via-claude",
+                "q",
+                producer_engine="mimo-via-claude",
                 audit_engine_override="kimi-via-claude",
             )
         # Recommender NOT consulted
@@ -839,6 +1000,7 @@ class TestRunAudit:
 
     def test_auditor_dispatch_failure_yields_unknown_verdict(self) -> None:
         from harness.ask import run_audit
+
         producer_resp = _mock_pool_result(text="answer")
         auditor_resp = _mock_pool_result(success=False)
         with (
@@ -864,7 +1026,8 @@ class TestAuditCli:
     """End-to-end --audit flag through the CLI."""
 
     def test_audit_flag_runs_producer_then_auditor(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         producer_resp = _mock_pool_result(text="The answer is yes.")
@@ -892,11 +1055,16 @@ class TestAuditCli:
                 side_effect=[producer_resp, auditor_resp],
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test question",
-                "--audit",
-                "--output", str(tmp_path / "out"),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test question",
+                    "--audit",
+                    "--output",
+                    str(tmp_path / "out"),
+                ],
+            )
         assert result.exit_code == 0
         assert mock_dispatch.call_count == 2
         # Banner mentions audit + producer
@@ -918,15 +1086,14 @@ class TestAuditCli:
         assert summary["verdict"]["verdict"] == "PASS"
 
     def test_audit_engine_flag_implies_audit(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """--audit-engine X without --audit should still trigger audit
         mode (UX convenience)."""
         runner = CliRunner()
         producer_resp = _mock_pool_result(text="answer")
-        auditor_resp = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
+        auditor_resp = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
         with (
             patch(
                 "harness.engines.routing_recommend.recommend",
@@ -937,11 +1104,16 @@ class TestAuditCli:
                 side_effect=[producer_resp, auditor_resp],
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test",
-                "--audit-engine", "kimi-via-claude",
-                "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--audit-engine",
+                    "kimi-via-claude",
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 0
         # Two dispatches (producer + auditor), auditor=kimi via override
         assert mock_dispatch.call_count == 2
@@ -949,20 +1121,33 @@ class TestAuditCli:
 
     def test_audit_plus_panel_rejected(self) -> None:
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "ask", "test", "--audit", "--panel", "--no-save",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "test",
+                "--audit",
+                "--panel",
+                "--no-save",
+            ],
+        )
         assert result.exit_code == 2
         assert "audit" in result.output.lower()
         assert "panel" in result.output.lower()
 
     def test_audit_plus_multi_engine_rejected(self) -> None:
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "ask", "test", "--audit",
-            "--engines", "mimo-via-claude,kimi-via-claude",
-            "--no-save",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "test",
+                "--audit",
+                "--engines",
+                "mimo-via-claude,kimi-via-claude",
+                "--no-save",
+            ],
+        )
         assert result.exit_code == 2
         assert "audit" in result.output.lower()
         assert "producer" in result.output.lower()
@@ -972,9 +1157,7 @@ class TestAuditCli:
         becomes the producer."""
         runner = CliRunner()
         producer_resp = _mock_pool_result(text="answer")
-        auditor_resp = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
+        auditor_resp = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
         with (
             patch(
                 "harness.engines.routing_recommend.recommend",
@@ -985,11 +1168,17 @@ class TestAuditCli:
                 side_effect=[producer_resp, auditor_resp],
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--audit",
-                "--engines", "kimi-via-claude",
-                "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--audit",
+                    "--engines",
+                    "kimi-via-claude",
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 0
         # Producer = pinned kimi; recommender consulted only for the
         # auditor pick (NOT for the routed default)
@@ -997,6 +1186,7 @@ class TestAuditCli:
         assert mock_rec.call_args.args[0] == "audit"
         assert mock_dispatch.call_args_list[0].args[0] == "kimi-via-claude"
         assert mock_dispatch.call_args_list[1].args[0] == "deepseek-via-claude"
+
 
 class TestAskResearch:
     """W14-ASK-RESEARCH 2026-05-28 (Phase 4.2): --research <file>
@@ -1019,11 +1209,16 @@ class TestAskResearch:
                 return_value=_mock_pool_result(text="synthesis"),
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "is X true?",
-                "--research", str(research),
-                "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "is X true?",
+                    "--research",
+                    str(research),
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 0
         # The dispatch prompt should contain BOTH the question AND
         # the research context, in the documented framing
@@ -1034,7 +1229,8 @@ class TestAskResearch:
         assert "is X true" in called_prompt
 
     def test_research_saves_findings_to_output_dir(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         research = tmp_path / "findings.md"
@@ -1050,11 +1246,17 @@ class TestAskResearch:
                 return_value=_mock_pool_result(text="synthesis"),
             ),
         ):
-            result = runner.invoke(cli, [
-                "ask", "what next?",
-                "--research", str(research),
-                "--output", str(out),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "what next?",
+                    "--research",
+                    str(research),
+                    "--output",
+                    str(out),
+                ],
+            )
         assert result.exit_code == 0
         # A research.md copy is persisted alongside the engine response
         assert (out / "research.md").exists()
@@ -1068,19 +1270,19 @@ class TestAskResearch:
         assert "findings.md" in summary["research_findings_source"]
 
     def test_research_with_audit_layers_correctly(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """--research + --audit: producer uses research context;
         auditor sees the synthesized answer (NOT the raw research)."""
         runner = CliRunner()
         research = tmp_path / "research.md"
         research.write_text(
-            "RFC 9999 says X is true.\n", encoding="utf-8",
+            "RFC 9999 says X is true.\n",
+            encoding="utf-8",
         )
         producer_resp = _mock_pool_result(text="X is true per RFC 9999.")
-        auditor_resp = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
+        auditor_resp = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
         with (
             patch(
                 "harness.engines.routing_recommend.recommend",
@@ -1094,12 +1296,18 @@ class TestAskResearch:
                 side_effect=[producer_resp, auditor_resp],
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "is X true?",
-                "--research", str(research),
-                "--audit",
-                "--output", str(tmp_path / "audit-research"),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "is X true?",
+                    "--research",
+                    str(research),
+                    "--audit",
+                    "--output",
+                    str(tmp_path / "audit-research"),
+                ],
+            )
         assert result.exit_code == 0
         # Producer prompt contains research context
         producer_prompt = mock_dispatch.call_args_list[0].args[1]
@@ -1112,11 +1320,16 @@ class TestAskResearch:
 
     def test_research_missing_file_errors(self) -> None:
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "ask", "q",
-            "--research", "/nonexistent/file.md",
-            "--no-save",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "q",
+                "--research",
+                "/nonexistent/file.md",
+                "--no-save",
+            ],
+        )
         # Click's path-exists check fires before our handler — exit 2
         assert result.exit_code == 2
 
@@ -1127,66 +1340,102 @@ class TestAuditQuorum:
 
     def test_aggregate_all_pass(self) -> None:
         from harness.ask import _aggregate_verdicts
-        agg = _aggregate_verdicts([
-            {"verdict": "PASS", "summary": "fine", "corrections": "none",
-             "missed": "none", "overall": ""},
-            {"verdict": "PASS", "summary": "fine", "corrections": "none",
-             "missed": "none", "overall": ""},
-        ])
+
+        agg = _aggregate_verdicts(
+            [
+                {
+                    "verdict": "PASS",
+                    "summary": "fine",
+                    "corrections": "none",
+                    "missed": "none",
+                    "overall": "",
+                },
+                {
+                    "verdict": "PASS",
+                    "summary": "fine",
+                    "corrections": "none",
+                    "missed": "none",
+                    "overall": "",
+                },
+            ]
+        )
         assert agg["verdict"] == "PASS"
         assert "Quorum of 2 auditors" in agg["summary"]
 
     def test_aggregate_all_fail(self) -> None:
         from harness.ask import _aggregate_verdicts
-        agg = _aggregate_verdicts([
-            {"verdict": "FAIL", "summary": "x", "corrections": "",
-             "missed": "", "overall": ""},
-            {"verdict": "FAIL", "summary": "x", "corrections": "",
-             "missed": "", "overall": ""},
-        ])
+
+        agg = _aggregate_verdicts(
+            [
+                {"verdict": "FAIL", "summary": "x", "corrections": "", "missed": "", "overall": ""},
+                {"verdict": "FAIL", "summary": "x", "corrections": "", "missed": "", "overall": ""},
+            ]
+        )
         assert agg["verdict"] == "FAIL"
 
     def test_aggregate_mixed_pass_fail_returns_partial(self) -> None:
         from harness.ask import _aggregate_verdicts
-        agg = _aggregate_verdicts([
-            {"verdict": "PASS", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-            {"verdict": "FAIL", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-        ])
+
+        agg = _aggregate_verdicts(
+            [
+                {"verdict": "PASS", "summary": "", "corrections": "", "missed": "", "overall": ""},
+                {"verdict": "FAIL", "summary": "", "corrections": "", "missed": "", "overall": ""},
+            ]
+        )
         # PASS=2, FAIL=0, avg=1 → PARTIAL
         assert agg["verdict"] == "PARTIAL"
         assert "split" in agg["summary"].lower()
 
     def test_aggregate_pass_partial_leans_pass(self) -> None:
         from harness.ask import _aggregate_verdicts
-        agg = _aggregate_verdicts([
-            {"verdict": "PASS", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-            {"verdict": "PARTIAL", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-        ])
+
+        agg = _aggregate_verdicts(
+            [
+                {"verdict": "PASS", "summary": "", "corrections": "", "missed": "", "overall": ""},
+                {
+                    "verdict": "PARTIAL",
+                    "summary": "",
+                    "corrections": "",
+                    "missed": "",
+                    "overall": "",
+                },
+            ]
+        )
         # PASS=2, PARTIAL=1, avg=1.5 → PASS (boundary)
         assert agg["verdict"] == "PASS"
 
     def test_aggregate_all_unknown(self) -> None:
         from harness.ask import _aggregate_verdicts
-        agg = _aggregate_verdicts([
-            {"verdict": "UNKNOWN", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-            {"verdict": "UNKNOWN", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-        ])
+
+        agg = _aggregate_verdicts(
+            [
+                {
+                    "verdict": "UNKNOWN",
+                    "summary": "",
+                    "corrections": "",
+                    "missed": "",
+                    "overall": "",
+                },
+                {
+                    "verdict": "UNKNOWN",
+                    "summary": "",
+                    "corrections": "",
+                    "missed": "",
+                    "overall": "",
+                },
+            ]
+        )
         assert agg["verdict"] == "UNKNOWN"
 
     def test_aggregate_includes_per_auditor_breakdown(self) -> None:
         from harness.ask import _aggregate_verdicts
-        agg = _aggregate_verdicts([
-            {"verdict": "PASS", "summary": "", "corrections": "",
-             "missed": "", "overall": ""},
-            {"verdict": "FAIL", "summary": "", "corrections": "x",
-             "missed": "", "overall": ""},
-        ])
+
+        agg = _aggregate_verdicts(
+            [
+                {"verdict": "PASS", "summary": "", "corrections": "", "missed": "", "overall": ""},
+                {"verdict": "FAIL", "summary": "", "corrections": "x", "missed": "", "overall": ""},
+            ]
+        )
         assert "auditor_breakdown" in agg
         assert len(agg["auditor_breakdown"]) == 2
         verdicts_seen = {b["verdict"] for b in agg["auditor_breakdown"]}
@@ -1194,6 +1443,7 @@ class TestAuditQuorum:
 
     def test_pick_auditor_engines_returns_up_to_n(self) -> None:
         from harness.ask import _pick_auditor_engines
+
         # 2 alternates available when producer is one of the 3 Pattern B
         # engines: should return 2 entries when asked for N=2.
         specs = _pick_auditor_engines("mimo-via-claude", num_auditors=2)
@@ -1205,6 +1455,7 @@ class TestAuditQuorum:
     def test_pick_auditor_engines_caps_at_available(self) -> None:
         """If we ask for 3 auditors but only 2 alternates exist, cap at 2."""
         from harness.ask import _pick_auditor_engines
+
         specs = _pick_auditor_engines("mimo-via-claude", num_auditors=3)
         # Currently 3 Pattern B engines → producer + 2 alternates → cap=2
         assert len(specs) <= 2
@@ -1212,13 +1463,10 @@ class TestAuditQuorum:
     def test_run_audit_num_auditors_2_dispatches_3_total(self) -> None:
         """1 producer + 2 auditors = 3 dispatches."""
         from harness.ask import run_audit
+
         producer_resp = _mock_pool_result(text="answer")
-        a1 = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
-        a2 = _mock_pool_result(
-            text="VERDICT: PARTIAL\nONE-LINE SUMMARY: kinda\nOVERALL: ok\n"
-        )
+        a1 = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
+        a2 = _mock_pool_result(text="VERDICT: PARTIAL\nONE-LINE SUMMARY: kinda\nOVERALL: ok\n")
         with (
             patch(
                 "harness.engines.routing_recommend.recommend",
@@ -1233,7 +1481,8 @@ class TestAuditQuorum:
             ) as mock_dispatch,
         ):
             outcome = run_audit(
-                "q", producer_engine="mimo-via-claude",
+                "q",
+                producer_engine="mimo-via-claude",
                 num_auditors=2,
             )
         # 3 total dispatches
@@ -1245,20 +1494,18 @@ class TestAuditQuorum:
         assert outcome.verdict["verdict"] == "PASS"
         # auditor_engines list populated
         assert set(outcome.auditor_engines) == {
-            "deepseek-via-claude", "kimi-via-claude",
+            "deepseek-via-claude",
+            "kimi-via-claude",
         }
 
     def test_cli_auditors_2_writes_two_audit_files(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         producer_resp = _mock_pool_result(text="answer")
-        a1 = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
-        a2 = _mock_pool_result(
-            text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n"
-        )
+        a1 = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
+        a2 = _mock_pool_result(text="VERDICT: PASS\nONE-LINE SUMMARY: ok\nOVERALL: ok\n")
         with (
             patch(
                 "harness.engines.routing_recommend.recommend",
@@ -1276,11 +1523,18 @@ class TestAuditQuorum:
                 side_effect=[producer_resp, a1, a2],
             ),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test question",
-                "--audit", "--auditors", "2",
-                "--output", str(tmp_path / "quorum-out"),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test question",
+                    "--audit",
+                    "--auditors",
+                    "2",
+                    "--output",
+                    str(tmp_path / "quorum-out"),
+                ],
+            )
         assert result.exit_code == 0
         out = tmp_path / "quorum-out"
         # Three response files: producer + 2 auditors with -1 / -2 suffix
@@ -1297,17 +1551,22 @@ class TestAuditQuorum:
 
     def test_cli_audit_engine_with_auditors_2_conflicts(self) -> None:
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "ask", "test",
-            "--audit-engine", "kimi-via-claude",
-            "--auditors", "2",
-            "--no-save",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "test",
+                "--audit-engine",
+                "kimi-via-claude",
+                "--auditors",
+                "2",
+                "--no-save",
+            ],
+        )
         assert result.exit_code == 2
         combined = (result.output + (result.stderr or "")).lower()
         assert "audit-engine" in combined
         assert "auditors" in combined or "conflict" in combined
-
 
     def test_audit_producer_fail_returns_failed_exit(self) -> None:
         """When the producer fails, --audit exits 1 (failed result) and
@@ -1323,9 +1582,15 @@ class TestAuditQuorum:
                 return_value=_mock_pool_result(success=False),
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--audit", "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--audit",
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 1
         # Only the producer was dispatched
         assert mock_dispatch.call_count == 1
@@ -1337,8 +1602,11 @@ class TestAuditQuorum:
 
 
 def _build_ask_dir(
-    tmp_path: Path, question: str, mode: str = "routed",
-    engines: list[str] | None = None, dirname: str | None = None,
+    tmp_path: Path,
+    question: str,
+    mode: str = "routed",
+    engines: list[str] | None = None,
+    dirname: str | None = None,
 ) -> Path:
     """Build a fake ask-* dir containing question.md + summary.json,
     suitable as input to `harness ask --rerun <dir>`."""
@@ -1350,16 +1618,23 @@ def _build_ask_dir(
         encoding="utf-8",
     )
     eng = engines or ["mimo-via-claude"]
-    (d / "summary.json").write_text(json.dumps({
-        "question": question,
-        "mode": mode,
-        "results": [
-            {"engine": e, "role": "" if mode != "audit" else
-             ("producer" if i == 0 else "audit")}
-            for i, e in enumerate(eng)
-        ],
-        "total_cost_usd": 0.01,
-    }), encoding="utf-8")
+    (d / "summary.json").write_text(
+        json.dumps(
+            {
+                "question": question,
+                "mode": mode,
+                "results": [
+                    {
+                        "engine": e,
+                        "role": "" if mode != "audit" else ("producer" if i == 0 else "audit"),
+                    }
+                    for i, e in enumerate(eng)
+                ],
+                "total_cost_usd": 0.01,
+            }
+        ),
+        encoding="utf-8",
+    )
     return d
 
 
@@ -1368,20 +1643,29 @@ class TestAskRerun:
     upgrades the mode via `--escalate {audit|panel}`."""
 
     def test_rerun_inherits_question_and_engine(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         parent = _build_ask_dir(
-            tmp_path, "Why is X true?",
-            mode="routed", engines=["mimo-via-claude"],
+            tmp_path,
+            "Why is X true?",
+            mode="routed",
+            engines=["mimo-via-claude"],
         )
         with patch(
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="answer"),
         ) as mock_dispatch:
-            result = runner.invoke(cli, [
-                "ask", "--rerun", str(parent), "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "--rerun",
+                    str(parent),
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 0
         # Recommender NOT called — parent's engine was inherited
         # (mock_dispatch was called with the inherited engine)
@@ -1391,12 +1675,15 @@ class TestAskRerun:
         assert "Why is X true?" in mock_dispatch.call_args_list[0].args[1]
 
     def test_rerun_with_escalate_audit_promotes_routed_to_audit(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         parent = _build_ask_dir(
-            tmp_path, "Is Y the case?",
-            mode="routed", engines=["mimo-via-claude"],
+            tmp_path,
+            "Is Y the case?",
+            mode="routed",
+            engines=["mimo-via-claude"],
         )
         producer_resp = _mock_pool_result(text="answer")
         auditor_resp = _mock_pool_result(
@@ -1412,11 +1699,18 @@ class TestAskRerun:
                 side_effect=[producer_resp, auditor_resp],
             ) as mock_dispatch,
         ):
-            result = runner.invoke(cli, [
-                "ask", "--rerun", str(parent),
-                "--escalate", "audit",
-                "--output", str(tmp_path / "rerun-out"),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "--rerun",
+                    str(parent),
+                    "--escalate",
+                    "audit",
+                    "--output",
+                    str(tmp_path / "rerun-out"),
+                ],
+            )
         assert result.exit_code == 0
         # Two dispatches (producer + auditor); recommender consulted
         # for the auditor pick with exclude={producer}
@@ -1437,28 +1731,36 @@ class TestAskRerun:
         assert summary["escalated_to"] == "audit"
 
     def test_rerun_with_escalate_panel_promotes_to_3_engines(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         parent = _build_ask_dir(
-            tmp_path, "Should we ship X?",
-            mode="routed", engines=["mimo-via-claude"],
+            tmp_path,
+            "Should we ship X?",
+            mode="routed",
+            engines=["mimo-via-claude"],
         )
         with patch(
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="resp"),
         ) as mock_dispatch:
-            result = runner.invoke(cli, [
-                "ask", "--rerun", str(parent),
-                "--escalate", "panel",
-                "--output", str(tmp_path / "panel-rerun"),
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "--rerun",
+                    str(parent),
+                    "--escalate",
+                    "panel",
+                    "--output",
+                    str(tmp_path / "panel-rerun"),
+                ],
+            )
         assert result.exit_code == 0
         # 3 dispatches across the default panel engines
         assert mock_dispatch.call_count == 3
-        engines_called = {
-            c.args[0] for c in mock_dispatch.call_args_list
-        }
+        engines_called = {c.args[0] for c in mock_dispatch.call_args_list}
         assert engines_called == set(DEFAULT_ENGINES)
         # Parent traceability + escalation metadata in summary.json
         out = tmp_path / "panel-rerun"
@@ -1470,12 +1772,14 @@ class TestAskRerun:
         assert summary["escalated_to"] == "panel"
 
     def test_rerun_no_escalate_inherits_panel_mode(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Parent was --panel; rerun without --escalate stays panel."""
         runner = CliRunner()
         parent = _build_ask_dir(
-            tmp_path, "Original panel question",
+            tmp_path,
+            "Original panel question",
             mode="panel",
             engines=list(DEFAULT_ENGINES),
         )
@@ -1483,39 +1787,61 @@ class TestAskRerun:
             "harness.engines.pool_dispatch.dispatch_with_pool",
             return_value=_mock_pool_result(text="resp"),
         ) as mock_dispatch:
-            result = runner.invoke(cli, [
-                "ask", "--rerun", str(parent), "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "--rerun",
+                    str(parent),
+                    "--no-save",
+                ],
+            )
         assert result.exit_code == 0
         assert mock_dispatch.call_count == 3
 
     def test_rerun_conflicts_with_positional_question(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         parent = _build_ask_dir(tmp_path, "Original q")
-        result = runner.invoke(cli, [
-            "ask", "New q", "--rerun", str(parent), "--no-save",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "New q",
+                "--rerun",
+                str(parent),
+                "--no-save",
+            ],
+        )
         assert result.exit_code == 2
         combined = (result.output + (result.stderr or "")).lower()
         assert "incompat" in combined or "conflict" in combined
 
     def test_rerun_missing_question_md_errors(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         broken = tmp_path / "ask-broken"
         broken.mkdir()  # no question.md
-        result = runner.invoke(cli, [
-            "ask", "--rerun", str(broken), "--no-save",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "ask",
+                "--rerun",
+                str(broken),
+                "--no-save",
+            ],
+        )
         assert result.exit_code == 2
         combined = result.output + (result.stderr or "")
         assert "question.md" in combined
 
     def test_escalate_without_rerun_warns_and_ignores(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         runner = CliRunner()
         with (
@@ -1528,12 +1854,17 @@ class TestAskRerun:
                 return_value=_mock_pool_result(text="answer"),
             ),
         ):
-            result = runner.invoke(cli, [
-                "ask", "test", "--escalate", "audit", "--no-save",
-            ])
+            result = runner.invoke(
+                cli,
+                [
+                    "ask",
+                    "test",
+                    "--escalate",
+                    "audit",
+                    "--no-save",
+                ],
+            )
         # Warning surfaces but command still succeeds (single routed dispatch)
         assert result.exit_code == 0
         combined = (result.output + (result.stderr or "")).lower()
-        assert "escalate" in combined and (
-            "ignored" in combined or "no effect" in combined
-        )
+        assert "escalate" in combined and ("ignored" in combined or "no effect" in combined)
