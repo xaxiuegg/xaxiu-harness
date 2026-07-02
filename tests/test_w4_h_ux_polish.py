@@ -60,45 +60,12 @@ def test_engines_no_arg_defaults_to_list() -> None:
 # Fix 2: harness lint-spec --spec flag (alongside positional)
 # ---------------------------------------------------------------------------
 
-def test_lint_spec_positional_still_works(tmp_path: Path) -> None:
-    """Original positional invocation must remain backward-compatible."""
-    spec = tmp_path / "ok.md"
-    spec.write_text("# Spec\n\n## Acceptance criteria\n\n- works\n", encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["lint-spec", str(spec)])
-    # exit 0 = plan-ready; exit 1 = lint warnings (also acceptable for a real spec)
-    assert result.exit_code in (0, 1)
-    assert "plan_ready" in result.output
 
 
-def test_lint_spec_flag_works(tmp_path: Path) -> None:
-    """`--spec X.md` should accept the same input as positional."""
-    spec = tmp_path / "ok.md"
-    spec.write_text("# Spec\n\n## Acceptance criteria\n\n- works\n", encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["lint-spec", "--spec", str(spec)])
-    assert result.exit_code in (0, 1)
-    assert "plan_ready" in result.output
 
 
-def test_lint_spec_no_path_errors() -> None:
-    """Calling lint-spec with neither positional nor --spec should fail cleanly."""
-    runner = CliRunner()
-    result = runner.invoke(cli, ["lint-spec"])
-    assert result.exit_code == 2
-    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
-    assert "must supply" in combined.lower()
 
 
-def test_lint_spec_both_positional_and_flag_errors(tmp_path: Path) -> None:
-    """Supplying both positional AND --spec should be rejected."""
-    spec = tmp_path / "ok.md"
-    spec.write_text("# Spec\n\n## Acceptance\n", encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["lint-spec", str(spec), "--spec", str(spec)])
-    assert result.exit_code == 2
-    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
-    assert "cannot supply both" in combined.lower()
 
 
 # ---------------------------------------------------------------------------

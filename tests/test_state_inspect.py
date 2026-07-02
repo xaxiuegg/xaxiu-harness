@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 
 from harness.errors import ConfigCorruption
 from harness.state.inspect import (
@@ -124,31 +123,3 @@ class TestRender:
             render_state_json(p)
 
 
-class TestCLI:
-    def test_state_help(self) -> None:
-        from harness.cli import cli
-        result = CliRunner().invoke(cli, ["state", "--help"])
-        assert result.exit_code == 0
-        assert "inspect" in result.output
-
-    def test_state_inspect_pretty(self, tmp_path: Path) -> None:
-        p = _state(tmp_path)
-        from harness.cli import cli
-        result = CliRunner().invoke(cli, ["state", "inspect", "--path", str(p)])
-        assert result.exit_code == 0, result.output
-        assert "Loop:" in result.output
-
-    def test_state_inspect_json(self, tmp_path: Path) -> None:
-        p = _state(tmp_path)
-        from harness.cli import cli
-        result = CliRunner().invoke(cli, ["state", "inspect", "--path", str(p), "--format", "json"])
-        assert result.exit_code == 0
-        json.loads(result.output)  # must parse
-
-    def test_state_inspect_missing(self, tmp_path: Path) -> None:
-        from harness.cli import cli
-        result = CliRunner().invoke(
-            cli, ["state", "inspect", "--path", str(tmp_path / "missing.json")]
-        )
-        assert result.exit_code == 1
-        assert "not found" in result.output.lower()

@@ -16,13 +16,7 @@ Tests cover:
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
-from click.testing import CliRunner
 
 from harness.preflight import (
     PreflightCheck,
@@ -93,89 +87,9 @@ def test_overall_exit_code_empty_is_zero():
 # -- CLI integration: verdict line printed --------------------------------
 
 
-def test_cli_preflight_prints_verdict_line_on_ok(monkeypatch):
-    """When all checks ok, CLI prints the PASS verdict + explanation."""
-    from harness import cli
-    from harness import preflight as _pf
-
-    # Stub run_all to return all-ok
-    def _stub_run_all():
-        return [PreflightCheck(name="git_clean", severity="ok",
-                               message="clean", duration_ms=10)]
-
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all)
-    monkeypatch.setattr(cli, "run_all", _stub_run_all, raising=False)
-
-    runner = CliRunner()
-    result = runner.invoke(cli.cli, ["preflight"])
-    # exit 0 (still ok semantics)
-    assert result.exit_code == 0
-    assert "Verdict: PASS" in result.output
-    assert "ready" in result.output.lower()
 
 
-def test_cli_preflight_prints_verdict_line_on_warn(monkeypatch):
-    """When at least one warn check, CLI prints PASS-WITH-WARNINGS verdict.
-
-    Critical: the operator sees that exit 1 is NOT a fail."""
-    from harness import cli
-    from harness import preflight as _pf
-
-    def _stub_run_all():
-        return [
-            PreflightCheck(name="git_clean", severity="ok",
-                           message="clean", duration_ms=10),
-            PreflightCheck(name="observer", severity="warn",
-                           message="no tasks registered",
-                           duration_ms=10),
-        ]
-
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all)
-    monkeypatch.setattr(cli, "run_all", _stub_run_all, raising=False)
-
-    runner = CliRunner()
-    result = runner.invoke(cli.cli, ["preflight"])
-    assert result.exit_code == 1
-    assert "Verdict: PASS-WITH-WARNINGS" in result.output
-    # The operator's mental-model reassurance
-    assert "proceed" in result.output.lower() or "actionable" in result.output.lower()
 
 
-def test_cli_preflight_prints_verdict_line_on_fail(monkeypatch):
-    from harness import cli
-    from harness import preflight as _pf
-
-    def _stub_run_all():
-        return [
-            PreflightCheck(name="dpapi", severity="fail",
-                           message="unreadable", duration_ms=10),
-        ]
-
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all)
-    monkeypatch.setattr(cli, "run_all", _stub_run_all, raising=False)
-
-    runner = CliRunner()
-    result = runner.invoke(cli.cli, ["preflight"])
-    assert result.exit_code == 4
-    assert "Verdict: FAIL" in result.output
-    assert "blocker" in result.output.lower() or "refuses" in result.output.lower()
 
 
-def test_cli_preflight_json_format_does_not_print_verdict_line(monkeypatch):
-    """JSON format is for CI consumption — keep it clean, no extra line.
-    The verdict is implicit in the existing exit code."""
-    from harness import cli
-    from harness import preflight as _pf
-
-    def _stub_run_all():
-        return [PreflightCheck(name="x", severity="ok",
-                               message="m", duration_ms=10)]
-
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all)
-    monkeypatch.setattr(cli, "run_all", _stub_run_all, raising=False)
-
-    runner = CliRunner()
-    result = runner.invoke(cli.cli, ["preflight", "--format", "json"])
-    assert result.exit_code == 0
-    # JSON output should not contain the "Verdict:" prose
-    assert "Verdict:" not in result.output

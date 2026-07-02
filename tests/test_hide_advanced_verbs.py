@@ -1,20 +1,13 @@
 """W11-HIDE-ADVANCED-VERBS: tests for the advanced/hidden verb split.
 
-12 engineering verbs are hidden from the default `harness --help`:
-spec-register, spec-verify, spec-init, lint-spec, panic-dump,
-swarm-verify, engines-reliability, engines-cooldowns, burst, lock,
-replay, proxy (group).
-
-They remain CALLABLE (hidden=True only affects help discovery).
-`harness advanced list` enumerates them for operators who need to
-find them.
-
-Audit follow-through 2026-05-27 (W14-COORD-UNHIDE): ``coord`` was
-previously in this list because v2 was treated as experimental
-scaffolding.  Now that ``coord`` is documented as a first-class
-operating mode in docs/OPERATOR_GUIDE.md § 3.3 and
-docs/AGENT_REFERENCE.md § 10, it must appear in ``harness --help``
-to match the docs.  Test moved to ``test_visible_daily_use_verbs``.
+PATH-A item-4 shrink 2026-07-01: the engineering-tier verbs that used to
+populate this file (spec-init, lint-spec, panic-dump, swarm-verify, burst,
+lock, replay, ...) were DELETED outright, not just hidden.  What remains
+statically hidden (decorator ``hidden=True``) is only ``engines-reliability``.
+The runtime hiding of non-core verbs happens in ``main()`` via
+``_hide_noncore_verbs()`` (not exercised by CliRunner, which invokes ``cli``
+directly), so these tests check the static decorator contract + the
+``advanced list`` browser.
 """
 
 from __future__ import annotations
@@ -26,26 +19,8 @@ from harness import cli as _cli
 
 
 HIDDEN_VERBS = [
-    # PATH-A-TRIM 2026-05-29: spec-register / spec-verify / engines-cooldowns
-    # removed with the coord/loops machinery they depended on.
-    "spec-init",
-    "lint-spec",
-    "panic-dump",
-    "swarm-verify",
     "engines-reliability",
-    "burst",
-    "lock",
-    "replay",
-    # NOTE: ``proxy`` was previously hidden (W11-HIDE-ADVANCED-VERBS) but
-    # was unhidden 2026-05-28 (W14-PROXY-UNHIDE) after a fresh-session
-    # sub-agent test surfaced that a hidden top-level verb causes agents
-    # to conclude "no proxy verb exists" when they verify via --help,
-    # even when the agent-instructions snippet documents the verb.  The
-    # same operational bug as W14-COORD-UNHIDE.
 ]
-
-
-# -- Hidden flag set correctly --------------------------------------------
 
 
 @pytest.mark.parametrize("verb_name", HIDDEN_VERBS)
@@ -59,31 +34,25 @@ def test_engineering_verb_marked_hidden(verb_name):
 
 
 def test_daily_use_verbs_NOT_hidden():
-    """Operator-facing daily verbs must stay visible.
-
-    Audit follow-through 2026-05-27: ``coord`` added to this list when
-    it was unhidden (was in HIDDEN_VERBS pre-W14-COORD-UNHIDE).
-    """
+    """Operator-facing daily verbs must stay visible (static decorator check)."""
     visible_required = [
-        "daily",
-        "today",
-        "morning-brief",
-        "preflight",
-        "dispatch",
+        "ask",
+        "ask-history",
+        "ask-show",
+        "proxy",
+        "keys",
         "env",
         "env-wizard",
-        "profile",
-        "status",
         "doctor",
+        "introspect",
+        "engines",
         "engines-heal",
-        "session",
         "budget",
-        "adapter",
-        "queue",
-        "memory",
-        # PATH-A-TRIM 2026-05-29: observer / loop / dashboard-serve / coord
-        # removed with their machinery; dropped from the visible-required list.
-        "proxy",  # W14-PROXY-UNHIDE 2026-05-28 (sub-agent test feedback)
+        "audit",
+        "capabilities",
+        "plan",
+        "today",
+        "session",
     ]
     for verb_name in visible_required:
         cmd = _cli.cli.commands.get(verb_name)
@@ -93,23 +62,13 @@ def test_daily_use_verbs_NOT_hidden():
         )
 
 
-# -- Hidden verbs still callable -----------------------------------------
-
-
 @pytest.mark.parametrize("verb_name", HIDDEN_VERBS)
 def test_hidden_verb_still_callable_via_help(verb_name):
-    """Hidden=True hides from listing but doesn't break invocation.
-
-    Calling `harness <verb> --help` must still produce help output for
-    the verb itself (proves the command is registered + reachable)."""
+    """Hidden=True hides from listing but doesn't break invocation."""
     runner = CliRunner()
     result = runner.invoke(_cli.cli, [verb_name, "--help"])
     assert result.exit_code == 0, f"verb {verb_name} --help failed: {result.output[:200]}"
-    # Help output should mention the verb name OR the docstring
     assert verb_name in result.output or "Usage:" in result.output
-
-
-# -- `harness advanced` group --------------------------------------------
 
 
 def test_advanced_group_registered():
@@ -121,17 +80,13 @@ def test_advanced_list_subcommand_works():
     runner = CliRunner()
     result = runner.invoke(_cli.cli, ["advanced", "list"])
     assert result.exit_code == 0
-    # Output should include at least 5 of the hidden verbs by name
     found = sum(1 for v in HIDDEN_VERBS if v in result.output)
-    assert found >= 5, (
-        f"advanced list output missing many hidden verbs; found {found}/13 "
-        f"in: {result.output[:500]}"
+    assert found >= 1, (
+        f"advanced list output missing hidden verbs; found {found} in: {result.output[:500]}"
     )
 
 
 def test_advanced_list_explains_invocation():
-    """The list output must tell the operator how to actually call the
-    hidden verbs (otherwise it's just a confusing catalog)."""
     runner = CliRunner()
     result = runner.invoke(_cli.cli, ["advanced", "list"])
     assert "Invoke" in result.output or "harness <verb>" in result.output
@@ -144,32 +99,11 @@ def test_advanced_help_shows_list_subcommand():
     assert "list" in result.output
 
 
-# -- Default --help omits hidden verbs -----------------------------------
-
-
 def test_default_help_omits_hidden_verbs():
-    """The operator's daily `harness --help` must NOT show the 13 hidden
-    verbs in the Commands listing (Click's hidden=True contract)."""
+    """`harness --help` must NOT show statically-hidden verbs."""
     runner = CliRunner()
     result = runner.invoke(_cli.cli, ["--help"])
     assert result.exit_code == 0
-    # Each hidden verb should NOT appear as a line item in the help.
-    # Click's --help puts each verb on its own line indented; check the
-    # verb does NOT start a line (with optional leading whitespace).
-    import re
-
     for verb_name in HIDDEN_VERBS:
-        # Short-name verbs could collide with prose mentioning them
-        # (low risk but pedantic).  Test those strict; long-name verbs
-        # by indented-line presence.
-        if verb_name in ("burst", "lock", "replay"):
-            # These short names could conflict with prose; check explicitly
-            pattern = rf"^\s{{2,4}}{re.escape(verb_name)}\s"
-            assert not re.search(pattern, result.output, re.MULTILINE), (
-                f"hidden verb {verb_name} appears in --help"
-            )
-        else:
-            # Long-name verbs: just check they're not in the verb listing
-            # by looking for the indented prefix
-            indented = f"\n  {verb_name}"
-            assert indented not in result.output, f"hidden verb {verb_name} appears in --help"
+        indented = f"\n  {verb_name}"
+        assert indented not in result.output, f"hidden verb {verb_name} appears in --help"

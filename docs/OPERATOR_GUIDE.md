@@ -11,7 +11,7 @@ xaxiu-harness is your command surface and observability layer for delegating dev
 
 2. **Agentic dev manager** — single Claude session orchestrating work in real time, with full dev authority, captured directives (parallelism, kill conditions, L5 escalation threshold), forensic audit trail, per-engine budget caps.
 
-3. **Multi-agent coordinator** (`harness coord`) — Planner/Worker pattern with isolated git worktrees, stateful 4-key API proxy with circuit breaker + auto-quarantine, replan-from-failure, integration phase. The mode that justifies the proxy + worktree + multi-key infra; for autonomous overnight runs.
+3. **Multi-agent coordinator** (harness coord — RETIRED 2026-05-30, Path A; use xaxiu-swarm or native Claude orchestration) — Planner/Worker pattern with isolated git worktrees, stateful 4-key API proxy with circuit breaker + auto-quarantine, replan-from-failure, integration phase. The mode that justifies the proxy + worktree + multi-key infra; for autonomous overnight runs.
 
 Underneath all three: cross-platform key resolution, JSONL audit ledger with redaction, replay/decision archaeology, heartbeat + status tracker + observer flags, session-handoff monitor, FastAPI dashboard with WebSocket telemetry.
 
@@ -171,7 +171,7 @@ These wrappers give you the full Claude Code experience (tools, multi-turn, in-p
 
 ### 1.7 Optional: clone xaxiu-swarm for agentic multi-file dispatch
 
-Only needed if you want **swarm-style agentic dispatch** (multi-file refactors, batch parallel work). NOT required for `harness ask`, `harness coord`, or any of the operating modes covered in this guide.
+Only needed if you want **swarm-style agentic dispatch** (multi-file refactors, batch parallel work). NOT required for `harness ask` or any of the operating modes covered in this guide.
 
 ```bash
 cd ..  # back out of xaxiu-harness
@@ -237,7 +237,7 @@ overall: OK
 
 **`--probe` flag** (P2 audit fix 2026-05-27): live network round-trip per configured engine. Adds a few seconds and a few cents. Catches dead/expired/typoed keys that simple presence checks miss.
 
-### 2.2 `harness setup` — one-shot guided onboarding
+### 2.2 harness setup — one-shot guided onboarding (verb RETIRED 2026-07-01; use `harness env-wizard` + `harness keys serve`)
 
 Use this on a brand-new machine, or after re-cloning into a fresh checkout.
 
@@ -559,11 +559,11 @@ This is the mode this very document was edited in.
 
 ### 3.3 Multi-agent coordinator (high autonomy)
 
-**Verb**: `harness coord <subcommand>`
+**Verb**: harness coord <subcommand> — RETIRED 2026-05-30 (Path A); this section is historical
 
 **When**: long-running autonomous runs against a spec — multiple workers in parallel git worktrees, each one-shot, all coordinated. The mode that justifies the proxy + worktree + 4-key pool infra. Overnight batch work; spec-driven feature waves.
 
-**How it works** (13 subcommands; see `harness coord --help`):
+**How it worked** (13 subcommands, historical):
 
 ```bash
 harness coord plan      --spec spec/wave-X.md          # Planner: spec → WavePlan JSON
@@ -793,7 +793,7 @@ harness morning-brief --since-hours 12 # longer overnight handoff
 harness observer flags                 # any escalations needing attention
 ```
 
-If `harness observer flags` shows HIGH severity, that's the harness asking for help. Read the message; include `harness panic-dump` output when escalating (secret-scrubbed; safe to share):
+The observer + panic-dump verbs are RETIRED (2026-05-30 / 2026-07-01, Path A). For escalation context, share `harness doctor` + `harness introspect` output (secret-scrubbed; safe to share):
 
 ```bash
 harness panic-dump --target-dir .
@@ -821,7 +821,7 @@ For a richer dead-engine view + key-presence probe: `harness engines heal`.
 Everything important EXCEPT runtime state is in git. You lose:
 
 - Dispatch cache (`.harness/dispatched/`) — affects `harness.retrieve()` SDK for past dispatches
-- Cumulative cost ledger — `harness cost-today` shows $0 again
+- Cumulative cost ledger — `harness audit summary` shows $0 again (cost-today verb RETIRED 2026-07-01)
 - Observer cycle history
 
 Recovery:
@@ -855,7 +855,7 @@ If timestamp is >1h old, the loop is dead. Restart:
 harness start --orchestrator mimo --mode autonomous
 ```
 
-The `--mode autonomous` flag will run `harness preflight` first; if any check is `[X]`, start refuses — fix that first.
+The `--mode autonomous` flag ran harness preflight (verb RETIRED 2026-07-01; `harness doctor` covers the checks) first; if any check is `[X]`, start refuses — fix that first.
 
 If observer restart fails 3× consecutively, an L5 banner fires with manual recovery steps. See § 6.2.
 
@@ -903,14 +903,14 @@ cannot self-recover
 ACTION: Inspect scheduler manually: on Windows run
 `Get-ScheduledTask -TaskName XaxiuHarnessObserver*`; on Linux/Mac
 run `crontab -l | grep HARNESS_OBSERVER`. Then run
-`harness observer install-scheduler` with elevated privileges if needed.
+the retired observer scheduler with elevated privileges if needed (observer RETIRED 2026-05-30, Path A).
 ============================================================
 ```
 
 Do the ACTION line. Common L5 sources:
 
-- **`L5.observer.CRITICAL_FLAG`** — observer raised a CRITICAL flag. See `harness observer flags`.
-- **`L5.observer.OBSERVER_RESTART_LOOP`** — watchdog can't self-recover. Run `harness observer install-scheduler` with elevated privileges.
+- **`L5.observer.CRITICAL_FLAG`** — observer raised a CRITICAL flag (observer RETIRED 2026-05-30, Path A; historical).
+- **`L5.observer.OBSERVER_RESTART_LOOP`** — watchdog can't self-recover (observer RETIRED 2026-05-30, Path A; historical).
 - **`L5.secrets.DPAPI_UNREADABLE`** — DPAPI broken for your Windows user (rare; usually profile corruption or domain-account migration). Stop and escalate.
 - **`L5.budget.CAP_EXCEEDED`** — cost cap exceeded. Either raise `COST_MAX_PER_SESSION` env var or stop dispatching.
 
@@ -981,7 +981,7 @@ xaxiu-harness/
 | **Dispatch** | One call to an engine |
 | **Pattern B** | Routing via Claude Code subprocess (`*-via-claude` engines); uses your Claude Code subscription, low marginal cost |
 | **Worker** | A subprocess running one `coord` task in an isolated git worktree |
-| **Run** | A coordinated set of workers handling one spec via `harness coord run` |
+| **Run** | A coordinated set of workers handling one spec via harness coord run (RETIRED 2026-05-30, Path A) |
 | **Wave** | A planned batch of features (W6, W7, W8...) — historical convention |
 | **Preflight** | Pre-flight readiness check; gates autonomous start |
 | **Audit** | Cross-engine review of a shipped feature |
@@ -1024,4 +1024,4 @@ At $50/mo MiMo Token Plan Pro: ~6,200 panels OR ~50,000 routed-default calls per
 
 ---
 
-*Updated 2026-05-27 (W14 docs consolidation 7→3). Update this file when `harness setup`, `harness keys serve`, `harness ask`, or `harness coord` change significantly.*
+*Updated 2026-05-27 (W14 docs consolidation 7→3). Update this file when `harness keys serve` or `harness ask` change significantly.*

@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-from click.testing import CliRunner
 
 from harness.replay import (
     ReplayEvent,
@@ -187,38 +183,3 @@ class TestFormatForHuman:
         assert "[300000ms]" in s
 
 
-class TestReplayCLI:
-    def test_replay_help(self) -> None:
-        from harness.cli import cli
-        result = CliRunner().invoke(cli, ["replay", "--help"])
-        assert result.exit_code == 0
-        assert "TASK_ID" in result.output
-
-    def test_replay_unknown_id_exits_clean(self) -> None:
-        from harness.cli import cli
-        with patch("harness.replay.state_db.get_connection",
-                   return_value=_mock_conn(dispatch_row=None)), \
-             patch("harness.replay._read_jsonl_entries", return_value=[]):
-            result = CliRunner().invoke(cli, ["replay", "ghost-id"])
-        assert result.exit_code == 0
-        assert "ghost-id" in result.output
-        assert "no events" in result.output.lower()
-
-    def test_replay_json_format(self) -> None:
-        from harness.cli import cli
-        with patch("harness.replay.state_db.get_connection",
-                   return_value=_mock_conn(
-                       dispatch_row={
-                           "id": "z-1", "project": "p", "packet_path": "x",
-                           "backend": "kimi", "model": None, "status": "success",
-                           "outcome": "success", "latency_ms": 1000,
-                           "fallback_to": None, "created_at": "2026-05-21T01:00:00Z",
-                       },
-                       fallback_rows=(),
-                   )), \
-             patch("harness.replay._read_jsonl_entries", return_value=[]):
-            result = CliRunner().invoke(cli, ["replay", "z-1", "--format", "json"])
-        assert result.exit_code == 0
-        payload = json.loads(result.output)
-        assert payload["task_id"] == "z-1"
-        assert "events" in payload

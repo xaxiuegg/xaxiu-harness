@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import io
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -136,15 +135,3 @@ def test_cli_preflight_skip_engines_does_not_crash(monkeypatch):
     )
 
 
-def test_cli_agent_init_does_not_crash(monkeypatch, tmp_path):
-    from click.testing import CliRunner
-    runner = CliRunner()
-    target = tmp_path / "fresh"
-    result = runner.invoke(cli.cli, [
-        "agent", "init", "--target", str(target),
-        "--project-type", "python", "--adapter-name", "Test",
-    ])
-    assert result.exit_code == 0
-    assert result.exception is None or not isinstance(
-        result.exception, UnicodeEncodeError,
-    )

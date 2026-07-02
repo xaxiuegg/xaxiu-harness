@@ -320,37 +320,7 @@ def test_prune_no_op_when_under_limit(tmp_path):
 # -- CLI -------------------------------------------------------------------
 
 
-def test_cli_backup_group_registered():
-    from harness.cli import cli
-    assert "backup" in cli.commands
-    backup_grp = cli.commands["backup"]
-    sub = set(backup_grp.commands.keys())
-    assert {"create", "list", "prune", "restore"} <= sub
 
 
-def test_cli_backup_create_works(tmp_path, monkeypatch):
-    """CLI smoke: `harness backup create` runs without crashing."""
-    from click.testing import CliRunner
-    from harness.cli import cli
-    from harness import backup as bk
-    # Patch BOTH the module-level import in harness.backup AND _constants
-    # so the CLI command's downstream calls go to tmp_path.
-    monkeypatch.setattr(bk, "_REPO_ROOT", tmp_path)
-    (tmp_path / ".harness").mkdir()
-    (tmp_path / ".harness" / "config.json").write_text("{}", encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["backup", "create"])
-    assert result.exit_code == 0, result.output
-    assert "archive:" in result.output
-    assert ".tar.gz" in result.output
 
 
-def test_cli_backup_list_empty(tmp_path, monkeypatch):
-    from click.testing import CliRunner
-    from harness.cli import cli
-    from harness import backup as bk
-    monkeypatch.setattr(bk, "_REPO_ROOT", tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["backup", "list"])
-    assert result.exit_code == 0
-    assert "no backups" in result.output.lower()

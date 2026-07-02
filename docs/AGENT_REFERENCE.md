@@ -341,7 +341,7 @@ Three formats available: `claude-md` (full section for CLAUDE.md), `prompt` (one
 
 ---
 
-## 10. Multi-agent coordination (`harness coord`)
+## 10. Multi-agent coordination (harness coord — RETIRED 2026-05-30, Path A; historical)
 
 When your agent has a spec broken into 3-12 independent file-disjoint tasks and wants to fan out to multiple engines, use the v2 coord subsystem.
 
@@ -351,8 +351,8 @@ When your agent has a spec broken into 3-12 independent file-disjoint tasks and 
 |---|---|
 | One file, one engine, one prompt | `harness.dispatch()` (§ 4) |
 | High-stakes decision, want 3 perspectives | `harness ask` (§ 8) |
-| Spec with 3-12 independent tasks, want autonomous execution across multiple engines | `harness coord` (this section) |
-| Long-running overnight batch work | `harness coord run --resume` |
+| Spec with 3-12 independent tasks, want autonomous execution across multiple engines | xaxiu-swarm / native Claude orchestration (coord RETIRED 2026-05-30) |
+| Long-running overnight batch work | xaxiu-swarm / native Claude orchestration (coord RETIRED 2026-05-30) |
 
 Coord is overhead — spec writing + planner round-trip + worktree setup. Worth it for autonomous fanout; wasted for single-shot dispatches.
 
@@ -477,7 +477,7 @@ cannot self-recover
 ACTION: Inspect scheduler manually: on Windows run
 `Get-ScheduledTask -TaskName XaxiuHarnessObserver*`; on Linux/Mac
 run `crontab -l | grep HARNESS_OBSERVER`. Then run
-`harness observer install-scheduler` with elevated privileges if needed.
+the retired observer scheduler with elevated privileges if needed (observer RETIRED 2026-05-30, Path A).
 
 Evidence:
   - latest register message: PowerShell exit code 1
@@ -498,7 +498,7 @@ Visually distinct: 60-char border + `L5 ESCALATION` header + `ACTION:` callout +
 - **DO NOT** save `result.text` to long-term memory if `result.text` is `None` — call `.full()` first.
 - **DO NOT** dispatch to `--backend claude` (no cross-engine value + ANTHROPIC_API_KEY pollution; use Claude in-session instead).
 - **DO NOT** bypass the budget cap silently — `COST_MAX_PER_SESSION` env override exists but escalates to L5 when exceeded.
-- **DO NOT** assume `harness coord` is a heavyweight one-off — it's idempotent + resumable. Re-running after a worker fails is the design.
+- **DO NOT** assume harness coord (RETIRED 2026-05-30, Path A) was a heavyweight one-off — it's idempotent + resumable. Re-running after a worker fails is the design.
 
 ---
 

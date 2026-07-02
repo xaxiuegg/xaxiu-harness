@@ -8,7 +8,6 @@ CLAUDE.md, .harness/state dir).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -250,63 +249,12 @@ def test_init_claude_md_snippet_under_800_chars(tmp_path):
 # -- CLI integration -----------------------------------------------------
 
 
-def test_cli_agent_init_writes_files(tmp_path):
-    runner = CliRunner()
-    target = tmp_path / "cli-proj"
-    result = runner.invoke(_cli.cli, [
-        "agent", "init", "--target", str(target),
-    ])
-    assert result.exit_code == 0, f"unexpected exit; output: {result.output}"
-    assert (target / "adapter.py").exists()
-    # Next-steps teach block printed
-    assert "harness env-wizard" in result.output or "fill in API keys" in result.output.lower()
 
 
-def test_cli_agent_init_dry_run(tmp_path):
-    runner = CliRunner()
-    target = tmp_path / "cli-dry"
-    result = runner.invoke(_cli.cli, [
-        "agent", "init", "--target", str(target), "--dry-run",
-    ])
-    assert result.exit_code == 0
-    assert "DRY RUN" in result.output
-    assert not (target / "adapter.py").exists()
 
 
-def test_cli_agent_init_self_refuse(tmp_path):
-    """CLI exit code 2 on self-target without --allow-self."""
-    (tmp_path / "src" / "harness").mkdir(parents=True)
-    (tmp_path / "src" / "harness" / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "coord").mkdir()
-    (tmp_path / "coord" / "STATUS.csv").write_text("", encoding="utf-8")
-    (tmp_path / "spec").mkdir()
-    (tmp_path / "spec" / "multi-agent-harness-architecture.md").write_text(
-        "", encoding="utf-8"
-    )
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, [
-        "agent", "init", "--target", str(tmp_path),
-    ])
-    assert result.exit_code == 2
-    assert "harness" in result.output.lower() or "self" in result.output.lower()
 
 
-def test_cli_agent_init_status_collision(tmp_path):
-    """CLI exit code 3 on STATUS.csv collision."""
-    target = tmp_path / "proj"
-    (target / ".harness").mkdir(parents=True)
-    (target / ".harness" / "STATUS.csv").write_text(
-        "timestamp,dispatch_id,engine,model,tokens_in,tokens_out,"
-        "duration_ms,cost_usd,status,error\n"
-        "2026,abc,kimi,k,1,1,10,0,success,\n",
-        encoding="utf-8",
-    )
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, [
-        "agent", "init", "--target", str(target),
-    ])
-    assert result.exit_code == 3
-    assert "STATUS.csv" in result.output or "merge" in result.output.lower()
 
 
 def test_cli_agent_init_invalid_project_type(tmp_path):
@@ -320,18 +268,6 @@ def test_cli_agent_init_invalid_project_type(tmp_path):
     assert result.exit_code != 0
 
 
-def test_cli_agent_init_with_node_template(tmp_path):
-    runner = CliRunner()
-    target = tmp_path / "my-bot"
-    result = runner.invoke(_cli.cli, [
-        "agent", "init", "--target", str(target),
-        "--project-type", "node",
-    ])
-    assert result.exit_code == 0
-    cfg = json.loads((target / ".harness" / "config.json").read_text(
-        encoding="utf-8"
-    ))
-    assert cfg["project_type"] == "node"
 
 
 # -- Idempotency (re-run produces no surprise) ---------------------------

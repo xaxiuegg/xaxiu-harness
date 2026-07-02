@@ -5,7 +5,7 @@ Mocks the engine layer so tests don't hit live engines.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -155,78 +155,10 @@ def test_review_document_respects_max_tokens(tmp_path, monkeypatch):
 # -- CLI -------------------------------------------------------------------
 
 
-def test_cli_review_registered():
-    from harness.cli import cli
-    assert "review" in cli.commands
 
 
-def test_cli_review_invokes_review_document(tmp_path, monkeypatch):
-    """End-to-end: harness review <file> calls review_document."""
-    from click.testing import CliRunner
-    from harness.cli import cli
-    from harness import reviewer as _review_mod
-
-    captured: dict = {}
-
-    def _fake_review(**kwargs):
-        captured.update(kwargs)
-        return {
-            "results": [],
-            "out_dir": tmp_path / "out",
-            "synthesis_path": tmp_path / "out" / "SYNTHESIS.md",
-            "document_text_length": 100,
-            "elapsed_s": 1.0,
-            "total_cost_usd": 0.0,
-        }
-
-    monkeypatch.setattr(_review_mod, "review_document", _fake_review)
-
-    # Also patch the import inside cli.py
-    from harness import cli as _cli_mod
-    monkeypatch.setattr("harness.reviewer.review_document", _fake_review)
-
-    doc = tmp_path / "doc.md"
-    doc.write_text("test", encoding="utf-8")
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["review", str(doc)])
-    assert result.exit_code == 0, result.output
-    assert "document_path" in captured
-    assert captured["document_path"] == doc
-    # W13 Tier 1 Shift F: auto-default = SAFE_MAX_TOKENS_FLOOR (4000)
-    # when --max-tokens isn't passed.  Previously was 6000.
-    from harness.reviewer import SAFE_MAX_TOKENS_FLOOR
-    assert captured["max_tokens"] == SAFE_MAX_TOKENS_FLOOR
 
 
-def test_cli_review_supports_lens_set_flag(tmp_path, monkeypatch):
-    from click.testing import CliRunner
-    from harness.cli import cli
-    from harness import reviewer as _review_mod
-
-    captured: dict = {}
-
-    def _fake(**kwargs):
-        captured.update(kwargs)
-        return {
-            "results": [], "out_dir": tmp_path,
-            "synthesis_path": tmp_path / "SYNTHESIS.md",
-            "document_text_length": 0, "elapsed_s": 0.0,
-            "total_cost_usd": 0.0,
-        }
-
-    monkeypatch.setattr("harness.reviewer.review_document", _fake)
-
-    doc = tmp_path / "code.py"
-    doc.write_text("x = 1", encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["review", str(doc),
-                                  "--lens-set", "code-review"])
-    assert result.exit_code == 0
-    # code-review lens set passed through
-    assert len(captured["lenses"]) == 3
-    lens_ids = [l.id for l in captured["lenses"]]
-    assert "bugs-and-edge-cases" in lens_ids
 
 
 def test_cli_review_missing_file_exits_nonzero(tmp_path):

@@ -5,13 +5,9 @@ the `harness profile set/show` CLI subcommands.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-from click.testing import CliRunner
 
-from harness import cli as _cli
 from harness.operator import saved_profile as sp
 
 
@@ -100,47 +96,12 @@ def test_resolve_profile_returns_none_when_unset(tmp_path):
 # -- CLI: harness profile set ---------------------------------------------
 
 
-def test_cli_profile_set_writes_file(tmp_path, monkeypatch):
-    target = tmp_path / "profile.json"
-    monkeypatch.setattr(sp, "default_profile_path", lambda: target)
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["profile", "set", "non_technical"])
-    assert result.exit_code == 0
-    assert "saved profile=non_technical" in result.output
-    assert target.exists()
-    data = json.loads(target.read_text(encoding="utf-8"))
-    assert data["profile"] == "non_technical"
 
 
-def test_cli_profile_set_rejects_unknown(tmp_path, monkeypatch):
-    monkeypatch.setattr(sp, "default_profile_path", lambda: tmp_path / "p.json")
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["profile", "set", "expert"])
-    # Click's Choice constraint rejects before our code runs
-    assert result.exit_code != 0
-    assert "expert" in result.output.lower() or "invalid" in result.output.lower()
 
 
 # -- CLI: harness profile show -------------------------------------------
 
 
-def test_cli_profile_show_when_set(tmp_path, monkeypatch):
-    target = tmp_path / "profile.json"
-    monkeypatch.setattr(sp, "default_profile_path", lambda: target)
-    sp.save_profile("technical", path=target)
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["profile", "show"])
-    assert result.exit_code == 0
-    assert "technical" in result.output
-    assert str(target) in result.output
 
 
-def test_cli_profile_show_when_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr(sp, "default_profile_path",
-                        lambda: tmp_path / "no-such.json")
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["profile", "show"])
-    assert result.exit_code == 1
-    assert "no saved profile" in result.output.lower()
-    # Operator gets the recipe to fix
-    assert "harness profile set" in result.output

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import csv
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from click.testing import CliRunner
 from pydantic import ValidationError
 
 from harness.status import (
@@ -23,7 +21,6 @@ from harness.status import (
     write_status,
 )
 from harness.status import hooks
-from harness.status.store import DEFAULT_STATUS_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -367,76 +364,10 @@ class TestStatusCLI:
         from harness.cli import cli
         return cli
 
-    def test_status_init_creates_file(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        result = CliRunner().invoke(cli, ["status", "init"])
-        assert result.exit_code == 0, result.output
-        assert (isolated_cwd / "coord" / "STATUS.csv").exists()
 
-    def test_status_init_refuses_existing(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        result = runner.invoke(cli, ["status", "init"])
-        assert result.exit_code != 0
-        assert "already exists" in result.output.lower() or "exists" in result.output.lower()
 
-    def test_status_init_force_overwrites(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        # Add a row, then init --force should wipe
-        runner.invoke(cli, ["status", "add", "X-1", "Cat", "Title"])
-        result = runner.invoke(cli, ["status", "init", "--force"])
-        assert result.exit_code == 0
-        rows = read_status(isolated_cwd / "coord" / "STATUS.csv")
-        assert rows == []
 
-    def test_status_add_appends_row(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        result = runner.invoke(cli, ["status", "add", "ADD-1", "Test", "Hello", "--status", "todo"])
-        assert result.exit_code == 0, result.output
-        rows = read_status(isolated_cwd / "coord" / "STATUS.csv")
-        assert len(rows) == 1 and rows[0].id == "ADD-1"
 
-    def test_status_update_modifies(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        runner.invoke(cli, ["status", "add", "UPD-1", "C", "Title"])
-        result = runner.invoke(cli, [
-            "status", "update", "UPD-1", "--status", "shipped", "--notes", "done",
-        ])
-        assert result.exit_code == 0, result.output
-        rows = read_status(isolated_cwd / "coord" / "STATUS.csv")
-        assert rows[0].status == Status.SHIPPED
-        assert rows[0].notes == "done"
 
-    def test_status_list_pretty(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        runner.invoke(cli, ["status", "add", "LIST-1", "C", "First"])
-        result = runner.invoke(cli, ["status", "list"])
-        assert result.exit_code == 0
-        assert "LIST-1" in result.output
 
-    def test_status_summary(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        runner.invoke(cli, ["status", "add", "S-1", "C", "T", "--status", "shipped"])
-        runner.invoke(cli, ["status", "add", "S-2", "C", "T", "--status", "todo"])
-        result = runner.invoke(cli, ["status", "summary"])
-        assert result.exit_code == 0
-        assert "shipped" in result.output
 
-    def test_status_verify_clean(self, isolated_cwd: Path) -> None:
-        cli = self._import_cli()
-        runner = CliRunner()
-        runner.invoke(cli, ["status", "init"])
-        runner.invoke(cli, ["status", "add", "V-1", "C", "T", "--status", "shipped"])
-        result = runner.invoke(cli, ["status", "verify"])
-        assert result.exit_code == 0

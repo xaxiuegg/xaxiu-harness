@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-from click.testing import CliRunner
 
-from harness.cli import cli
 from harness.swarm_verify import (
     LandingResult, summarize, verify_landings, _latest_swarm_run,
 )
@@ -68,24 +64,5 @@ def test_summarize_counts_each_bucket() -> None:
     assert s["unmutated"] == 1
 
 
-def test_cli_swarm_verify_all_landed(tmp_path: Path, monkeypatch) -> None:
-    runner = CliRunner()
-    with patch("harness.swarm_verify._git_diff_files", return_value={"src/x.py"}), \
-         patch("harness.swarm_verify._untracked_files", return_value=set()), \
-         patch("harness.swarm_verify._latest_swarm_run", return_value=None):
-        result = runner.invoke(cli, [
-            "swarm-verify", "--expect-edits-in", "src/x.py",
-        ])
-    assert result.exit_code == 0
-    assert "all_landed=True" in result.output
 
 
-def test_cli_swarm_verify_missing_path_exits_1(tmp_path: Path, monkeypatch) -> None:
-    runner = CliRunner()
-    with patch("harness.swarm_verify._git_diff_files", return_value=set()), \
-         patch("harness.swarm_verify._untracked_files", return_value=set()), \
-         patch("harness.swarm_verify._latest_swarm_run", return_value=None):
-        result = runner.invoke(cli, [
-            "swarm-verify", "--expect-edits-in", "src/missing.py",
-        ])
-    assert result.exit_code == 1

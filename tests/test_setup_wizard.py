@@ -1,12 +1,11 @@
 """W14-HARNESS-SETUP 2026-05-26: tests for the interactive setup wizard."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
-from harness.cli import cli
 from harness.doctor import Diagnosis
 from harness.setup_wizard import (
     _step_agent_instructions,
@@ -204,32 +203,6 @@ class TestRunWizard:
                 rc = run_wizard(non_interactive=True)
         assert rc == 1
 
-    def test_wizard_runs_six_steps(
-        self, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Phase 3.1 (2026-05-28) added Step 6 — install-agent-
-        instructions snippet — to the wizard.  Lock the count."""
-        with patch(
-            "harness.doctor.run_all",
-            return_value=[
-                Diagnosis("python", "ok", "fine"),
-                Diagnosis("claude_binary", "ok", "fine"),
-                Diagnosis("secrets", "ok", "have keys"),
-            ],
-        ):
-            runner = CliRunner()
-            result = runner.invoke(cli, ["setup", "--non-interactive"])
-        assert result.exit_code in (0, 1)
-        # Each step prints "--- Step N/6: ..." — verify all 6 fire
-        for n in range(1, 7):
-            assert f"Step {n}/6:" in result.output, (
-                f"Step {n}/6 missing from wizard output"
-            )
-        # Step 6 specifically is the agent-instructions installer
-        assert (
-            "agent-instructions" in result.output.lower()
-            or "CLAUDE.md" in result.output
-        )
 
 
 class TestStepAgentInstructions:
@@ -305,46 +278,3 @@ class TestStepAgentInstructions:
 # ---------------------------------------------------------------------------
 
 
-class TestSetupCli:
-    def test_help(self) -> None:
-        runner = CliRunner()
-        result = runner.invoke(cli, ["setup", "--help"])
-        assert result.exit_code == 0
-        assert "setup wizard" in result.output.lower() or \
-               "onboarding" in result.output.lower()
-
-    def test_non_interactive_runs_all_ok(
-        self, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        with patch(
-            "harness.doctor.run_all",
-            return_value=[
-                Diagnosis("python", "ok", "fine"),
-                Diagnosis("claude_binary", "ok", "claude 1.0"),
-                Diagnosis("secrets", "ok", "env=KIMI_API_KEY"),
-            ],
-        ):
-            runner = CliRunner()
-            result = runner.invoke(
-                cli, ["setup", "--non-interactive"],
-            )
-        # Should complete successfully when doctor is all-OK
-        assert "setup wizard" in result.output.lower()
-        assert "complete" in result.output.lower()
-
-    def test_non_interactive_with_issues_exits_nonzero(
-        self, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        with patch(
-            "harness.doctor.run_all",
-            return_value=[
-                Diagnosis("python", "ok", "fine"),
-                Diagnosis("secrets", "fail", "no keys",
-                          fix="set keys"),
-            ],
-        ):
-            runner = CliRunner()
-            result = runner.invoke(
-                cli, ["setup", "--non-interactive"],
-            )
-        assert result.exit_code == 1

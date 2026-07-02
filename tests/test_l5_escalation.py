@@ -140,17 +140,6 @@ def test_should_escalate_to_l5_respects_custom_threshold():
 # -- CLI surface --------------------------------------------------------
 
 
-def test_cli_l5_banner_demo_invokes_render():
-    """harness l5-banner-demo prints a synthetic banner for visual check."""
-    from click.testing import CliRunner
-
-    from harness.cli import cli
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["l5-banner-demo"])
-    assert result.exit_code == 0
-    assert "L5" in result.output
-    assert "ESCALATION" in result.output.upper()
 
 
 # -- preflight FAIL surfaces L5 banner -----------------------------------

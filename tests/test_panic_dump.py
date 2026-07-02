@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import io
 import tarfile
 from pathlib import Path
 
-import pytest
-from click.testing import CliRunner
 
-from harness.cli import cli
 from harness.panic import panic_dump, _scrub_text
 
 
@@ -69,9 +65,3 @@ def test_panic_dump_includes_status_csv(tmp_path: Path, monkeypatch) -> None:
         assert "A,Production" in content
 
 
-def test_cli_panic_dump(tmp_path: Path, monkeypatch) -> None:
-    runner = CliRunner()
-    monkeypatch.chdir(tmp_path)
-    result = runner.invoke(cli, ["panic-dump", "--target-dir", str(tmp_path)])
-    assert result.exit_code == 0
-    assert "panic-dump written:" in result.output

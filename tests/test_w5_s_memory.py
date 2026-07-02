@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-from click.testing import CliRunner
 
-from harness.cli import cli
 from harness.memory import (
-    MemoryEntry, find_by_name, format_for_packet, load_all, memory_dir, search,
+    find_by_name, format_for_packet, load_all, search,
 )
 
 
@@ -160,40 +157,9 @@ def test_format_for_packet_truncates_at_size(tmp_path: Path) -> None:
 # CLI surface
 # ---------------------------------------------------------------------------
 
-def test_cli_memory_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mdir = tmp_path / "memory"
-    mdir.mkdir()
-    (mdir / "test-entry.md").write_text("# Test Entry\n\nbody\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["memory", "list"])
-    assert result.exit_code == 0
-    assert "test-entry" in result.output
-    assert "Test Entry" in result.output
 
 
-def test_cli_memory_show_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["memory", "show", "nonexistent"])
-    assert result.exit_code == 1
 
 
-def test_cli_memory_search_no_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mdir = tmp_path / "memory"
-    mdir.mkdir()
-    (mdir / "x.md").write_text("# X\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["memory", "search", "zzz-no-match"])
-    assert result.exit_code == 0
-    assert "no memory entries match" in result.output.lower()
 
 
-def test_cli_memory_help_exposed() -> None:
-    runner = CliRunner()
-    result = runner.invoke(cli, ["memory", "--help"])
-    assert result.exit_code == 0
-    assert "list" in result.output
-    assert "show" in result.output
-    assert "search" in result.output

@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 
-from harness.cli import cli
 from harness.adapters.scaffold import scaffold_adapter
 
 
@@ -35,39 +33,5 @@ def test_scaffold_refuses_existing_target(tmp_path: Path) -> None:
         scaffold_adapter("existing", target_dir=tmp_path)
 
 
-def test_cli_adapter_create(tmp_path: Path) -> None:
-    runner = CliRunner()
-    with runner.isolated_filesystem(temp_dir=tmp_path) as iso:
-        iso_path = Path(iso)
-        result = runner.invoke(
-            cli,
-            [
-                "adapter",
-                "create",
-                "my-project",
-                "--target-dir",
-                str(iso_path),
-            ],
-        )
-    assert result.exit_code == 0, result.output
-    assert "created project:" in result.output
-    assert "my-project" in result.output
 
 
-def test_cli_adapter_create_refuses_existing(tmp_path: Path) -> None:
-    runner = CliRunner()
-    with runner.isolated_filesystem(temp_dir=tmp_path) as iso:
-        iso_path = Path(iso)
-        (iso_path / "dup").mkdir()
-        result = runner.invoke(
-            cli,
-            [
-                "adapter",
-                "create",
-                "dup",
-                "--target-dir",
-                str(iso_path),
-            ],
-        )
-    assert result.exit_code == 1
-    assert "already exists" in result.output

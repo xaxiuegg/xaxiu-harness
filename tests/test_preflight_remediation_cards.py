@@ -16,9 +16,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from unittest.mock import patch
 
-import pytest
 from click.testing import CliRunner
 
 from harness import cli as _cli
@@ -32,39 +30,8 @@ def _stub_run_all(results):
     return _impl
 
 
-def test_warn_check_with_fix_renders_remediation_card(monkeypatch):
-    """The W10 contract: warn-level fix hint shown as a distinct callout."""
-    results = [
-        PreflightCheck(
-            name="observer", severity="warn",
-            message="no observer tasks registered",
-            duration_ms=10,
-            fix="harness orchestrator install-observer-scheduler",
-        ),
-    ]
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all(results))
-    monkeypatch.setattr(_cli, "run_all", _stub_run_all(results), raising=False)
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["preflight"])
-    assert "→ Run to fix:" in result.output
-    assert "harness orchestrator install-observer-scheduler" in result.output
 
 
-def test_fail_check_with_fix_renders_remediation_card(monkeypatch):
-    results = [
-        PreflightCheck(
-            name="dpapi", severity="fail",
-            message="DPAPI store unreadable",
-            duration_ms=5,
-            fix="harness env --rebuild",
-        ),
-    ]
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all(results))
-    monkeypatch.setattr(_cli, "run_all", _stub_run_all(results), raising=False)
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["preflight"])
-    assert "→ Run to fix:" in result.output
-    assert "harness env --rebuild" in result.output
 
 
 def test_ok_check_with_fix_field_does_NOT_render_card(monkeypatch):
@@ -101,43 +68,5 @@ def test_check_without_fix_renders_no_card(monkeypatch):
     assert "→ Run to fix:" not in result.output
 
 
-def test_multiple_warn_checks_render_independent_cards(monkeypatch):
-    """Each warn with fix gets its own card."""
-    results = [
-        PreflightCheck(
-            name="observer", severity="warn",
-            message="no tasks", duration_ms=10,
-            fix="harness orchestrator install-observer-scheduler",
-        ),
-        PreflightCheck(
-            name="loops", severity="warn",
-            message="not registered", duration_ms=8,
-            fix="harness loop start",
-        ),
-    ]
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all(results))
-    monkeypatch.setattr(_cli, "run_all", _stub_run_all(results), raising=False)
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["preflight"])
-    # Both fix commands appear in output, each under "Run to fix:"
-    assert "harness orchestrator install-observer-scheduler" in result.output
-    assert "harness loop start" in result.output
-    assert result.output.count("→ Run to fix:") == 2
 
 
-def test_json_format_does_not_render_card_text(monkeypatch):
-    """JSON format keeps the existing PreflightCheck dump; no card text."""
-    results = [
-        PreflightCheck(
-            name="observer", severity="warn",
-            message="no tasks", duration_ms=10,
-            fix="harness orchestrator install-observer-scheduler",
-        ),
-    ]
-    monkeypatch.setattr(_pf, "run_all", _stub_run_all(results))
-    monkeypatch.setattr(_cli, "run_all", _stub_run_all(results), raising=False)
-    runner = CliRunner()
-    result = runner.invoke(_cli.cli, ["preflight", "--format", "json"])
-    assert "→ Run to fix:" not in result.output
-    # But the fix field IS in the JSON output (CI consumers can parse it)
-    assert "harness orchestrator install-observer-scheduler" in result.output

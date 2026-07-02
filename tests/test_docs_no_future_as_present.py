@@ -27,6 +27,7 @@ Updated 2026-05-27 (W14-DOCS-CONSOLIDATE 7→3) — both old doc names
   - docs/AGENT_REFERENCE.md (agent-facing; absorbed AGENT_QUICKSTART
     + new sections for agent-instructions + v2 coord programmatic use)
 """
+
 from __future__ import annotations
 
 import re
@@ -67,6 +68,7 @@ EXPLAINER_PHRASES = [
 def _verbs_registered_in_cli() -> set[str]:
     """Return the set of valid `harness <verb>` strings (incl. group/sub)."""
     from harness.cli import cli
+
     valid: set[str] = set()
     for name, cmd in cli.commands.items():
         valid.add(name)
@@ -120,7 +122,7 @@ def test_doc_has_no_unmarked_future_commands(doc_path: Path) -> None:
             if _has_explainer_context(line):
                 continue
             violations.append(
-                f"  {doc_path.name}:{i+1}: `harness {verb_str}` "
+                f"  {doc_path.name}:{i + 1}: `harness {verb_str}` "
                 f"is not a registered CLI verb + line is not FUTURE-marked"
             )
 
@@ -140,8 +142,14 @@ def test_doc_has_no_unmarked_future_commands(doc_path: Path) -> None:
 def test_cli_verb_introspection_works():
     """Sanity: _verbs_registered_in_cli() returns the expected core verbs."""
     verbs = _verbs_registered_in_cli()
-    for required in ("dispatch", "today", "preflight", "review",
-                      "cost-today", "observer status", "backup create"):
-        assert required in verbs, (
-            f"required verb '{required}' missing from CLI registration"
-        )
+    # PATH-A item-4 shrink 2026-07-01: check the surviving core verbs.
+    for required in (
+        "ask",
+        "today",
+        "doctor",
+        "proxy start",
+        "keys list",
+        "budget show",
+        "audit show",
+    ):
+        assert required in verbs, f"required verb '{required}' missing from CLI registration"
